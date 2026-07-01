@@ -1,0 +1,27 @@
+# 1. Dependencias de Node (Súper pesado, GitHub Actions lo instala en la nube)
+node_modules/
+
+# 2. Secretos y Variables de Entorno Locales (¡CRÍTICO PARA LA SEGURIDAD!)
+local.settings.json
+.env
+*.env
+
+# 3. Empaquetados y despliegues manuales (Para evitar subir el app.zip)
+*.zip
+*.tgz
+.funcignore
+
+# 4. Logs de NPM (Basura generada si algo falla localmente)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 5. Configuraciones de Editores de Código y SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 6. Carpetas de cache de herramientas de Azure
+.azurefunctions/
