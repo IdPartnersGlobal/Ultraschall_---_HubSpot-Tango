@@ -1,90 +1,91 @@
 const { app } = require('@azure/functions');
 
 app.http('testTangoConnection', {
-    // Permitimos GET y POST desde tu Postman
     methods: ['GET', 'POST'],
-    authLevel: 'anonymous', 
+    authLevel: 'anonymous',
     handler: async (request, context) => {
         try {
-            context.log("Iniciando prueba de conexión hacia Tango...");
+            context.log("Iniciando proxy de conexión hacia Tango...");
 
-            // 1. Leer la URL base desde las variables de entorno
+            // 1. Leer variables de entorno (Basado en la estructura de TangoService)
             const baseUrl = process.env.TANGO_API_URL;
-            const token = process.env.TANGO_API_TOKEN;
+            const apiKey = process.env.TANGO_API_KEY;
+            const company = process.env.TANGO_COMPANY || '3';
 
-            if (!baseUrl) {
+            if (!baseUrl || !apiKey) {
                 return { 
                     status: 500, 
-                    body: JSON.stringify({ error: "Falta configurar TANGO_API_URL en las variables de entorno." }) 
+                    body: JSON.stringify({ error: "Faltan variables TANGO_API_URL o TANGO_API_KEY" }) 
                 };
             }
 
-            // 2. Obtener qué endpoint/tabla queremos consultar dinámicamente desde Postman
-            // Ejemplo: Si en Postman mandas ?endpoint=api/v1/articulos, tomará ese valor
-            const endpoint = request.query.get('endpoint') || ''; 
+            // 2. Construir la URL dinámica para Tango
+            // Extraemos la URL original de la petición que entra desde Postman
+            const incomingUrl = new URL(request.url);
             
-            // Armamos la URL final destino
-            const targetUrl = `${baseUrl}/${endpoint}`;
-            context.log(`Ejecutando GET hacia: ${targetUrl}`);
+            // Usamos un parámetro especial 'tangoPath' para definir la ruta (ej: Api/Get)
+            // Si no lo mandan, por defecto asume 'Api/Get'
+            const tangoPath = incomingUrl.searchParams.get('tangoPath') || 'Api/Get';
+            
+            // Borramos 'tangoPath' para que no viaje a Tango como parámetro inválido
+            incomingUrl.searchParams.delete('tangoPath');
+            
+            // Armamos la URL final uniendo la IP de Claro + la ruta + los parámetros sobrantes (process, id, etc)
+            const queryParamsString = incomingUrl.searchParams.toString();
+            const targetUrl = queryParamsString 
+                ? `${baseUrl}/${tangoPath}?${queryParamsString}` 
+                : `${baseUrl}/${tangoPath}`;
 
-            // 3. Configurar los headers para enviar a Tango (opcional si requiere token)
+            context.log(`Ejecutando petición hacia: ${targetUrl}`);
+
+            // 3. Headers EXACTOS extraídos de TangoService.js
             const headers = {
-                "Content-Type": "application/json"
+                'ApiAuthorization': apiKey,
+                'company': company,
+                'Content-Type': 'application/json'
             };
-            if (token) {
-                headers["Authorization"] = `Bearer ${token}`; // O el formato que use Tango
-            }
 
-            // 4. Hacer la petición GET al servidor de Claro Cloud
+            // 4. Disparar la petición a Claro Cloud
             const response = await fetch(targetUrl, {
-                method: 'GET',
+                method: 'GET', // Para empezar a testear tablas usamos GET
                 headers: headers
             });
 
-            // 5. Capturar la respuesta
             const responseText = await response.text();
 
             if (!response.ok) {
-                context.log.error(`El servidor de Tango devolvió un error: ${response.status}`);
+                context.log.error(`Tango devolvió error HTTP ${response.status}`);
                 return {
                     status: response.status,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        message: "Error en el servidor de destino (Claro Cloud)",
+                        error: "El servidor de Tango rechazó la petición",
                         statusCode: response.status,
                         tangoResponse: responseText
                     })
                 };
             }
 
-            // Intentar parsear a JSON si la respuesta es válida
+            // 5. Devolver la respuesta exitosa al Postman
             let responseData;
             try {
                 responseData = JSON.parse(responseText);
             } catch (e) {
-                responseData = responseText; // Si no es JSON (ej. XML o texto plano), lo dejamos como string
+                responseData = responseText;
             }
 
-            // 6. Devolver la info obtenida a tu Postman
-            context.log("Petición exitosa, devolviendo datos a Postman.");
             return {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    source: targetUrl,
-                    data: responseData
-                })
+                body: JSON.stringify(responseData)
             };
 
         } catch (error) {
-            context.log.error("Hubo un error de red o de código:", error);
+            context.log.error("Error fatal en el Proxy:", error);
             return {
                 status: 500,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    error: 'Error interno en la Azure Function', 
-                    details: error.message 
-                })
+                body: JSON.stringify({ error: 'Fallo de red o código', details: error.message })
             };
         }
     }
