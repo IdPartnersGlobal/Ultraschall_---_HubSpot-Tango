@@ -6,9 +6,12 @@ app.http('testTangoConnection', {
     handler: async (request, context) => {
         const requestId = Math.random().toString(36).substring(2, 9).toUpperCase();
         const startTime = Date.now();
+        
+        // Detectamos dinámicamente si Postman envió un GET o un POST
+        const reqMethod = request.method.toUpperCase(); 
 
         context.log(`======================================================================`);
-        context.log(`🚀 [START] [REQ-${requestId}] Iniciando Proxy de Prueba hacia Tango ERP`);
+        context.log(`🚀 [START] [REQ-${requestId}] Iniciando Proxy hacia Tango ERP | Método: ${reqMethod}`);
         context.log(`======================================================================`);
 
         try {
@@ -17,7 +20,6 @@ app.http('testTangoConnection', {
             const apiKey = process.env.TANGO_API_KEY;
             const company = process.env.TANGO_COMPANY || '1';
 
-            // Enmascaramos la API Key para mostrarla segura en los logs de Azure
             const maskedKey = apiKey 
                 ? `${apiKey.substring(0, 6)}...${apiKey.substring(apiKey.length - 4)}` 
                 : '❌ NO CONFIGURADA';
@@ -38,10 +40,12 @@ app.http('testTangoConnection', {
 
             // 2. PROCESAR URL ENTRANTE Y CONSTRUIR DESTINO
             const incomingUrl = new URL(request.url);
-            const tangoPath = incomingUrl.searchParams.get('tangoPath') || 'Api/Get';
             
-            // Limpiamos el parámetro interno del proxy para que no ensucie la query de Tango
-            incomingUrl.searchParams.delete('tangoPath');
+            // Lógica inteligente: Si es POST por defecto asume 'Api/Create', si es GET asume 'Api/Get'
+            const defaultPath = reqMethod === 'POST' ? 'Api/Create' : 'Api/Get';
+            const tangoPath = incomingUrl.searchParams.get('tangoPath') || defaultPath;
+            
+            incomingUrl.searchParams.delete('tangoPath'); // Lo borramos para que no ensucie a Tango
             
             const queryParamsString = incomingUrl.searchParams.toString();
             const targetUrl = queryParamsString 
@@ -53,30 +57,47 @@ app.http('testTangoConnection', {
             context.log(`   • Parámetros Query  : ${queryParamsString || 'Ninguno'}`);
             context.log(`   • URL Final Target  : ${targetUrl}`);
 
-            // 3. SELECCIÓN DE CABECERAS (HEADERS)
+            // 3. SELECCIÓN DE CABECERAS EXACTAS DE TANGO
             const headers = {
                 'ApiAuthorization': apiKey,
                 'company': company,
                 'Content-Type': 'application/json'
             };
 
-            context.log(`🔒 [HEADERS-OUT] Cabeceras enviadas al Firewall de Claro Cloud:`);
-            context.log(`   • ApiAuthorization : ${maskedKey}`);
-            context.log(`   • company          : ${company}`);
-            context.log(`   • Content-Type     : application/json`);
+            // 4. PREPARAR LAS OPCIONES DEL FETCH BASADO EN EL MÉTODO
+            const fetchOptions = {
+                method: reqMethod,
+                headers: headers
+            };
 
-            // 4. DISPARAR PETICIÓN Y MEDIR LATENCIA
+            // Si es un POST, extraemos el body de Postman y lo empaquetamos
+            if (reqMethod === 'POST') {
+                try {
+                    const requestBodyText = await request.text();
+                    fetchOptions.body = requestBodyText; // Se lo pasamos directo a Tango
+                    
+                    context.log(`📦 [PAYLOAD-OUT] Cuerpo de la petición detectado:`);
+                    context.log(`   • Tamaño Payload : ${requestBodyText.length} bytes`);
+                    // Logueamos un preview seguro (hasta 300 caracteres) para no saturar la consola
+                    const bodyPreview = requestBodyText.length > 300 
+                        ? requestBodyText.substring(0, 300) + '... [TRUNCADO]' 
+                        : requestBodyText;
+                    context.log(`   • Preview Body   : ${bodyPreview}`);
+
+                } catch (err) {
+                    context.log.error(`❌ [ERR-BODY] No se pudo leer el cuerpo de la petición enviada desde Postman.`);
+                }
+            }
+
+            // 5. DISPARAR PETICIÓN Y MEDIR LATENCIA
             context.log(`🛰️ [HTTP-REQUEST] Enviando petición externa... Esperando respuesta de Claro Cloud...`);
             
             const tangoStartTime = Date.now();
-            const response = await fetch(targetUrl, {
-                method: 'GET',
-                headers: headers
-            });
+            const response = await fetch(targetUrl, fetchOptions);
             const tangoEndTime = Date.now();
             const latency = tangoEndTime - tangoStartTime;
 
-            // 5. EVALUAR RESPUESTA DEL SERVIDOR
+            // 6. EVALUAR RESPUESTA DEL SERVIDOR
             context.log(`⏱️ [HTTP-RESPONSE] Respuesta recibida:`);
             context.log(`   • Estado HTTP   : ${response.status} ${response.statusText}`);
             context.log(`   • Latencia Red  : ${latency}ms`);
@@ -100,21 +121,18 @@ app.http('testTangoConnection', {
                 };
             }
 
-            // 6. PARSEAR CUERPO EXITOSO
+            // 7. PARSEAR CUERPO EXITOSO
             let responseData;
             try {
                 responseData = JSON.parse(responseText);
                 context.log(`✅ [PARSER-SUCCESS] El cuerpo recibido es un JSON válido.`);
-                if (responseData.resultData && Array.isArray(responseData.resultData.list)) {
-                    context.log(`   • Registros encontrados: ${responseData.resultData.list.length}`);
-                }
             } catch (e) {
                 context.log(`🔤 [PARSER-WARN] El cuerpo no es JSON plano. Devolviendo texto crudo.`);
                 responseData = responseText;
             }
 
             const totalDuration = Date.now() - startTime;
-            context.log(`🏁 [END] [REQ-${requestId}] Proceso finalizado con éxito. Tiempo de ejecución total de la función: ${totalDuration}ms\n`);
+            context.log(`🏁 [END] [REQ-${requestId}] Proceso finalizado con éxito. Tiempo total: ${totalDuration}ms\n`);
 
             return {
                 status: 200,
@@ -122,6 +140,7 @@ app.http('testTangoConnection', {
                 body: JSON.stringify({
                     status: "success",
                     proxyTarget: targetUrl,
+                    method: reqMethod,
                     latencyMs: latency,
                     totalFunctionTimeMs: totalDuration,
                     result: responseData
