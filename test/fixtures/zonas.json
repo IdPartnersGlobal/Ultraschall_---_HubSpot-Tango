@@ -1,0 +1,74 @@
+[
+ {
+  "ID_GVA05": 1,
+  "COD_GVA05": "01",
+  "NOMBRE_ZON": "CABA",
+  "COD_ZONA": "01",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": ""
+ },
+ {
+  "ID_GVA05": 2,
+  "COD_GVA05": "02",
+  "NOMBRE_ZON": "GRAN BUENOS AIRES",
+  "COD_ZONA": "02",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 3,
+  "COD_GVA05": "03",
+  "NOMBRE_ZON": "PROVINCIA DE BS AS",
+  "COD_ZONA": "03",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 4,
+  "COD_GVA05": "04",
+  "NOMBRE_ZON": "NOA",
+  "COD_ZONA": "04",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 5,
+  "COD_GVA05": "05",
+  "NOMBRE_ZON": "NEA",
+  "COD_ZONA": "05",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 6,
+  "COD_GVA05": "06",
+  "NOMBRE_ZON": "ZONA SUR",
+  "COD_ZONA": "06",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 7,
+  "COD_GVA05": "07",
+  "NOMBRE_ZON": "CUYO",
+  "COD_ZONA": "07",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 8,
+  "COD_GVA05": "08",
+  "NOMBRE_ZON": "LATINOAMERICA",
+  "COD_ZONA": "08",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": null
+ },
+ {
+  "ID_GVA05": 10,
+  "COD_GVA05": "09",
+  "NOMBRE_ZON": "ZONA NO DEFINIDA",
+  "COD_ZONA": "09",
+  "COMIS_ZONA": 0,
+  "OBSERVACIONES": ""
+ }
+]

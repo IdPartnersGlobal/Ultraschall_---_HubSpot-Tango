@@ -101,12 +101,17 @@ flowchart LR
 
 ## 4. Componentes a construir
 
-| Componente | Tipo | Responsabilidad |
-|---|---|---|
-| `lib/tangoClient.js` | módulo | Auth, paginado automático, reintentos y timeout contra Tango. Único lugar que conoce la URL del ERP. |
-| `lib/hubspotClient.js` | módulo | Auth con private app token, batch upsert, respeto de rate limits. |
-| `lib/mapper.js` | módulo | Aplica `config/mapeo.*.json`: renombra campos, castea tipos, corre transforms. |
-| `lib/logger.js` | módulo | Formato de log unificado (el estilo con `[REQ-xxx]` que ya usás). |
+| Componente | Tipo | Responsabilidad | Estado |
+|---|---|---|---|
+| `lib/tangoClient.js` | módulo | Los 4 endpoints (§5.8), reintentos con backoff, timeout. Único lugar que conoce la URL del ERP. | ✅ 2026-08-14 |
+| `lib/lookups.js` | módulo | **Resolución `código → ID interno`** contra las 6 tablas auxiliares. Es lo que evita la corrupción silenciosa de §5.4. | ✅ 2026-08-14 |
+| `lib/mapper.js` | módulo | Aplica `config/mapeo.*.json`: renombra, castea, corre transforms, resuelve lookups y calcula el hash del sync diferencial. | ✅ 2026-08-14 |
+| `lib/logger.js` | módulo | Formato de log unificado (el estilo con `[REQ-xxx]` que ya usás). | ✅ 2026-08-14 |
+| `lib/hubspotClient.js` | módulo | Auth con private app token, batch upsert, respeto de rate limits. | 🔨 Bloqueado: falta el token |
+
+**Tests:** `npm test` (runner nativo de Node, sin dependencias). 23 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
+
+Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms, con 5.670 hashes distintos y 0 problemas de resolución.
 | `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products. |
 | `functions/syncClientes.js` | Timer | Fase 2. Tango `process=2117` → HubSpot Companies. |
 | `functions/dealToTango.js` | HTTP | Fase 4. Recibe el Deal desde HubSpot y crea el comprobante en Tango. |
