@@ -222,6 +222,25 @@ Ejemplo: el cliente `000003` tiene `COND_VTA=15` ("CHEQUE 0, 30 DIAS FF"), pero 
 
 **Patrón de resolución:** cada tabla auxiliar expone ambas columnas (interno + código), así que un solo `GET` por tabla alcanza para armar el diccionario en memoria. Son tablas chicas (`GVA01` = 86 registros) y estables: se cachean al inicio de cada corrida.
 
+#### Qué es cada tabla auxiliar (identificado 2026-08-14)
+
+Las tablas se identificaron leyendo los **valores reales** del padrón de clientes, no por el nombre. Dos estaban mal supuestas en versiones previas de este documento:
+
+| Tabla | Qué es | Valores | Cargado | Nota |
+|---|---|---|---|---|
+| `GVA01` | **Condiciones de venta** | 86 | 100% | ✅ `process=2151`. Ver §5.4. |
+| `GVA10` | **Listas de precios** | 5 | 87% | `SIN IVA EN $`, `CON IVA EN $` (3.830 clientes), `MEDICO SIN IVA $`, `SIN IVA EN U$S`, `CON IVA EN U$S` |
+| `GVA23` | **Vendedores** | 24 | 88% | ⛔ El doc lo daba como incógnita. Ver §7.4. |
+| `GVA24` | **Transporte / forma de envío** | 33 | 86% | ⛔ Era incógnita. `BUSPACK`, `RETIRA CLIENTE`, `CORREO OCA`, `MOTO (REM)`, `CADETE (REM)`… |
+| `GVA05` | **Zonas geográficas** | 9 | 100% | ⛔ Estaba mal identificada como "vendedores". Ver §7.4. |
+| `GVA18` | **Provincias** | 38 | 100% | Misiones, Buenos Aires, CABA, San Juan… |
+| `GVA133` | **Países** | 6 | — | ARGENTINA, URUGUAY, PERU, PARAGUAY, ECUADOR, BOLIVIA |
+| `GVA62` | Agrupaciones de clientes ⚠️ | 11 | — | Parecen grupos empresarios / cuentas vinculadas. Confirmar. |
+| `GVA41` | Alícuotas de IVA | — | 0% en padrón | Sólo aparece `GVA41_NO_CAT_*`, vacío. |
+| `GVA44` | Talonarios de exportación | — | — | |
+
+**Lo que esto habilita:** las descripciones ya las tenemos, así que los mapeos a HubSpot se pueden escribir ahora. **Lo que sigue faltando es el `process` de cada tabla**, que es lo único que da el `ID` interno (§5.4). Sin eso se puede sincronizar *hacia* HubSpot mostrando descripciones, pero no se puede escribir *hacia* Tango.
+
 #### Caso aparte: `CATEGORIA_IVA` es alfabética
 
 `COD_CATEGORIA_IVA` no es numérico: sus 5 valores son `RI`, `RS`, `EX`, `CF`, `EXE` (100% cargado). Acá ni siquiera existe la ilusión de que código == ID: se necesita sí o sí la tabla de equivalencia para resolver `ID_CATEGORIA_IVA`.
@@ -258,6 +277,43 @@ https://ultraschall-tango-hubspot-cjcpbug0g4fxgehg.canadacentral-01.azurewebsite
 4. Como beneficio lateral, el ERP no está expuesto a internet en general — la superficie de ataque es la Function App, no Tango. Eso **no** compensa D2: el proxy anónimo reabre el agujero, con el agravante de que ya viene autenticado contra el ERP.
 
 Si hace falta verificar algo en la interfaz de Tango (parametría, talonarios, depósitos), Matías tiene **acceso remoto** al ERP.
+
+### 5.7 Cómo descubrir los `process` faltantes
+
+**No existe documentación de esta API.** Confirmado con soporte de Tango (2026-08-14): no hay nada publicado. Los `process` hay que descubrirlos.
+
+Se descartaron dos caminos automáticos:
+
+| Intento | Resultado |
+|---|---|
+| Sondear el espacio de `process` | Funciona (un ID inválido devuelve `"Action not found"`), pero el espacio es disperso y grande. Varios processes tardan >60 s contra **producción**. Así se encontró `2151`, pero no escala. |
+| Leer el bundle JS de la SPA | `http://138.99.6.77:17000` sirve el cliente web de Tango (AxCloud/Angular). Se bajó `main-NR5TOSF7.js` (34 MB): **no contiene el mapeo**. Los `processId` se resuelven en runtime y el menú lo sirve el backend según permisos del usuario. Tampoco hay endpoint de catálogo (`Api/Menu`, `Api/Modules`, etc. caen al fallback de la SPA). |
+
+**✅ Camino que sí funciona: mirar el tráfico de red del propio ERP.**
+
+La SPA de Tango consume **exactamente el mismo endpoint** que nosotros (`Api/Get?process=NNNN`). Entonces:
+
+1. Abrir el cliente web de Tango en Chrome (por el acceso remoto).
+2. `F12` → pestaña **Network** → filtro `Api/Get`.
+3. Navegar a la pantalla que interesa.
+4. Leer el `process=NNNN` de la request que se dispara.
+
+Pantallas a visitar y qué se busca:
+
+| Pantalla en Tango | Tabla | Para qué |
+|---|---|---|
+| **Precios de artículos / actualización de precios** | — | ⛔ Desbloquea la Fase 1 entera |
+| Listas de precios | `GVA10` | ⛔ Fase 4 |
+| Vendedores | `GVA23` | ⛔ Fase 4 + owners |
+| Transportes / formas de envío | `GVA24` | ⛔ Fase 4 |
+| Depósitos | `STA22` | ⛔ Fase 4 |
+| Zonas | `GVA05` | Segmentación |
+| Provincias | `GVA18` | Alta de clientes |
+| Categorías / alícuotas de IVA | `GVA41`, `CATEGORIA_IVA` | Alta de clientes |
+| Talonarios | `GVA43` | Fase 4 |
+| Stock / existencias por depósito | — | Optimización |
+
+Alcanza con anotar el número: con el `process` en mano, la tabla se lee sola y se arma el diccionario `código → ID` (§5.4).
 
 ### 5.2 HubSpot
 
@@ -314,9 +370,28 @@ Dato duro del relevamiento: **`E_MAIL` está cargado en apenas el 25% de los cli
 
 ### 7.4 Vendedor → Owner
 
-`GVA05_CODIGO` / `GVA05_DESCRIPCION` ⚠️ (asumo que es la tabla de vendedores de Tango) está al 100%. Si se arma una tabla de equivalencia vendedor Tango ↔ usuario HubSpot, se puede setear `hubspot_owner_id` automáticamente y las companies quedan asignadas solas.
+> ⛔ **CORRECCIÓN (2026-08-14): `GVA05` NO es la tabla de vendedores.** Era una inferencia equivocada. Al leer los valores reales del padrón, `GVA05` resultó ser **zonas geográficas** (CABA, NEA, NOA, CUYO…). **La tabla de vendedores es `GVA23`.**
 
-🟡 **PENDIENTE:** ¿existe esa correspondencia? ¿la armamos a mano en un JSON de configuración?
+**`GVA23` = Vendedores** (88% cargado, 24 valores):
+
+| cód | Vendedor | Clientes | | cód | Vendedor | Clientes |
+|---|---|---|---|---|---|---|
+| 10 | FACUNDO | **3.569** | | 18 | VANESA | 26 |
+| 01 | FERNANDO | 344 | | 02 | DAVID | 27 |
+| 24 | Juan Butorac | 312 | | 19 | MANGER | 22 |
+| 25 | Julian Gomez | 252 | | 22 | Narkys Garmendia | 18 |
+| 11 | MELINA | 114 | | 14 | PAIRA | 13 |
+| 07 | LUCAS | 94 | | 16 | DADOMO | 9 |
+| 13 | LICITACIONES | 63 | | 05 | CAMINA MARIA ISABEL | 6 |
+| 03 | DOMENECH ROMINA | 41 | | 20 | BONANO | 6 |
+| 08 | MARIA LAURA | 32 | | resto | 8 vendedores más | ≤5 c/u |
+
+⚠️ **FACUNDO tiene el 63% de la cartera.** Antes de mapear a owners de HubSpot conviene confirmar si es un vendedor real o un cajón de sastre / vendedor por defecto. Si es lo segundo, asignar 3.569 companies a esa persona sería un error.
+
+**`GVA05` = Zonas** (100% cargado, 9 valores): CABA (1.016), NEA (894), NOA (855), PROVINCIA DE BS AS (851), ZONA NO DEFINIDA (696), GRAN BUENOS AIRES (565), ZONA SUR (427), CUYO (306), LATINOAMERICA (60).
+Es un buen candidato a propiedad de segmentación en HubSpot, no a owner.
+
+🟡 **PENDIENTE:** armar la equivalencia vendedor `GVA23` ↔ usuario de HubSpot. Propuesta: JSON de configuración a mano (son 24, y sólo ~8 tienen volumen real).
 
 ---
 
@@ -382,8 +457,8 @@ Payload de referencia validado: **`docs/payloads/pedido-create.json`**.
 | `ID_GVA14` | Company → `tango_id_gva14` | Cliente. Si está vacío ⇒ error de negocio (§9.3). |
 | `ID_GVA01` | Company → `tango_id_gva01` | Condición de venta del cliente (`GVA01_COND_VTA`, 100% cargado). |
 | `ID_GVA10` | Company → `tango_id_gva10` | Lista de precios. **87% cargado** (medido 2026-08-14, no 30% como se estimó). Igual necesita default para el 13% restante. |
-| `ID_GVA23` | Company → `tango_id_gva23` | **88% cargado.** ⚠️ confirmar qué es. |
-| `ID_GVA24` | Company → `tango_id_gva24` | **86% cargado.** ⚠️ confirmar qué es. |
+| `ID_GVA23` | Company → `tango_id_gva23` | ✅ **Vendedor** (88% cargado). Identificado 2026-08-14, §5.4. |
+| `ID_GVA24` | Company → `tango_id_gva24` | ✅ **Transporte / forma de envío** (86% cargado). Identificado 2026-08-14, §5.4. |
 | `ID_MONEDA` | fijo `1` | 🟡 confirmar si siempre ARS. |
 | `ID_GVA43_TALON_PED` | config | Talonario de pedidos. 🟡 confirmar cuál usa Ultraschall. |
 | `ID_STA22` | config | Depósito. 🟡 confirmar cuál. |
@@ -455,7 +530,7 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 
 | # | Qué | Bloquea |
 |---|---|---|
-| 1 | **Doc de comunicación con la API de Tango.** Subió a lo más alto: es lo que destraba de una los `process` de los ítems 2 y 3, que hoy son el cuello de botella. Sondear el ERP proceso por proceso no escala (§5.1). | Fases 1, 2 y 4 |
+| 1 | **Los `process` faltantes, sacados del Network del propio ERP** (receta paso a paso en §5.7). ⛔ No existe documentación de la API — confirmado con soporte de Tango. Es el cuello de botella de todo lo demás. | Fases 1, 2 y 4 |
 | 2 | **`process` de las tablas auxiliares**: `GVA10`, `GVA23`, `GVA24`, `GVA05`, `GVA18`, `GVA41`, `STA22`, `CATEGORIA_IVA`. Ya no es opcional: §5.4 confirmó que el código **no** es el ID interno. | Fase 4 y alta de clientes |
 | 3 | **`process` de listas de precios** | Fase 1 (`process=87` no trae precio — confirmado) |
 | 4 | **Credenciales/portal de HubSpot**: Hub ID + Private App token | Todas las fases de escritura |
