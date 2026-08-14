@@ -1,14 +1,16 @@
 {
-  "name": "azure-hubspot",
+  "name": "ultraschall-tango-hubspot",
   "version": "1.0.0",
   "main": "src/{index.js,functions/*.js}",
-  "description": "",
+  "description": "Integración Tango Gestión (ERP) ↔ HubSpot (CRM) para Ultraschall. Azure Functions, modelo v4.",
   "scripts": {
     "start": "func start",
     "test": "echo \"No tests yet...\""
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
-    "@azure/functions": "^4.0.0",
-    "pdfkit": "^0.19.1"
+    "@azure/functions": "^4.0.0"
   }
 }

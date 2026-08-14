@@ -1,0 +1,215 @@
+{
+  "_meta": {
+    "entidad": "productos",
+    "estado": "PROPUESTA — pendiente de validacion por Ultraschall",
+    "origen": {
+      "sistema": "Tango",
+      "process": 87,
+      "tabla": "STA11",
+      "totalRegistros": 825
+    },
+    "destino": {
+      "sistema": "HubSpot",
+      "objeto": "products",
+      "grupoPropiedades": "tango_erp"
+    },
+    "claveIdempotencia": {
+      "tango": "COD_STA11",
+      "hubspot": "hs_sku",
+      "unique": true
+    },
+    "bloqueante": "process=87 NO devuelve precio. HubSpot Products requiere 'price'. Falta el process de listas de precios (ARQUITECTURA.md §5.1).",
+    "convenciones": {
+      "prefijo": "tango_",
+      "autoritativoTango": "true = el sync pisa el valor en HubSpot en cada corrida.",
+      "porcentajeCarga": "% de registros con dato, medido sobre una muestra de 500 registros reales."
+    }
+  },
+
+  "campos": [
+    {
+      "tango": "COD_STA11",
+      "hubspot": "hs_sku",
+      "label": "SKU",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "unique": true,
+      "autoritativoTango": true,
+      "notas": "Clave primaria de la integracion. Ej: 'APY'."
+    },
+    {
+      "tango": "ID_STA11",
+      "hubspot": "tango_id_sta11",
+      "label": "ID interno Tango",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "OBLIGATORIO. Requerido en RENGLON_DTO al crear pedidos (ARQUITECTURA.md §5.3)."
+    },
+    {
+      "tango": "DESCRIPCIO",
+      "hubspot": "name",
+      "label": "Nombre",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "DESC_ADIC",
+      "hubspot": "description",
+      "label": "Descripcion",
+      "tipo": "string",
+      "hsFieldType": "textarea",
+      "autoritativoTango": false,
+      "transform": "concatenarConObservaciones",
+      "notas": "Bajo nivel de carga. Evaluar concatenar con OBSERVACIONES (30%)."
+    },
+    {
+      "tango": null,
+      "hubspot": "price",
+      "label": "Precio",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "autoritativoTango": true,
+      "notas": "BLOQUEANTE: no viene en process=87. Debe salir del process de listas de precios. Definir que lista alimenta el catalogo de HubSpot."
+    },
+    {
+      "tango": "COD_BARRA",
+      "hubspot": "tango_cod_barra",
+      "label": "Codigo de barras",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": true,
+      "notas": "Bajo nivel de carga en la muestra."
+    },
+    {
+      "tango": "SINONIMO",
+      "hubspot": "tango_sinonimo",
+      "label": "Sinonimo",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": true
+    },
+    {
+      "tango": "CLASIFICACION",
+      "hubspot": "tango_clasificacion",
+      "label": "Clasificacion",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 39,
+      "autoritativoTango": true,
+      "notas": "Candidato para agrupar el catalogo en HubSpot (hs_folder)."
+    },
+    {
+      "tango": "MEDIDA_VENTAS_DESCRIPCION",
+      "hubspot": "tango_unidad_venta",
+      "label": "Unidad de venta",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "GVA41_DESC_IVA",
+      "hubspot": "tango_alicuota_iva",
+      "label": "Alicuota de IVA",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 98,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "STOCK",
+      "hubspot": "tango_lleva_stock",
+      "label": "Lleva stock",
+      "tipo": "boolean",
+      "hsFieldType": "booleancheckbox",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Es un flag de configuracion, NO la existencia real. El stock disponible requiere otro process."
+    },
+    {
+      "tango": "PERFIL",
+      "hubspot": "tango_perfil",
+      "label": "Perfil",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR valores posibles. Probable: A=ambos, V=ventas, C=compras. Si existe 'C', esos articulos quizas no deban ir al catalogo comercial."
+    },
+    {
+      "tango": "REMITIBLE",
+      "hubspot": "tango_remitible",
+      "label": "Remitible",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "FECHA_ALTA",
+      "hubspot": "tango_fecha_alta",
+      "label": "Fecha de alta en Tango",
+      "tipo": "date",
+      "hsFieldType": "date",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "transform": "fechaTangoAEpoch"
+    },
+    {
+      "tango": "COD_NCM",
+      "hubspot": "tango_ncm",
+      "label": "Codigo NCM",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 96,
+      "autoritativoTango": true,
+      "transform": "trimNcm",
+      "notas": "Puede venir como mascara vacia: '    .  .  '. Guardar null en ese caso."
+    },
+    {
+      "tango": "OBSERVACIONES",
+      "hubspot": "tango_observaciones",
+      "label": "Observaciones Tango",
+      "tipo": "string",
+      "hsFieldType": "textarea",
+      "porcentajeCarga": 30,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "__hash__",
+      "hubspot": "tango_sync_hash",
+      "label": "Hash de sincronizacion",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": true,
+      "notas": "Campo tecnico."
+    },
+    {
+      "tango": "__timestamp__",
+      "hubspot": "tango_ultima_sync",
+      "label": "Ultima sincronizacion",
+      "tipo": "datetime",
+      "hsFieldType": "date",
+      "autoritativoTango": true,
+      "notas": "Campo tecnico."
+    }
+  ],
+
+  "sinMapear": {
+    "motivo": "Parametria interna del ERP sin uso comercial en el CRM.",
+    "campos": [
+      "USA_PARTID, USA_SERIE, USA_ESC, USA_SCRAP, PORC_SCRAP (control de partidas/series/escalas)",
+      "STOCK_MAXI, STOCK_MINI, PTO_PEDIDO, DESCARGA_NEGATIVO_* (reposicion)",
+      "GVA41_*, CPA14_*, IMPUESTO_I, IMP_II_V_2, GEN_IB, GEN_IB3, IMPUEST_IC (parametria impositiva, salvo la alicuota de IVA)",
+      "CLASIFICACION_SIAP_*, TIPO_ITEM_AFIP_*, COD_ACTIVIDAD_DGI (regimenes AFIP)",
+      "MEDIDA_STOCK_*, AFIP_EQ_*, RENTA_*, EQUIVALE_V (unidades y equivalencias)",
+      "CODIGO_ITEM_TURISMO_*, TIPO_UNIDAD_TURISMO_* (vacios: no aplica al rubro)",
+      "COMISION_V, PORC_UTILI, DESCUENTO (politica comercial: evaluar si comercial las necesita ver)"
+    ]
+  }
+}

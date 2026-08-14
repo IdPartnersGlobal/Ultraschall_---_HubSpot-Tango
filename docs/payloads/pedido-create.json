@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "descripcion": "Payload de alta de PEDIDO en Tango. Ejemplo validado desde Postman.",
+    "endpoint": "POST /Api/Create",
+    "process": 19845,
+    "origen": "Relevamiento Ultraschall - JsonMapeoPedidos.json",
+    "nota": "Todas las referencias son IDs internos de Tango, NO códigos. Ver ARQUITECTURA.md §5.3"
+  },
+  "ID_MONEDA": 1,
+  "PORCENTAJE_DESCUENTO_GENERAL": 0,
+  "CALCULA_PROMOCIONES": false,
+  "ES_CLIENTE_HABITUAL": true,
+  "ID_GVA14": 2590,
+  "ID_GVA01": 5,
+  "ID_GVA24": 5,
+  "ID_GVA10": 3,
+  "ID_GVA23": 10,
+  "FECHA_PEDIDO": "2024-10-24T00:00:00",
+  "ID_GVA43_TALON_PED": 1,
+  "NRO_ORDEN_COMPRA": "TEST-POSTMAN-01",
+  "FECHA_ORDEN_COMPRA": "2024-10-24T00:00:00",
+  "FECHA_ENTREGA": "2024-10-25T00:00:00",
+  "LEYENDA_1": "ARS",
+  "LEYENDA_2": "Prueba de Integracion",
+  "LEYENDA_3": "",
+  "LEYENDA_4": "Creado desde Azure Function Proxy",
+  "LEYENDA_5": "",
+  "ID_STA22": 1,
+  "VALIDA_STOCK": false,
+  "APLICA_DESCUENTO_CLIENTE": false,
+  "OBSERVACIONES": "Pedido inyectado por API",
+  "RENGLON_DTO": [
+    {
+      "ID_STA11": 394,
+      "CANTIDAD_PEDIDA": 1,
+      "PRECIO": 48999,
+      "PORCENTAJE_BONIFICACION": 0,
+      "ID_STA22": 1,
+      "OBSERVACIONES": ""
+    }
+  ]
+}

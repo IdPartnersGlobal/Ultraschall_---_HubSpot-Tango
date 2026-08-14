@@ -1,0 +1,158 @@
+{
+  "_meta": {
+    "descripcion": "Valores por defecto para el ALTA de registros en Tango.",
+    "razonDeSer": "Tango exige campos de parametria que HubSpot no conoce ni deberia conocer (regimenes impositivos, agenda de cobranzas, talonarios). El payload de alta se arma como: { ...defaults, ...camposMapeadosDesdeHubSpot }.",
+    "estado": "PROPUESTA — valores tomados de los payloads de ejemplo. Hay que confirmar cuales son los correctos para Ultraschall en produccion.",
+    "advertencia": "Estos valores fueron tomados de ejemplos de prueba de Postman. NO se deben usar en produccion sin validacion del area administrativa."
+  },
+
+  "clientes": {
+    "process": 2117,
+    "endpoint": "Api/Create",
+    "confirmar": [
+      "ID_TIPO_DOCUMENTO_GV y ID_CATEGORIA_IVA deberian derivarse del cliente real, no ser fijos",
+      "ID_GVA05 (vendedor) deberia venir del owner del Deal/Company en HubSpot",
+      "ID_GVA10 (lista de precios): definir la lista por defecto para clientes nuevos"
+    ],
+    "defaults": {
+      "HABILITADO": true,
+      "MON_CTE": true,
+      "APLICA_MORA": "S",
+      "SUCURSAL_NRO": 1,
+      "SOBRE_IVA": "N",
+      "II_L": "N",
+      "II_D": "N",
+      "SOBRE_II": "N",
+      "TYP_FEX": "H",
+      "TYP_NCEX": "H",
+      "TYP_NDEX": "H",
+      "DESTINO_DE": "T",
+      "IDIOMA_CTE": "1",
+      "INC_COMENT": "N",
+      "EXPORTA": false,
+      "RG_3572_EMPRESA_VINCULADA_CLIENTE": false,
+      "PORC_EXCL": 0,
+      "PORC_DESC": 0,
+      "CUPO_CREDI": 0,
+      "CLAUSULA": false,
+      "INHABILITADO_NEXO_COBRANZAS": "N",
+      "PUBLICA_WEB_CLIENTES": "N",
+      "COBRA_LUNES": "N",
+      "COBRA_MARTES": "N",
+      "COBRA_MIERCOLES": "N",
+      "COBRA_JUEVES": "N",
+      "COBRA_VIERNES": "N",
+      "COBRA_SABADO": "N",
+      "COBRA_DOMINGO": "N"
+    },
+    "desdeHubSpot": [
+      "COD_GVA14", "RAZON_SOCI", "NOM_COM", "CUIT", "DOMICILIO", "LOCALIDAD",
+      "C_POSTAL", "GVA133_NOM_PAIS", "TELEFONO_1", "E_MAIL",
+      "ID_TIPO_DOCUMENTO_GV", "ID_CATEGORIA_IVA", "ID_GVA18",
+      "ID_GVA01", "ID_GVA10", "ID_GVA23", "ID_GVA24", "ID_GVA05"
+    ]
+  },
+
+  "pedidos": {
+    "process": 19845,
+    "endpoint": "Api/Create",
+    "confirmar": [
+      "ID_GVA43_TALON_PED: talonario de pedidos real de Ultraschall",
+      "ID_STA22: deposito real de Ultraschall",
+      "VALIDA_STOCK: el ejemplo va en false; definir si produccion debe validar stock",
+      "ID_MONEDA: confirmar si siempre es ARS"
+    ],
+    "defaults": {
+      "ID_MONEDA": 1,
+      "ID_GVA43_TALON_PED": 1,
+      "ID_STA22": 1,
+      "VALIDA_STOCK": false,
+      "CALCULA_PROMOCIONES": false,
+      "APLICA_DESCUENTO_CLIENTE": false,
+      "ES_CLIENTE_HABITUAL": true,
+      "PORCENTAJE_DESCUENTO_GENERAL": 0
+    },
+    "desdeHubSpot": [
+      "ID_GVA14", "ID_GVA01", "ID_GVA10", "ID_GVA23", "ID_GVA24",
+      "FECHA_PEDIDO", "FECHA_ENTREGA", "NRO_ORDEN_COMPRA", "FECHA_ORDEN_COMPRA",
+      "OBSERVACIONES", "LEYENDA_1", "LEYENDA_2", "LEYENDA_3", "LEYENDA_4", "LEYENDA_5",
+      "RENGLON_DTO[].ID_STA11", "RENGLON_DTO[].CANTIDAD_PEDIDA",
+      "RENGLON_DTO[].PRECIO", "RENGLON_DTO[].PORCENTAJE_BONIFICACION"
+    ]
+  },
+
+  "productos": {
+    "process": 87,
+    "endpoint": "Api/Create",
+    "confirmar": [
+      "ID_MEDIDA_STOCK / VENTAS / COMPRAS = 4: confirmar que unidad es",
+      "ID_GVA41_COD_IVA = 5: confirmar que alicuota de IVA corresponde",
+      "Los ID_CLASIFICACION_SIAP_* dependen del rubro del articulo, no deberian ser fijos"
+    ],
+    "defaults": {
+      "PERFIL": "A",
+      "STOCK": true,
+      "PROMO_MENU": "A",
+      "USA_ESC": "N",
+      "LLEVA_DOBLE_UNIDAD_MEDIDA": false,
+      "EQUIVALENCIA_STOCK_2": 0,
+      "RELACION_UNIDADES_STOCK": "A",
+      "USA_CONTROL_UNIDADES_STOCK": false,
+      "DESVIO_CONTROL_UNIDADES_STOCK": 0,
+      "USA_PARTID": false,
+      "USA_SERIE": false,
+      "USA_SCRAP": false,
+      "PORC_SCRAP": 0,
+      "COMISION_V": 0,
+      "DESCUENTO": 0,
+      "PORC_UTILI": 0,
+      "DESVIO_CIERRE_PEDIDOS": 0,
+      "PORC_DESVI": 0,
+      "DESCARGA_NEGATIVO_STOCK": false,
+      "DESCARGA_NEGATIVO_VENTAS": false,
+      "REMITIBLE": "S",
+      "FACT_IMPOR": false,
+      "USA_CTRPRE": false,
+      "AFECTA_AF": false,
+      "STOCK_MAXI": 0,
+      "STOCK_MINI": 0,
+      "PTO_PEDIDO": 0,
+      "EQUIVALE_V": 1,
+      "IMPUESTO_I": 0,
+      "IMP_II_V_2": 0,
+      "IMPUEST_IC": 0,
+      "GEN_IB": false,
+      "GEN_IB3": false,
+      "PERC_NO_CA": false,
+      "GENERACOT": false,
+      "PRODUCTO_TERMINADO_COT": "S",
+      "RENTA_EQ_S": 0,
+      "RENTA_EQ_V": 0,
+      "AFIP_EQ_S": 1,
+      "AFIP_EQ_V": 1,
+      "COD_NCM": "    .  .  ",
+      "ID_MEDIDA_STOCK": 4,
+      "ID_MEDIDA_VENTAS": 4,
+      "ID_MEDIDA_COMPRAS": 4,
+      "ID_UNIDAD_MEDIDA_AFIP_UMEX_S": 7,
+      "ID_UNIDAD_MEDIDA_AFIP_UMEX_V": 7,
+      "ID_UNIDAD_MEDIDA_AFIP_UM_S": 7,
+      "ID_UNIDAD_MEDIDA_AFIP_UM_V": 7,
+      "ID_GVA41_COD_IVA": 5,
+      "ID_GVA41_COD_S_IVA": 1,
+      "ID_GVA41_COD_II": 2,
+      "ID_GVA41_COD_S_II": 3,
+      "ID_CPA14_COD_IVA_CO": 1,
+      "ID_CPA14_COD_S_IV_C": 12,
+      "ID_CPA14_COD_II_CO": 6,
+      "ID_CLASIFICACION_SIAP_CL_SIAP_GV": 16,
+      "ID_CLASIFICACION_SIAP_CL_SIAP_CP": 13,
+      "SINCRONIZA_NEXO_TIENDAS": false,
+      "ADMITE_VENTA_FRACCIONADA": false,
+      "STA_ARTICULO_UNIDAD_COMPRA": [
+        { "ID_MEDIDA_COMPRA": 4, "EQUIVALENCIA": 1, "HABITUAL": true }
+      ]
+    },
+    "desdeHubSpot": ["COD_STA11", "DESCRIPCIO", "FECHA_ALTA"]
+  }
+}

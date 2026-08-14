@@ -1,5 +1,10 @@
 const { app } = require('@azure/functions');
 
+// Herramienta de diagnóstico: proxy pass-through contra Tango.
+// No es la función de producción — el sync real vive en syncClientes / syncProductos / dealToTango.
+// ⚠️ DEUDA D2 (docs/ARQUITECTURA.md §10): authLevel 'anonymous' expone el ERP a internet sin
+// autenticación, incluido el POST → Api/Create. Se mantiene sólo durante el relevamiento.
+// Antes de producción pasar a 'function' (header 'x-functions-key' o query '?code=...').
 app.http('testTangoConnection', {
     methods: ['GET', 'POST'],
     authLevel: 'anonymous',

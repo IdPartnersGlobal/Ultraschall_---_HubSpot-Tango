@@ -9,7 +9,6 @@ local.settings.json
 # 3. Empaquetados y despliegues manuales (Para evitar subir el app.zip)
 *.zip
 *.tgz
-.funcignore
 
 # 4. Logs de NPM (Basura generada si algo falla localmente)
 npm-debug.log*

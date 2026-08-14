@@ -1,0 +1,383 @@
+{
+  "_meta": {
+    "entidad": "clientes",
+    "estado": "PROPUESTA — pendiente de validacion por Ultraschall",
+    "origen": {
+      "sistema": "Tango",
+      "process": 2117,
+      "tabla": "GVA14",
+      "totalRegistros": 5668
+    },
+    "destino": {
+      "sistema": "HubSpot",
+      "objeto": "companies",
+      "grupoPropiedades": "tango_erp"
+    },
+    "claveIdempotencia": {
+      "tango": "COD_GVA14",
+      "hubspot": "tango_cod_cliente",
+      "unique": true,
+      "nota": "CUIT NO se usa como clave primaria: puede repetirse entre sucursales del mismo grupo."
+    },
+    "convenciones": {
+      "prefijo": "tango_",
+      "autoritativoTango": "true = el sync pisa el valor en HubSpot en cada corrida. false = solo se escribe si el campo esta vacio.",
+      "porcentajeCarga": "% de registros con dato, medido sobre una muestra de 500 registros reales."
+    }
+  },
+
+  "campos": [
+    {
+      "tango": "COD_GVA14",
+      "hubspot": "tango_cod_cliente",
+      "label": "Codigo cliente Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "unique": true,
+      "autoritativoTango": true,
+      "notas": "Clave primaria de la integracion."
+    },
+    {
+      "tango": "ID_GVA14",
+      "hubspot": "tango_id_gva14",
+      "label": "ID interno Tango",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "OBLIGATORIO. Requerido para crear pedidos (ARQUITECTURA.md §5.3). Ocultar a comercial."
+    },
+    {
+      "tango": "RAZON_SOCI",
+      "hubspot": "name",
+      "label": "Nombre de empresa",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Propiedad estandar de HubSpot."
+    },
+    {
+      "tango": "NOM_COM",
+      "hubspot": "tango_nombre_comercial",
+      "label": "Nombre comercial",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "CUIT",
+      "hubspot": "tango_cuit",
+      "label": "CUIT",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "transform": "normalizarCuit",
+      "notas": "Viene con guiones: '30-70985931-1'. Definir si se guarda con o sin formato."
+    },
+    {
+      "tango": "E_MAIL",
+      "hubspot": "tango_email",
+      "label": "Email Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 25,
+      "autoritativoTango": false,
+      "notas": "Solo 25% cargado. Companies no tiene propiedad de email estandar."
+    },
+    {
+      "tango": "WEB",
+      "hubspot": "website",
+      "label": "Sitio web",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": false,
+      "transform": "normalizarUrl",
+      "notas": "Viene sin protocolo: 'www.arrayamed.com'. HubSpot deriva 'domain' de aca."
+    },
+    {
+      "tango": "TELEFONO_1",
+      "hubspot": "phone",
+      "label": "Telefono",
+      "tipo": "string",
+      "hsFieldType": "phonenumber",
+      "porcentajeCarga": 64,
+      "autoritativoTango": false,
+      "transform": "normalizarTelefono",
+      "notas": "Formato argentino con parentesis: '(0376)4434782'."
+    },
+    {
+      "tango": "TELEFONO_MOVIL_WA",
+      "hubspot": "tango_whatsapp",
+      "label": "WhatsApp",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": false
+    },
+    {
+      "tango": "DOMICILIO",
+      "hubspot": "address",
+      "label": "Direccion",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "DIR_COM",
+      "hubspot": "tango_direccion_comercial",
+      "label": "Direccion comercial",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 99,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "LOCALIDAD",
+      "hubspot": "city",
+      "label": "Ciudad",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 98,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "C_POSTAL",
+      "hubspot": "zip",
+      "label": "Codigo postal",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 50,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "GVA18_DESCRIPCION",
+      "hubspot": "state",
+      "label": "Provincia",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": false,
+      "notas": "CONFIRMADO: GVA18 = provincias (el payload de alta pide ID_GVA18 junto a GVA133_NOM_PAIS)."
+    },
+    {
+      "tango": "GVA133_NOM_PAIS",
+      "hubspot": "country",
+      "label": "Pais",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "HABILITADO",
+      "hubspot": "tango_habilitado",
+      "label": "Habilitado en Tango",
+      "tipo": "boolean",
+      "hsFieldType": "booleancheckbox",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Util para filtrar en listas: clientes inhabilitados no deberian trabajarse."
+    },
+    {
+      "tango": "FECHA_ALTA",
+      "hubspot": "tango_fecha_alta",
+      "label": "Fecha de alta en Tango",
+      "tipo": "date",
+      "hsFieldType": "date",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "transform": "fechaTangoAEpoch",
+      "notas": "Formato origen: '2018-08-30T00:00:00'. HubSpot espera epoch ms a medianoche UTC."
+    },
+    {
+      "tango": "DESC_CATEGORIA_IVA",
+      "hubspot": "tango_categoria_iva",
+      "label": "Categoria de IVA",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Generar las opciones del select desde los valores distintos del ERP."
+    },
+    {
+      "tango": "GVA01_DESC_COND",
+      "hubspot": "tango_condicion_venta",
+      "label": "Condicion de venta",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "GVA01_COND_VTA",
+      "hubspot": "tango_id_gva01",
+      "label": "ID condicion de venta",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR que este campo es el ID interno y no el codigo. Necesario para el alta de pedidos."
+    },
+    {
+      "tango": "GVA10_NOMBRE_LIS",
+      "hubspot": "tango_lista_precios",
+      "label": "Lista de precios",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 30,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "GVA10_NRO_DE_LIS",
+      "hubspot": "tango_id_gva10",
+      "label": "ID lista de precios",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 30,
+      "autoritativoTango": true,
+      "notas": "Necesario para el alta de pedidos. Solo 30% cargado: definir lista por defecto."
+    },
+    {
+      "tango": "GVA05_DESCRIPCION",
+      "hubspot": "tango_vendedor",
+      "label": "Vendedor Tango",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMADO: GVA05 = vendedores (el payload de alta pide ID_GVA05). Candidato a mapear contra hubspot_owner_id."
+    },
+    {
+      "tango": "GVA23_CODIGO",
+      "hubspot": "tango_id_gva23",
+      "label": "ID GVA23",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 31,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR que representa. Se necesita para el alta de pedidos."
+    },
+    {
+      "tango": "GVA24_CODIGO",
+      "hubspot": "tango_id_gva24",
+      "label": "ID GVA24",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 30,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR que representa. Se necesita para el alta de pedidos."
+    },
+    {
+      "tango": "CUPO_CREDI",
+      "hubspot": "tango_cupo_credito",
+      "label": "Cupo de credito",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "PORC_DESC",
+      "hubspot": "tango_porc_descuento",
+      "label": "% descuento",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "MON_CTE",
+      "hubspot": "tango_mon_cte",
+      "label": "Cuenta en moneda corriente",
+      "tipo": "boolean",
+      "hsFieldType": "booleancheckbox",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CORREGIDO: el payload de alta lo manda como boolean (true), no es el nombre de una moneda."
+    },
+    {
+      "tango": "GVA05_CODIGO",
+      "hubspot": "tango_id_gva05",
+      "label": "ID vendedor",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR codigo vs ID interno (ARQUITECTURA.md §5.4). El alta de cliente exige ID_GVA05."
+    },
+    {
+      "tango": "COD_CATEGORIA_IVA",
+      "hubspot": "tango_id_categoria_iva",
+      "label": "ID categoria de IVA",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR codigo vs ID interno. El alta exige ID_CATEGORIA_IVA."
+    },
+    {
+      "tango": "COD_TIPO_DOCUMENTO_GV",
+      "hubspot": "tango_id_tipo_documento",
+      "label": "ID tipo de documento",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMAR codigo vs ID interno. El alta exige ID_TIPO_DOCUMENTO_GV."
+    },
+    {
+      "tango": "GVA18_CODIGO",
+      "hubspot": "tango_id_gva18",
+      "label": "ID provincia",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "CONFIRMADO que GVA18 es provincia: el alta lo pide junto a GVA133_NOM_PAIS (pais). Falta confirmar codigo vs ID."
+    },
+    {
+      "tango": "OBSERVACIONES",
+      "hubspot": "tango_observaciones",
+      "label": "Observaciones Tango",
+      "tipo": "string",
+      "hsFieldType": "textarea",
+      "autoritativoTango": false
+    },
+    {
+      "tango": "__hash__",
+      "hubspot": "tango_sync_hash",
+      "label": "Hash de sincronizacion",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": true,
+      "notas": "Campo tecnico. Hash de los campos mapeados, para evitar escrituras innecesarias (ARQUITECTURA.md §8.2)."
+    },
+    {
+      "tango": "__timestamp__",
+      "hubspot": "tango_ultima_sync",
+      "label": "Ultima sincronizacion",
+      "tipo": "datetime",
+      "hsFieldType": "date",
+      "autoritativoTango": true,
+      "notas": "Campo tecnico."
+    }
+  ],
+
+  "sinMapear": {
+    "motivo": "Datos operativos del ERP sin valor para el CRM. Se dejan documentados por si mas adelante se necesitan.",
+    "campos": [
+      "COBRA_LUNES a COBRA_DOMINGO y HORARIO_COBRANZA (agenda de cobranzas)",
+      "SOBRE_IVA, PORC_EXCL, II_L, II_D, SOBRE_II, N_IMPUESTO, N_ING_BRUT (parametria impositiva)",
+      "CBU, N_PAGOELEC, MAIL_NEXO, INHABILITADO_NEXO_COBRANZAS (cobranzas / Nexo)",
+      "TYP_FEX, TYP_NCEX, TYP_NDEX, GVA44_* (talonarios de exportacion)",
+      "CLAUSULA, EXPORTA, DESTINO_DE, IDIOMA_CTE, DET_ARTIC, INC_COMENT (config de facturacion)",
+      "RG_3572_*, COD_OPERACION_AFIP_VENTAS, NRO_INSCR_RG1817 (regimenes AFIP)",
+      "SUCURSAL_NRO, SUCURSAL_DESC, NRO_SUCURSAL_DESTINO_* (sucursales)",
+      "CUMPLEANIO, EDAD, SEXO (vacios: GVA14 es tabla de empresas, no de personas)"
+    ]
+  }
+}
