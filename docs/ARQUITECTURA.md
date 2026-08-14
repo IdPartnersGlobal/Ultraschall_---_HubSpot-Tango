@@ -4,7 +4,7 @@
 > Todo lo marcado con 🟡 **PENDIENTE** está esperando definición o dato de Ultraschall / Matías.
 > Todo lo marcado con ⚠️ es una inferencia mía que hay que confirmar contra Tango.
 >
-> Última actualización: 2026-08-12
+> Última actualización: 2026-08-14 — incorpora el relevamiento contra el ERP (§5.4 resuelto, §5.6 nueva).
 
 ---
 
@@ -20,8 +20,8 @@ Sincronizar la información maestra y transaccional entre **Tango Gestión** (ER
 | Fase | Flujo | Origen → Destino | Estado |
 |---|---|---|---|
 | 0 | Conectividad y proxy a Tango | — | ✅ Hecho |
-| 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | 🔨 A construir (piloto, 825 reg.) |
-| 2 | Clientes → cuentas | Tango `GVA14` → HubSpot **Companies** | 🔨 A construir (5.668 reg.) |
+| 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | ⛔ Bloqueada: `process=87` no trae precio (826 reg.) |
+| 2 | Clientes → cuentas | Tango `GVA14` → HubSpot **Companies** | 🔨 A construir (5.670 reg.) |
 | 3 | Contactos | Tango `GVA14` (email) → HubSpot **Contacts** | 🟡 PENDIENTE definir (ver §7.3) |
 | 4 | Pedidos | HubSpot **Deal** ganado → Tango `Api/Create` (`process=19845`) | 🔨 A construir — payload ya relevado (§9) |
 
@@ -131,11 +131,32 @@ flowchart LR
 
 **Procesos relevados:**
 
-| `process` | Tabla | Contenido | Uso | Registros |
+| `process` | Tabla | Contenido | Uso | Registros (medido 2026-08-14) |
 |---|---|---|---|---|
-| `2117` | `GVA14` | Clientes | Lectura **y alta** | 5.668 (116 campos, 61 con datos ≥20%) |
-| `87` | `STA11` | Artículos | Lectura **y alta** | 825 (141 campos, 82 con datos ≥20%) |
+| `2117` | `GVA14` | Clientes | Lectura **y alta** | **5.670** (116 campos) |
+| `87` | `STA11` | Artículos | Lectura **y alta** | **826** (141 campos) |
+| `2151` | `GVA01` | Condiciones de venta | Lectura (lookup) | **86** (18 campos) — ✅ descubierto 2026-08-14 |
 | `19845` | `GVA21` ⚠️ | Pedidos | **Alta** | — |
+
+**Comportamiento del endpoint (verificado contra el ERP):**
+
+| Hallazgo | Detalle |
+|---|---|
+| `Api/Get` **ignora cualquier filtro** | Se probaron `id`, `ID_GVA14`, `filter`, `where`, `COD_GVA14`, `search`: todos devuelven los 5.670 registros igual. **No hay filtrado del lado del servidor.** |
+| `process` inválido | Devuelve `{"exceptionInfo":{"messages":["Action not found"]}}` en ~180 ms. Permite descubrir processes por sondeo. |
+| Espacio de `process` | **Disperso** (87, 2117, 2151, 19845). Barrerlo entero contra producción no es viable: varios processes tardan >60 s y algunos tiran `An exception was thrown while activating ViewsFacade`. |
+| `pageSize` | No tiene tope práctico: `pageSize=6000` trajo los 5.670 clientes en una sola llamada. |
+
+**Volumen y tiempos medidos** (a través del proxy de Azure, que es la única vía — §5.6):
+
+| Lectura | Tiempo | Payload |
+|---|---|---|
+| Clientes completos (5.670) | **107 s** | 15,7 MB |
+| Artículos completos (826) | **12 s** | 2,9 MB |
+| Tabla auxiliar `GVA01` (86) | 1,4 s | — |
+| Latencia de una consulta chica | ~180-580 ms | — |
+
+⚠️ Los 107 s de la lectura de clientes son **casi la mitad del timeout HTTP por defecto de Azure (230 s)**. Refuerza la decisión de §8.3: el sync de clientes va por **timer trigger**, no por HTTP.
 
 El `process` va como query param y el payload en el body — el puente de Azure lo reenvía tal cual:
 
@@ -146,13 +167,19 @@ POST https://{function-app}/api/testTangoConnection?process=2117
 
 🟡 **PENDIENTE — completar procesos faltantes:**
 
-| Necesidad | `process` | Notas |
+| Necesidad | `process` | Estado |
 |---|---|---|
-| Listas de precios | `____` | **Bloqueante para Fase 1**: `process=87` NO trae precio. |
-| Stock por depósito | `____` | `STA11.STOCK` es un booleano "lleva stock", no la existencia real. |
-| Tablas auxiliares (`GVA01`, `GVA05`, `GVA10`, `GVA18`, `GVA23`, `GVA24`, `GVA41`, `STA22`) | `____` | Ver §5.4: hacen falta para resolver los IDs internos. |
+| Listas de precios | `____` | ⛔ **Bloqueante Fase 1.** Confirmado 2026-08-14: `process=87` **no tiene ningún campo de precio** (se revisaron los 141). |
+| Stock por depósito | `____` | Confirmado: los campos `STOCK*` de `STA11` son todos parametría (`STOCK_MAXI`, `STOCK_MINI`, unidades de medida). Ninguno es la existencia real. |
+| `GVA01` Condiciones de venta | ✅ **`2151`** | Descubierto 2026-08-14. |
+| `GVA10` Listas de precios (cabecera) | `____` | ⛔ Bloqueante Fase 4 (§5.4). |
+| `GVA05` Vendedores | `____` | Necesaria para el mapeo a owner (§7.4). |
+| `GVA23`, `GVA24`, `GVA18`, `GVA41`, `STA22` | `____` | ⛔ Bloqueantes Fase 4 (§5.4). |
+| `CATEGORIA_IVA` | `____` | ⛔ Bloqueante: es alfabética (§5.4). |
 
-🟡 **PENDIENTE — filtros del ERP:** ¿`Api/Get` acepta filtro por fecha de modificación o por código? De eso depende si el sync puede ser incremental o tiene que ser full (§8.2).
+> **La vía rápida para cerrar esto es el doc de la API de Tango** (ítem 8 de §12). El sondeo funciona pero el espacio de `process` es disperso y barrerlo contra producción es caro y riesgoso. Con el doc, estos 8 valores salen de una.
+
+✅ **RESUELTO — filtros del ERP:** `Api/Get` **no acepta ningún filtro** (ver tabla de comportamiento arriba). El sync **tiene que ser full read**. Esto cierra la duda de §8.2 a favor de la propuesta de hash.
 
 ### 5.3 ⚠️ Regla crítica: lectura por código, escritura por ID interno
 
@@ -168,16 +195,36 @@ Los payloads de alta relevados (`docs/payloads/`) **no usan códigos, usan los I
 
 Estos IDs ya vienen en las respuestas de lectura (`ID_GVA14` e `ID_STA11` están al 100% en ambos dumps), así que no requiere llamadas extra.
 
-### 5.4 ⚠️ RIESGO ABIERTO: ¿el código de las tablas auxiliares es el ID interno?
+### 5.4 ⛔ RESUELTO (2026-08-14): el código **NO** es el ID interno
 
 Para las entidades principales el ID viene explícito (`ID_GVA14`, `ID_STA11`). **Para las tablas auxiliares no.**
 
 Los payloads de alta piden `ID_GVA01`, `ID_GVA05`, `ID_GVA10`, `ID_GVA18`, `ID_GVA23`, `ID_GVA24`, `ID_CATEGORIA_IVA`, `ID_TIPO_DOCUMENTO_GV`, `ID_STA22`, `ID_MEDIDA_*`, `ID_GVA41_*`.
 Pero la lectura de clientes devuelve **códigos**: `GVA01_COND_VTA`, `GVA05_CODIGO`, `GVA10_NRO_DE_LIS`, `GVA23_CODIGO`, `GVA24_CODIGO`, `COD_CATEGORIA_IVA`…
 
-**No está confirmado que código == ID interno.** Si no coinciden, hace falta resolver la equivalencia leyendo cada tabla auxiliar (de ahí el pedido de procesos en §5.1) y cachearla.
+**Verificado contra el ERP: divergen.** Se leyó la tabla `GVA01` completa (`process=2151`, 86 registros), que expone las dos columnas juntas — `ID_GVA01` (interno) y `COND_VTA` (código):
 
-**Cómo verificarlo rápido:** leer el cliente `ID_GVA14 = 2590` (el del payload de pedido de ejemplo) y comparar su `GVA10_NRO_DE_LIS` contra el `ID_GVA10 = 3` del pedido. Si coinciden, código == ID y nos ahorramos las tablas auxiliares. **Es la primera prueba a correr.**
+| Medición | Resultado |
+|---|---|
+| Registros de `GVA01` donde `ID_GVA01 != COND_VTA` | **72 de 86** |
+| Rango de `ID_GVA01` | 1-14, después salta a 1014-1102 |
+| Rango de `COND_VTA` | 1-99 |
+| Clientes (de 5.670) cuyo código coincide con el ID | 4.271 |
+| Clientes que **romperían** si mandamos el código como ID | **1.399 (25% de la cartera)** |
+
+Ejemplo: el cliente `000003` tiene `COND_VTA=15` ("CHEQUE 0, 30 DIAS FF"), pero su `ID_GVA01` real es **1014**.
+
+> ⚠️ **Cuidado con la prueba de una sola muestra.** El cliente `ID_GVA14=2590` (el del payload de ejemplo) tiene `COND_VTA=5`, y da MATCH contra el `ID_GVA01=5` del pedido. Es **casualidad**: los IDs 1-14 coinciden con sus códigos porque fueron los primeros creados. Verificar con un solo registro da un falso positivo y lleva a la conclusión opuesta a la correcta.
+
+**Modo de falla:** de los 1.399, **0 producen corrupción silenciosa** — como los códigos 15-99 casi no existen en el espacio de IDs (1-14, 1014-1102), Tango rechaza con error. Es el modo de falla bueno, pero es *suerte estructural de esta tabla*: en otra auxiliar cuyos rangos se solapen, mandar el código grabaría un valor **distinto y válido**, sin error. No se puede confiar en que falle ruidosamente.
+
+**Consecuencia de arquitectura (firme):** hace falta **leer y cachear cada tabla auxiliar** para resolver `código → ID interno`. No hay atajo. Esto convierte el pedido de los `process` de las auxiliares (§5.1) en **bloqueante de la Fase 4 y del alta de clientes**.
+
+**Patrón de resolución:** cada tabla auxiliar expone ambas columnas (interno + código), así que un solo `GET` por tabla alcanza para armar el diccionario en memoria. Son tablas chicas (`GVA01` = 86 registros) y estables: se cachean al inicio de cada corrida.
+
+#### Caso aparte: `CATEGORIA_IVA` es alfabética
+
+`COD_CATEGORIA_IVA` no es numérico: sus 5 valores son `RI`, `RS`, `EX`, `CF`, `EXE` (100% cargado). Acá ni siquiera existe la ilusión de que código == ID: se necesita sí o sí la tabla de equivalencia para resolver `ID_CATEGORIA_IVA`.
 
 ### 5.5 Campos de parametría en el alta
 
@@ -246,8 +293,16 @@ Si hace falta verificar algo en la interfaz de Tango (parametría, talonarios, d
 ### 7.2 Clientes → Companies (Fase 2)
 
 - **Clave de idempotencia:** `COD_GVA14` → propiedad custom `tango_cod_cliente`, marcada como *unique*.
-  `CUIT` queda como segunda clave (única pero no primaria: puede haber sucursales con mismo CUIT).
 - Mapeo detallado: **`config/mapeo.clientes.json`**.
+
+✅ **Claves verificadas sobre los 5.670 clientes (2026-08-14):**
+
+| Campo | Cargado | Únicos | Veredicto |
+|---|---|---|---|
+| `COD_GVA14` | 100% | 5.670 | ✅ Clave primaria. Cero duplicados. |
+| `ID_GVA14` | 100% | 5.670 | ✅ Único. Se persiste igual por §5.3. |
+| `CUIT` | 100% | 5.401 | ⚠️ **267 duplicados.** Confirma que no puede ser clave primaria (sucursales con mismo CUIT). Sirve sólo como clave secundaria de conciliación. |
+| `E_MAIL` | 26% | 1.465 | ❌ Inservible como clave. Ver §7.3. |
 
 ### 7.3 ¿Contacts? (Fase 3)
 
@@ -279,12 +334,16 @@ Dato duro del relevamiento: **`E_MAIL` está cargado en apenas el 25% de los cli
 
 ### 8.2 Full vs. incremental
 
-Ninguno de los dos payloads relevados trae **fecha de última modificación** (hay `FECHA_ALTA`, no `FECHA_MODIF`). Consecuencias:
+✅ **DECIDIDO (2026-08-14), con las dos condiciones verificadas contra el ERP:**
 
-- Si Tango **no** permite filtrar por modificación → sync **full** todas las corridas: 12 páginas de clientes + 2 de productos. Es viable con batch upsert, pero consume cuota de API de HubSpot.
-- Optimización: calcular un **hash por registro** y guardarlo en `tango_sync_hash`; sólo se manda a HubSpot lo que cambió. Reduce muchísimo la escritura sin depender del ERP.
+1. **No hay fecha de modificación.** Los únicos campos de fecha en `GVA14` son `FECHA_ALTA`, `FECHA_INHA` y `FECHA_VTO`. No existe `FECHA_MODIF`.
+2. **`Api/Get` no acepta filtros** (§5.1). No hay forma de pedirle a Tango "sólo lo que cambió".
 
-**Propuesta:** full read desde Tango + escritura diferencial por hash a HubSpot.
+**Estrategia: full read desde Tango + escritura diferencial por hash a HubSpot.** No es una preferencia, es la única opción disponible.
+
+El hash por registro se guarda en `tango_sync_hash`; sólo se manda a HubSpot lo que cambió. Sin eso, cada corrida escribiría 5.670 companies y quemaría la cuota de API de HubSpot al pedo.
+
+**Costo real de la lectura full** (medido): 107 s y 15,7 MB para clientes, 12 s y 2,9 MB para artículos. Cabe en una sola llamada con `pageSize=6000` — no hace falta paginar, pero **sí hace falta que sea timer trigger** (§8.3).
 
 ### 8.3 Paginado y límites de ejecución
 
@@ -322,9 +381,9 @@ Payload de referencia validado: **`docs/payloads/pedido-create.json`**.
 |---|---|---|
 | `ID_GVA14` | Company → `tango_id_gva14` | Cliente. Si está vacío ⇒ error de negocio (§9.3). |
 | `ID_GVA01` | Company → `tango_id_gva01` | Condición de venta del cliente (`GVA01_COND_VTA`, 100% cargado). |
-| `ID_GVA10` | Company → `tango_id_gva10` | Lista de precios. ⚠️ sólo 30% de los clientes la tiene ⇒ necesita **default**. |
-| `ID_GVA23` | Company → `tango_id_gva23` | ⚠️ confirmar qué es (31% cargado). |
-| `ID_GVA24` | Company → `tango_id_gva24` | ⚠️ confirmar qué es (30% cargado). |
+| `ID_GVA10` | Company → `tango_id_gva10` | Lista de precios. **87% cargado** (medido 2026-08-14, no 30% como se estimó). Igual necesita default para el 13% restante. |
+| `ID_GVA23` | Company → `tango_id_gva23` | **88% cargado.** ⚠️ confirmar qué es. |
+| `ID_GVA24` | Company → `tango_id_gva24` | **86% cargado.** ⚠️ confirmar qué es. |
 | `ID_MONEDA` | fijo `1` | 🟡 confirmar si siempre ARS. |
 | `ID_GVA43_TALON_PED` | config | Talonario de pedidos. 🟡 confirmar cuál usa Ultraschall. |
 | `ID_STA22` | config | Depósito. 🟡 confirmar cuál. |
@@ -396,14 +455,25 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 
 | # | Qué | Bloquea |
 |---|---|---|
-| 1 | **Verificar código vs. ID interno** en tablas auxiliares (§5.4) — es una sola consulta | Fase 4 y alta de clientes |
-| 2 | **`process` de listas de precios** | Fase 1 (Products sin `price` no sirven) |
-| 3 | **Credenciales/portal de HubSpot**: Hub ID + Private App token | Todas las fases de escritura |
-| 4 | **Revisar los mapeos propuestos** en `config/mapeo.*.json` | Fases 1 y 2 |
-| 5 | **Validar `config/defaults.tango.json`** con administración (talonario, depósito, alícuotas, SIAP) | Toda escritura a Tango |
-| 6 | `process` de stock, frecuencia de sync, ambiente de pruebas | Optimizaciones |
-| 7 | Confirmar que Contacts queda fuera de alcance (§7.3) | Fase 3 |
-| 8 | Doc de comunicación con la API de Tango (lo pasa Matías) | — |
+| 1 | **Doc de comunicación con la API de Tango.** Subió a lo más alto: es lo que destraba de una los `process` de los ítems 2 y 3, que hoy son el cuello de botella. Sondear el ERP proceso por proceso no escala (§5.1). | Fases 1, 2 y 4 |
+| 2 | **`process` de las tablas auxiliares**: `GVA10`, `GVA23`, `GVA24`, `GVA05`, `GVA18`, `GVA41`, `STA22`, `CATEGORIA_IVA`. Ya no es opcional: §5.4 confirmó que el código **no** es el ID interno. | Fase 4 y alta de clientes |
+| 3 | **`process` de listas de precios** | Fase 1 (`process=87` no trae precio — confirmado) |
+| 4 | **Credenciales/portal de HubSpot**: Hub ID + Private App token | Todas las fases de escritura |
+| 5 | **Revisar los mapeos propuestos** en `config/mapeo.*.json` | Fases 1 y 2 |
+| 6 | **Validar `config/defaults.tango.json`** con administración (talonario, depósito, alícuotas, SIAP) | Toda escritura a Tango |
+| 7 | `process` de stock, frecuencia de sync, ambiente de pruebas | Optimizaciones |
+| 8 | Confirmar que Contacts queda fuera de alcance (§7.3) | Fase 3 |
+
+### Resuelto en el relevamiento del 2026-08-14
+
+| Pregunta | Respuesta |
+|---|---|
+| ¿El código es el ID interno? | **No.** Divergen en 72 de 86 registros de `GVA01`; 25% de la cartera rompería. Hacen falta las tablas auxiliares (§5.4). |
+| ¿`Api/Get` acepta filtros? | **No**, ninguno. El sync tiene que ser full read (§8.2). |
+| ¿Hay fecha de modificación? | **No.** Sólo `FECHA_ALTA`. Confirma la estrategia de hash (§8.2). |
+| ¿`process=87` trae precio? | **No**, ninguno de sus 141 campos. Fase 1 sigue bloqueada. |
+| ¿`COD_GVA14` sirve como clave? | **Sí**, 100% cargado y sin duplicados. `CUIT` no (267 duplicados). |
+| ¿Cuánto tarda una lectura full? | 107 s clientes, 12 s artículos. Obliga a timer trigger (§8.3). |
 
 ### Archivos de referencia
 
