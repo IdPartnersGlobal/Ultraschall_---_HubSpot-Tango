@@ -142,7 +142,7 @@ flowchart LR
 
 | Hallazgo | Detalle |
 |---|---|
-| `Api/Get` **ignora cualquier filtro** | Se probaron `id`, `ID_GVA14`, `filter`, `where`, `COD_GVA14`, `search`: todos devuelven los 5.670 registros igual. **No hay filtrado del lado del servidor.** |
+| `Api/Get` ignora los query params que no conoce | Se probaron `id`, `filter`, `where`, `search`: los descarta y devuelve todo. **Pero eso no significa que no haya filtrado** — hay endpoints dedicados, ver §5.8. |
 | `process` inválido | Devuelve `{"exceptionInfo":{"messages":["Action not found"]}}` en ~180 ms. Permite descubrir processes por sondeo. |
 | Espacio de `process` | **Disperso** (87, 2117, 2151, 19845). Barrerlo entero contra producción no es viable: varios processes tardan >60 s y algunos tiran `An exception was thrown while activating ViewsFacade`. |
 | `pageSize` | No tiene tope práctico: `pageSize=6000` trajo los 5.670 clientes en una sola llamada. |
@@ -171,13 +171,18 @@ POST https://{function-app}/api/testTangoConnection?process=2117
 |---|---|---|
 | Listas de precios | `____` | ⛔ **Bloqueante Fase 1.** Confirmado 2026-08-14: `process=87` **no tiene ningún campo de precio** (se revisaron los 141). |
 | Stock por depósito | `____` | Confirmado: los campos `STOCK*` de `STA11` son todos parametría (`STOCK_MAXI`, `STOCK_MINI`, unidades de medida). Ninguno es la existencia real. |
-| `GVA01` Condiciones de venta | ✅ **`2151`** | Descubierto 2026-08-14. |
-| `GVA10` Listas de precios (cabecera) | `____` | ⛔ Bloqueante Fase 4 (§5.4). |
-| `GVA05` Vendedores | `____` | Necesaria para el mapeo a owner (§7.4). |
-| `GVA23`, `GVA24`, `GVA18`, `GVA41`, `STA22` | `____` | ⛔ Bloqueantes Fase 4 (§5.4). |
+| `GVA01` Condiciones de venta | ✅ **`2151`** | Descubierto por sondeo. |
+| `GVA23` Vendedores | ✅ **`952`** | 27 registros. |
+| `GVA24` Transportes | ✅ **`960`** | 41 registros. |
+| `GVA18` Provincias | ✅ **`852`** | 40 registros. |
+| `GVA05` Zonas | ✅ **`842`** | 9 registros. |
+| `GVA41` Alícuotas de IVA | ✅ **`3010`** | 9 registros. |
+| `GVA10` Listas de precios | `____` | ⛔ Bloqueante Fase 4. |
+| `STA22` Depósitos | `____` | ⛔ Bloqueante Fase 4. No aparece en el menú del ERP. |
+| `GVA43` Talonarios | `____` | ⛔ Bloqueante Fase 4. No aparece en el menú del ERP. |
 | `CATEGORIA_IVA` | `____` | ⛔ Bloqueante: es alfabética (§5.4). |
 
-> **La vía rápida para cerrar esto es el doc de la API de Tango** (ítem 8 de §12). El sondeo funciona pero el espacio de `process` es disperso y barrerlo contra producción es caro y riesgoso. Con el doc, estos 8 valores salen de una.
+> El catálogo completo y actualizado vive en **`config/tango.processes.json`**. Los que faltan se consiguen con el método de §5.7.
 
 ✅ **RESUELTO — filtros del ERP:** `Api/Get` **no acepta ningún filtro** (ver tabla de comportamiento arriba). El sync **tiene que ser full read**. Esto cierra la duda de §8.2 a favor de la propuesta de hash.
 
@@ -216,7 +221,30 @@ Ejemplo: el cliente `000003` tiene `COND_VTA=15` ("CHEQUE 0, 30 DIAS FF"), pero 
 
 > ⚠️ **Cuidado con la prueba de una sola muestra.** El cliente `ID_GVA14=2590` (el del payload de ejemplo) tiene `COND_VTA=5`, y da MATCH contra el `ID_GVA01=5` del pedido. Es **casualidad**: los IDs 1-14 coinciden con sus códigos porque fueron los primeros creados. Verificar con un solo registro da un falso positivo y lleva a la conclusión opuesta a la correcta.
 
-**Modo de falla:** de los 1.399, **0 producen corrupción silenciosa** — como los códigos 15-99 casi no existen en el espacio de IDs (1-14, 1014-1102), Tango rechaza con error. Es el modo de falla bueno, pero es *suerte estructural de esta tabla*: en otra auxiliar cuyos rangos se solapen, mandar el código grabaría un valor **distinto y válido**, sin error. No se puede confiar en que falle ruidosamente.
+**Modo de falla en `GVA01`:** de los 1.399, 0 producen corrupción silenciosa — como los códigos 15-99 casi no existen en el espacio de IDs (1-14, 1014-1102), Tango rechaza con error. Es *suerte estructural de esa tabla*.
+
+#### ⛔ Las otras 5 auxiliares: acá sí hay corrupción silenciosa
+
+Con los `process` conseguidos el 2026-08-14 se leyeron las tablas restantes. **Las seis divergen**, y en la mayoría los rangos de código e ID **se solapan**, que es justo el caso peligroso:
+
+| Tabla | Qué es | Divergen | Clientes OK por casualidad | Error ruidoso | 🔴 **Corrupción silenciosa** |
+|---|---|---|---|---|---|
+| `GVA18` | Provincias | 26/40 | 788 | 860 | **4.022 (71%)** |
+| `GVA23` | Vendedores | 17/27 | 4.120 | 366 | **484 (10%)** |
+| `GVA24` | Transportes | 35/41 | 3.291 | 1.318 | **278 (6%)** |
+| `GVA41` | Alícuotas IVA | 9/9 | — | — | — |
+| `GVA01` | Cond. de venta | 72/86 | 4.271 | 1.399 | 0 |
+| `GVA05` | Zonas | 1/9 | 4.974 | 696 | 0 |
+
+Ejemplos reales de lo que se grabaría, **sin ningún error**:
+
+| Tabla | Código | Valor real del cliente | Se grabaría como |
+|---|---|---|---|
+| `GVA18` | 1 | Buenos Aires | **Capital Federal** |
+| `GVA23` | 24 | Juan Butorac | **Natali Vazquez** |
+| `GVA24` | 10 | A CONVENIR | **RETIRA BICENTENARIO (REM)** |
+
+**7 de cada 10 pedidos se grabarían con la provincia equivocada** y nadie se enteraría hasta que un despacho llegue mal. Esto liquida cualquier atajo: **la resolución `código → ID` por tabla auxiliar es obligatoria, sin excepción.**
 
 **Consecuencia de arquitectura (firme):** hace falta **leer y cachear cada tabla auxiliar** para resolver `código → ID interno`. No hay atajo. Esto convierte el pedido de los `process` de las auxiliares (§5.1) en **bloqueante de la Fase 4 y del alta de clientes**.
 
@@ -277,6 +305,32 @@ https://ultraschall-tango-hubspot-cjcpbug0g4fxgehg.canadacentral-01.azurewebsite
 4. Como beneficio lateral, el ERP no está expuesto a internet en general — la superficie de ataque es la Function App, no Tango. Eso **no** compensa D2: el proxy anónimo reabre el agujero, con el agravante de que ya viene autenticado contra el ERP.
 
 Si hace falta verificar algo en la interfaz de Tango (parametría, talonarios, depósitos), Matías tiene **acceso remoto** al ERP.
+
+### 5.8 Endpoints reales de la API (2026-08-14)
+
+> ⚠️ **Corrección.** Una versión previa de este documento afirmaba que "`Api/Get` no acepta ningún filtro, el sync tiene que ser full read". **Era incorrecto**: se probaron filtros como *query params* de `Api/Get`, pero el filtrado vive en **endpoints dedicados**. La conclusión de fondo (full read para el sync) sigue en pie, pero por otro motivo — ver §8.2.
+
+| Endpoint | Forma que funciona | Devuelve |
+|---|---|---|
+| Consulta | `GET Api/Get?process={p}&pages={n}&pageSize={n}` | `{ resultData: { list, totalCount, … } }` |
+| **Por ID** | `GET Api/GetById?process={p}&id={id}` | `{ value: {…} }` ⚠️ forma distinta |
+| **Por filtro** | `GET Api/GetByFilter?process={p}&filtroSql=WHERE {condición}` | `{ list: [...] }` ⚠️ forma distinta |
+| Alta | `POST Api/Create?process={p}` | |
+| Baja / Modificación | `Api/Delete`, `Api/Update` | **No probados**: son destructivos y esto es producción. |
+
+**Dos detalles que cuestan tiempo si no se saben:**
+
+1. **Las rutas *path-style* no existen en esta instalación.** El listado oficial de Tango documenta `Api/Get/{process}/{pageSize}/{pageIndex}/{view}`, pero todas esas rutas caen al fallback HTML de la SPA. **Todo va por query params.**
+2. **`filtroSql` tiene que incluir la palabra `WHERE`.** Sin ella SQL Server devuelve `Incorrect syntax near '='`. Vacío devuelve todo.
+
+```
+# Un cliente puntual: 484 ms  (vs. 107 s de la lectura completa)
+Api/GetByFilter?process=2117&filtroSql=WHERE COD_GVA14='000003'
+```
+
+**Impacto en el diseño (§9):** para la Fase 4 no hace falta cachear las 5.670 companies para resolver un pedido. Se puede resolver el cliente puntual en <1 s. Las tablas auxiliares **sí** conviene cachearlas (son chicas y se usan en cada renglón).
+
+> 🔴 **`filtroSql` es SQL crudo concatenado.** Se verificó (sólo lectura) que acepta subconsultas arbitrarias contra **cualquier tabla** del ERP, no sólo la del `process`. Ver §10: esto cambia la severidad de D2.
 
 ### 5.7 Cómo descubrir los `process` faltantes
 
@@ -409,12 +463,18 @@ Es un buen candidato a propiedad de segmentación en HubSpot, no a owner.
 
 ### 8.2 Full vs. incremental
 
-✅ **DECIDIDO (2026-08-14), con las dos condiciones verificadas contra el ERP:**
+✅ **DECIDIDO (2026-08-14). Ojo: la razón cambió respecto de la versión anterior de este documento.**
 
-1. **No hay fecha de modificación.** Los únicos campos de fecha en `GVA14` son `FECHA_ALTA`, `FECHA_INHA` y `FECHA_VTO`. No existe `FECHA_MODIF`.
-2. **`Api/Get` no acepta filtros** (§5.1). No hay forma de pedirle a Tango "sólo lo que cambió".
+Sí existe filtrado del lado del servidor (`Api/GetByFilter`, §5.8). Pero eso **no** habilita el sync incremental, porque falta la otra mitad:
 
-**Estrategia: full read desde Tango + escritura diferencial por hash a HubSpot.** No es una preferencia, es la única opción disponible.
+1. **No hay fecha de modificación.** Los campos de fecha de `GVA14` son `FECHA_ALTA`, `FECHA_INHA` y `FECHA_VTO`.
+2. Como `filtroSql` es SQL crudo contra la tabla, se pudo **sondear si existía una columna oculta** que la vista no expone: se probaron `FECHA_MODIF`, `FEC_MODIF`, `FECHA_ULT_MODIF` y `ULT_MODIF`. SQL Server respondió `Invalid column name` a las cuatro. **La columna no existe, ni oculta.**
+
+Se puede filtrar, pero no hay por qué campo preguntar "¿qué cambió desde ayer?".
+
+**Estrategia: full read desde Tango + escritura diferencial por hash a HubSpot.** Sigue siendo la única opción para el sync masivo.
+
+> Donde `Api/GetByFilter` **sí** cambia el diseño es en la Fase 4: resolver un cliente puntual tarda <1 s, así que `dealToTango` no necesita ningún cache de companies (§5.8).
 
 El hash por registro se guarda en `tango_sync_hash`; sólo se manda a HubSpot lo que cambió. Sin eso, cada corrida escribiría 5.670 companies y quemaría la cuota de API de HubSpot al pedo.
 
@@ -492,6 +552,39 @@ Payload de referencia validado: **`docs/payloads/pedido-create.json`**.
 
 ## 10. Seguridad
 
+### 🔴 10.0 URGENTE — el proxy anónimo expone SQL arbitrario del ERP a internet
+
+Descubierto el 2026-08-14 al relevar los endpoints (§5.8). **Sube la severidad de D2 de "deuda a saldar antes de producción" a "arreglar ya".**
+
+**La cadena:**
+
+1. `testTangoConnection` está en `authLevel: 'anonymous'` → la URL de la Function App es pública, sin credencial.
+2. El proxy reenvía **cualquier** `tangoPath` y **todos** los query params, agregando él mismo las credenciales del ERP.
+3. Tango expone `Api/GetByFilter?process={p}&filtroSql=WHERE …`, que es **SQL crudo concatenado**.
+
+**Verificado (sólo lectura):** el filtro acepta subconsultas contra **cualquier tabla** de la base, no sólo la del `process` consultado:
+
+```
+filtroSql=WHERE ID_GVA05 IN (SELECT TOP 1 ID_GVA14 FROM GVA14)   -> 200 OK
+```
+
+**Consecuencia:** cualquiera que conozca la URL tiene **lectura SQL arbitraria sobre toda la base del ERP** — clientes, CUITs, precios, ventas — y además el `POST → Api/Create` para escribir. La restricción por IP de Tango (§5.6) no protege nada acá: el proxy *es* la IP autorizada.
+
+No se probaron `Api/Delete` ni `Api/Update` (destructivos, producción), pero figuran en el listado de endpoints de Tango y no hay razón para suponer que el proxy no los reenviaría igual.
+
+**Acciones, en orden:**
+
+| # | Acción | Por qué |
+|---|---|---|
+| 1 | Pasar `testTangoConnection` a `authLevel: 'function'` | Corta el acceso anónimo. Es un cambio de una línea. |
+| 2 | No dejar el proxy pass-through en producción | Las funciones de sync no lo necesitan: hablan con `lib/tangoClient` directo. |
+| 3 | Si se conserva como diagnóstico: **allowlist de `tangoPath` y de `process`** | Un proxy que reenvía cualquier ruta es un agujero por diseño. |
+| 4 | Nunca exponer `filtroSql` a entrada externa | El día que `dealToTango` reciba un webhook, el filtro se arma en el código, jamás con datos del request. |
+
+⚠️ Mientras el relevamiento siguió con `anonymous` (decisión consciente, §5.6), **esa ventana ya no se justifica**: los `process` que faltaban ya se consiguen por el método de §5.7, sin necesidad del proxy abierto.
+
+### 10.1 Resto
+
 | Tema | Situación | Acción |
 |---|---|---|
 | Transporte a Tango | `http://` plano contra IP pública, con la API key viajando en header | 🟡 Evaluar HTTPS o VPN/IP allowlist. Hoy la credencial del ERP viaja en claro. |
@@ -530,9 +623,10 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 
 | # | Qué | Bloquea |
 |---|---|---|
-| 1 | **Los `process` faltantes, sacados del Network del propio ERP** (receta paso a paso en §5.7). ⛔ No existe documentación de la API — confirmado con soporte de Tango. Es el cuello de botella de todo lo demás. | Fases 1, 2 y 4 |
-| 2 | **`process` de las tablas auxiliares**: `GVA10`, `GVA23`, `GVA24`, `GVA05`, `GVA18`, `GVA41`, `STA22`, `CATEGORIA_IVA`. Ya no es opcional: §5.4 confirmó que el código **no** es el ID interno. | Fase 4 y alta de clientes |
-| 3 | **`process` de listas de precios** | Fase 1 (`process=87` no trae precio — confirmado) |
+| 0 | 🔴 **Cerrar el proxy anónimo (§10.0).** Hoy expone lectura SQL arbitraria de todo el ERP a internet. Es un cambio de una línea. | — |
+| 1 | **`process` de precios de artículos** — la pantalla de precios / actualización de precios | ⛔ Fase 1 entera |
+| 2 | **`process` de listas de precios (`GVA10`), depósitos (`STA22`) y talonarios (`GVA43`)**. Matías no encontró depósitos ni talonarios en el menú: puede que estén dentro de otra pantalla o requieran permiso. | ⛔ Fase 4 |
+| 3 | **Equivalencia de `CATEGORIA_IVA`** (`RI`, `RS`, `EX`, `CF`, `EXE` → ID). Es alfabética, no hay atajo. | Alta de clientes |
 | 4 | **Credenciales/portal de HubSpot**: Hub ID + Private App token | Todas las fases de escritura |
 | 5 | **Revisar los mapeos propuestos** en `config/mapeo.*.json` | Fases 1 y 2 |
 | 6 | **Validar `config/defaults.tango.json`** con administración (talonario, depósito, alícuotas, SIAP) | Toda escritura a Tango |

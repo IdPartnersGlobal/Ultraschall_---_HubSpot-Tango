@@ -1,0 +1,78 @@
+{
+  "_meta": {
+    "descripcion": "Catalogo de processes de Tango. Un process identifica una entidad del ERP en Api/Get, Api/GetById, Api/GetByFilter y Api/Create.",
+    "origen": "No existe documentacion de esta API (confirmado con soporte de Tango, 2026-08-14). Los valores se obtuvieron leyendo el trafico de red del cliente web de Tango. Metodo en docs/ARQUITECTURA.md 5.7.",
+    "comoAgregarUno": "Abrir el ERP web con DevTools > Network, filtrar por 'Api/Get' y navegar a la pantalla. El numero es el query param 'process'."
+  },
+
+  "endpoints": {
+    "_nota": "Las rutas path-style (Api/Get/{process}/{pageSize}/...) NO existen en esta instalacion: devuelven el fallback HTML de la SPA. Todo va por query params.",
+    "consulta": "GET Api/Get?process={p}&pages={n}&pageSize={n}",
+    "porId": "GET Api/GetById?process={p}&id={id}  -> devuelve { value: {...} }, no { resultData: { list } }",
+    "porFiltro": "GET Api/GetByFilter?process={p}&filtroSql=WHERE {condicion}  -> devuelve { list: [...] }",
+    "alta": "POST Api/Create?process={p}",
+    "_filtroSql": "El filtro DEBE incluir la palabra WHERE. Sin ella, SQL Server tira 'Incorrect syntax'. Vacio devuelve todo.",
+    "_baja_modificacion": "Api/Delete y Api/Update figuran en la lista de endpoints de Tango pero NO se probaron: son destructivos y esto es produccion."
+  },
+
+  "entidades": {
+    "clientes": {
+      "process": 2117, "tabla": "GVA14", "registros": 5670,
+      "id": "ID_GVA14", "codigo": "COD_GVA14",
+      "uso": "lectura y alta"
+    },
+    "articulos": {
+      "process": 87, "tabla": "STA11", "registros": 826,
+      "id": "ID_STA11", "codigo": "COD_STA11",
+      "uso": "lectura y alta",
+      "advertencia": "No trae precio. Ninguno de sus 141 campos es de precio."
+    },
+    "pedidos": {
+      "process": 19845, "tabla": "GVA21", "uso": "alta"
+    }
+  },
+
+  "auxiliares": {
+    "_nota": "Tablas de lookup para resolver codigo -> ID interno. OBLIGATORIO: el codigo NO es el ID (ver ARQUITECTURA.md 5.4). Todas divergen.",
+    "condicionesVenta": {
+      "process": 2151, "tabla": "GVA01", "registros": 86,
+      "id": "ID_GVA01", "codigo": "COND_VTA", "descripcion": "DESC_COND",
+      "campoEnCliente": "GVA01_COND_VTA", "divergen": "72/86"
+    },
+    "vendedores": {
+      "process": 952, "tabla": "GVA23", "registros": 27,
+      "id": "ID_GVA23", "codigo": "COD_GVA23", "descripcion": "NOMBRE_VEN",
+      "campoEnCliente": "GVA23_CODIGO", "divergen": "17/27"
+    },
+    "transportes": {
+      "process": 960, "tabla": "GVA24", "registros": 41,
+      "id": "ID_GVA24", "codigo": "COD_GVA24", "descripcion": "NOMBRE_TRA",
+      "campoEnCliente": "GVA24_CODIGO", "divergen": "35/41"
+    },
+    "provincias": {
+      "process": 852, "tabla": "GVA18", "registros": 40,
+      "id": "ID_GVA18", "codigo": "COD_GVA18", "descripcion": "NOMBRE_PRO",
+      "campoEnCliente": "GVA18_CODIGO", "divergen": "26/40"
+    },
+    "zonas": {
+      "process": 842, "tabla": "GVA05", "registros": 9,
+      "id": "ID_GVA05", "codigo": "COD_GVA05", "descripcion": "NOMBRE_ZON",
+      "campoEnCliente": "GVA05_CODIGO", "divergen": "1/9"
+    },
+    "alicuotasIva": {
+      "process": 3010, "tabla": "GVA41", "registros": 9,
+      "id": "ID_GVA41", "codigo": "COD_ALICUO",
+      "divergen": "9/9"
+    }
+  },
+
+  "faltantes": {
+    "_nota": "Sin estos process no se puede avanzar. Conseguirlos con el metodo de 5.7.",
+    "listasDePrecios": { "tabla": "GVA10", "bloquea": "Fase 4", "pantalla": "Listas de precios" },
+    "preciosArticulos": { "tabla": null, "bloquea": "Fase 1 completa", "pantalla": "Precios de articulos / actualizacion de precios" },
+    "depositos": { "tabla": "STA22", "bloquea": "Fase 4", "pantalla": "Depositos", "nota": "Matias no la encontro en el menu" },
+    "talonarios": { "tabla": "GVA43", "bloquea": "Fase 4", "pantalla": "Talonarios", "nota": "Matias no la encontro en el menu" },
+    "categoriaIva": { "tabla": null, "bloquea": "alta de clientes", "nota": "COD_CATEGORIA_IVA es alfabetico (RI, RS, EX, CF, EXE)" },
+    "stockPorDeposito": { "tabla": null, "bloquea": "optimizacion", "nota": "STA11.STOCK es parametria, no existencia real" }
+  }
+}
