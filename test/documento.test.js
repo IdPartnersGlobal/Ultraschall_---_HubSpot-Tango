@@ -116,6 +116,43 @@ test('resolver no adivina cuando no puede', () => {
     assert.strictEqual(r.revisar, true);
 });
 
+// ------------------------------------------------- equivalencia para el alta
+
+test('la equivalencia codigo -> ID no es "codigo + 1"', () => {
+    // Verificado contra el ERP el 2026-08-18. La regla vale solo para 0..8:
+    // el cliente creado con ID 2 volvio con codigo 1, con ID 3 codigo 2, etc.
+    // Pero CUIT (cod 80) es ID 26, no 81 — el 81 lo rechaza Tango.
+    assert.strictEqual(doc.COD_A_ID[0], 1);
+    assert.strictEqual(doc.COD_A_ID[80], 26, 'CUIT');
+    assert.strictEqual(doc.COD_A_ID[96], 40, 'DNI');
+    assert.notStrictEqual(doc.COD_A_ID[80], 81, 'la planilla y la intuicion dicen 81; es falso');
+});
+
+test('idParaAlta devuelve el ID que exige Tango, no el codigo', () => {
+    const cuit = doc.idParaAlta({ COD_TIPO_DOCUMENTO_GV: 80, CUIT: '30-70985931-1' });
+    assert.strictEqual(cuit.ok, true);
+    assert.strictEqual(cuit.id, 26);
+    assert.strictEqual(cuit.origen, 'tango');
+    assert.notStrictEqual(cuit.id, 80, 'nunca mandar el codigo como ID');
+
+    const dni = doc.idParaAlta({ COD_TIPO_DOCUMENTO_GV: 96, CUIT: '38901611' });
+    assert.strictEqual(dni.id, 40);
+});
+
+test('idParaAlta aprovecha el tipo inferido y avisa que lo es', () => {
+    const r = doc.idParaAlta({ COD_TIPO_DOCUMENTO_GV: 0, CUIT: '30-70985931-1' });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.id, 26, 'se infiere CUIT');
+    assert.strictEqual(r.origen, 'inferido', 'quien lo use tiene que saber que fue deducido');
+});
+
+test('idParaAlta falla explicitamente si no puede determinar el tipo', () => {
+    const r = doc.idParaAlta({ COD_TIPO_DOCUMENTO_GV: 0, CUIT: '123' });
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.id, null);
+    assert.ok(r.motivo);
+});
+
 test('sobre la muestra completa, quedan pocos sin resolver', () => {
     let porTango = 0, inferido = 0, desconocido = 0, revisar = 0;
     for (const c of clientes) {
