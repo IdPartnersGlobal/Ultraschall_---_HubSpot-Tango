@@ -1,5 +1,7 @@
 {
   "version": "2.0",
+  "_comentario_functionTimeout": "El default en plan Consumption es 5 min y la corrida completa de syncClientes ronda los 3-4 (107s solo la lectura de Tango). 10 min es el maximo en Consumption. Ver docs/ARQUITECTURA.md 8.3.",
+  "functionTimeout": "00:10:00",
   "logging": {
     "applicationInsights": {
       "samplingSettings": {
