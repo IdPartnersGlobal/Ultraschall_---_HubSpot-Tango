@@ -390,6 +390,38 @@ Alcanza con anotar el número: con el `process` en mano, la tabla se lee sola y 
 
 ## 6. Convenciones
 
+### 6.0 La planilla de Ultraschall es la fuente de verdad de los nombres
+
+Ultraschall mantiene la planilla **"Tablero de informacion HubSpot - Empresas TANGO"** (copia en `config/`). Define los **nombres internos** de las propiedades de HubSpot y a qué campo de Tango corresponde cada una.
+
+**Reparto de responsabilidades:**
+
+| Documento | Manda en |
+|---|---|
+| La planilla | Nombres internos, etiquetas, qué campo va a dónde, qué propiedades son sólo de HubSpot |
+| `config/mapeo.*.json` | Lo que la planilla no puede expresar: tipos, transforms y la **resolución `código → ID interno`** |
+
+Ante un conflicto de nombres, gana la planilla.
+
+**Decisiones tomadas el 2026-08-18:**
+
+1. **`name` = nombre de fantasía (`NOM_COM`)**, y la razón social va a `razon_social`. Antes el mapeo técnico ponía `RAZON_SOCI` en `name`; para comercial es más útil ver la fantasía.
+2. **El documento se guarda como TEXTO con guiones**, un solo formato. La planilla lo tenía como tipo *número*, pero Tango exige los guiones en el alta y un campo numérico no los soporta.
+3. **Dirección de sincronización:** se mantiene la convención del proyecto — el maestro de clientes y artículos va **Tango → HubSpot** (Fases 1 y 2), y la dirección inversa es la Fase 4. Por campo se expresa con `autoritativoTango`.
+
+**Dos correcciones aplicadas a lo que traía la planilla:**
+
+- **Fila 16 estaba corrida:** mapeaba `TELEFONO_1` a `domicilio_fiscal`. El teléfono habría terminado en un campo de dirección. Corregido a `phone`. 🟡 **Corregir también en el Google Sheet**, que es el original.
+- **Filas 30-35:** los valores de ejemplo de los campos `ID_GVA*` son **códigos, no IDs internos** (`24 (Juan Butorac)` es el código; el ID es 26). Ver §5.4. El código ya lo resuelve `lib/lookups.js`, pero **quien implemente a mano siguiendo esa tabla corrompe datos en silencio**.
+
+**Lo que la planilla aportó y estaba pendiente:**
+
+- **Equivalencia de categoría de IVA**: `1` Resp. Inscripto, `4` Exento, `5` Cons. Final, `6` Monotributo. 🟡 Los datos reales tienen 5 códigos (`RI`, `RS`, `EX`, `CF`, `EXE`): falta confirmar a qué ID corresponden **`RS` y `EXE`**.
+- **Validación de `defaults.tango.json`**: las 16 filas de parametría de alta de la planilla **coinciden todas** con el archivo. Pendiente cerrado.
+- `ID_TIPO_DOCUMENTO_GV = 1` para C.U.I.T. ⚠️ En la lectura ese tipo viene con código `80` — otra confirmación de que código ≠ ID. Y **el 54% de los clientes tiene código `0` ("C.I. POLICIA FEDERAL"), que en los hechos significa "sin definir"**: 132 de ellos tienen un CUIT bien formado. Para el alta hay que inferir el tipo del formato del documento.
+
+
+
 - **Prefijo de propiedades custom:** `tango_` (ej. `tango_cod_cliente`). Evita colisiones y hace obvio el origen del dato.
 - **Grupo de propiedades en HubSpot:** `tango_erp` ("Datos Tango ERP"), para que el equipo comercial las vea agrupadas.
 - **Nunca pisar campos editados a mano en HubSpot** salvo los que el mapeo marque como `autoritativoTango: true`.

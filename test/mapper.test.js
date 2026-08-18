@@ -25,10 +25,25 @@ const mapper = crear(mapeoClientes, lk);
 
 // ------------------------------------------------------------------ transforms
 
-test('normalizarCuit deja solo digitos', () => {
-    assert.strictEqual(transforms.normalizarCuit('30-70985931-1'), '30709859311');
-    assert.strictEqual(transforms.normalizarCuit(''), null);
-    assert.strictEqual(transforms.normalizarCuit(null), null);
+test('documentoConGuiones: un solo formato, texto con guiones', () => {
+    // Decision de Ultraschall 2026-08-18. Tango exige los guiones en el alta.
+    assert.strictEqual(transforms.documentoConGuiones('30-70985931-1'), '30-70985931-1');
+    assert.strictEqual(transforms.documentoConGuiones('30709859311'), '30-70985931-1', 'normaliza al mismo formato');
+    assert.strictEqual(transforms.documentoConGuiones(''), null);
+    assert.strictEqual(transforms.documentoConGuiones(null), null);
+});
+
+test('documentoConGuiones no le pone mascara de CUIT a un DNI', () => {
+    // El campo CUIT de Tango tambien trae DNIs segun el tipo de documento.
+    assert.strictEqual(transforms.documentoConGuiones('38.901.611'), '38901611');
+    assert.strictEqual(transforms.documentoConGuiones('33835690'), '33835690');
+});
+
+test('el CUIT llega a HubSpot con guiones, listo para el alta en Tango', () => {
+    const c = clientes.find((x) => /^\d{2}-\d{8}-\d$/.test(String(x.CUIT || '')));
+    assert.ok(c);
+    const { propiedades } = mapper.aHubSpot(c);
+    assert.match(propiedades.cuit, /^\d{2}-\d{8}-\d$/);
 });
 
 test('normalizarTelefono conserva el + internacional', () => {
@@ -107,6 +122,23 @@ test('la clave de idempotencia es COD_GVA14', () => {
     assert.strictEqual(mapper.clave(clientes[0]), String(clientes[0].COD_GVA14).trim());
 });
 
+test('name es el nombre de fantasia y la razon social va aparte', () => {
+    // Decision de la planilla de Ultraschall: name = NOM_COM, no RAZON_SOCI.
+    const c = clientes.find((x) => x.NOM_COM && x.RAZON_SOCI && x.NOM_COM !== x.RAZON_SOCI);
+    assert.ok(c, 'la muestra tiene algun cliente con fantasia distinta de la razon social');
+    const { propiedades } = mapper.aHubSpot(c);
+    assert.strictEqual(propiedades.name, c.NOM_COM);
+    assert.strictEqual(propiedades.razon_social, c.RAZON_SOCI);
+});
+
+test('el telefono va a phone, no a un campo de direccion (fila 16 de la planilla)', () => {
+    const c = clientes.find((x) => x.TELEFONO_1);
+    assert.ok(c);
+    const { propiedades } = mapper.aHubSpot(c);
+    assert.ok(propiedades.phone, 'TELEFONO_1 debe ir a phone');
+    assert.strictEqual(propiedades.domicilio_fiscal, undefined, 'nunca a domicilio_fiscal');
+});
+
 test('el mapper exige lookups si el mapeo los usa', () => {
     assert.throws(() => crear(mapeoClientes, null), /no se paso la instancia de lookups/);
 });
@@ -129,9 +161,13 @@ test('mapea los 300 clientes de la muestra sin excepciones', () => {
     let conProblemas = 0;
     const hashes = new Set();
 
+    // La propiedad clave se lee del mapeo, no se hardcodea: los nombres
+    // internos los define la planilla de Ultraschall y pueden cambiar.
+    const propClave = mapeoClientes._meta.claveIdempotencia.hubspot;
+
     for (const c of clientes) {
         const { propiedades, problemas } = mapper.aHubSpot(c);
-        assert.ok(propiedades.tango_cod_cliente, 'todo cliente debe tener la clave');
+        assert.ok(propiedades[propClave], `todo cliente debe tener la clave (${propClave})`);
         assert.strictEqual(typeof propiedades.tango_id_gva14, 'number');
         if (problemas.length) conProblemas++;
         hashes.add(mapper.hash(propiedades));

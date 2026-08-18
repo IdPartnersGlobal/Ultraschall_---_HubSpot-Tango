@@ -16,11 +16,25 @@ const crypto = require('node:crypto');
 // ---------------------------------------------------------------- transforms
 
 const transforms = {
-    /** '30-70985931-1' -> '30709859311'. Solo digitos. */
-    normalizarCuit(v) {
+    /**
+     * Documento del cliente, en UN solo formato: texto con guiones.
+     *
+     * Decision de Ultraschall (2026-08-18): se guarda como texto, no como
+     * numero, y con guiones — Tango los exige en el alta.
+     *
+     * Ojo: el campo CUIT de Tango no siempre trae un CUIT. Segun el tipo de
+     * documento tambien puede traer un DNI ('38.901.611'). Por eso solo se
+     * formatea cuando hay 11 digitos; el resto se deja como digitos limpios
+     * en vez de forzarlo a una mascara que no le corresponde.
+     */
+    documentoConGuiones(v) {
         if (v === null || v === undefined) return null;
-        const d = String(v).replace(/\D/g, '');
-        return d.length ? d : null;
+        const s = String(v).trim();
+        if (s === '') return null;
+        const d = s.replace(/\D/g, '');
+        if (d.length === 0) return null;
+        if (d.length === 11) return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
+        return d; // DNI u otro documento: sin mascara de CUIT
     },
 
     /** Agrega el esquema si falta; descarta lo que no parezca un dominio. */

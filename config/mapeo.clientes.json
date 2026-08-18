@@ -1,7 +1,7 @@
 {
   "_meta": {
     "entidad": "clientes",
-    "estado": "PARCIALMENTE VERIFICADO 2026-08-14 — lookups resueltos para 5 tablas; faltan listas de precios y categoria de IVA.",
+    "estado": "ALINEADO CON LA PLANILLA DE ULTRASCHALL 2026-08-18. Pendiente: equivalencia de RS y EXE en categoria de IVA, y el process de listas de precios.",
     "origen": {
       "sistema": "Tango",
       "process": 2117,
@@ -15,29 +15,39 @@
     },
     "claveIdempotencia": {
       "tango": "COD_GVA14",
-      "hubspot": "tango_cod_cliente",
+      "hubspot": "codigo_tango",
       "unique": true,
-      "nota": "CUIT NO se usa como clave primaria: puede repetirse entre sucursales del mismo grupo."
+      "nota": "CUIT NO se usa como clave primaria: 267 duplicados en el padron (sucursales del mismo grupo). Nombre interno segun la planilla de Ultraschall."
     },
     "convenciones": {
       "prefijo": "tango_",
       "autoritativoTango": "true = el sync pisa el valor en HubSpot en cada corrida. false = solo se escribe si el campo esta vacio.",
       "porcentajeCarga": "% de registros con dato, medido sobre los 5670 clientes reales (2026-08-14).",
       "lookup": "Si un campo declara `lookup`, su valor es un CODIGO de Tango que se traduce al ID interno contra esa tabla auxiliar. Nunca copiar el codigo tal cual: ver ARQUITECTURA.md §5.4.",
-      "lookupPendiente": "Como `lookup`, pero todavia no se consiguio el `process` de la tabla. El campo guarda el codigo sin resolver y NO se puede usar para escribir en Tango."
+      "lookupPendiente": "Como `lookup`, pero todavia no se consiguio el `process` de la tabla. El campo guarda el codigo sin resolver y NO se puede usar para escribir en Tango.",
+      "direccion": "tango->hubspot en todo el maestro de clientes (Fases 1 y 2). La direccion inversa es la Fase 4 (Deal ganado -> pedido), que usa config/defaults.tango.json y los IDs resueltos por lookups."
+    },
+    "fuente": {
+      "planilla": "config/Ultraschall - Tablero de informacion HubSpot - Empresas TANGO.csv",
+      "nota": "La planilla de Ultraschall es la fuente de verdad de los nombres internos y del destino de cada campo. Este JSON agrega lo que la planilla no puede expresar: transforms, tipos y la resolucion codigo -> ID interno (lookups).",
+      "correcciones": [
+        "Fila 16: TELEFONO_1 mapeaba a domicilio_fiscal por una fila corrida. Corregido a phone.",
+        "Filas 30-35: los valores de ejemplo de los campos ID_GVA* son CODIGOS, no IDs internos. Ver ARQUITECTURA.md §5.4."
+      ]
     }
   },
   "campos": [
     {
       "tango": "COD_GVA14",
-      "hubspot": "tango_cod_cliente",
-      "label": "Codigo cliente Tango",
+      "hubspot": "codigo_tango",
+      "label": "codigo_tango",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
       "unique": true,
       "autoritativoTango": true,
-      "notas": "Clave primaria de la integracion."
+      "notas": "Clave primaria de la integracion.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "ID_GVA14",
@@ -47,47 +57,53 @@
       "hsFieldType": "number",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "OBLIGATORIO. Requerido para crear pedidos (ARQUITECTURA.md §5.3). Ocultar a comercial."
+      "notas": "OBLIGATORIO. Requerido para crear pedidos (ARQUITECTURA.md §5.3). Ocultar a comercial.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "RAZON_SOCI",
-      "hubspot": "name",
-      "label": "Nombre de empresa",
+      "hubspot": "razon_social",
+      "label": "Razon Social",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "Propiedad estandar de HubSpot."
+      "notas": "Nombre legal. Obligatorio en Tango. Antes se mapeaba a name; la planilla lo separa.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "NOM_COM",
-      "hubspot": "tango_nombre_comercial",
-      "label": "Nombre comercial",
+      "hubspot": "name",
+      "label": "Nombre de la empresa",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "notas": "La planilla define name = nombre de fantasia (NOM_COM). Suele coincidir con la razon social cuando el cliente no tiene fantasia.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "CUIT",
-      "hubspot": "tango_cuit",
+      "hubspot": "cuit",
       "label": "CUIT",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "transform": "normalizarCuit",
-      "notas": "Viene con guiones: '30-70985931-1'. Definir si se guarda con o sin formato."
+      "transform": "documentoConGuiones",
+      "notas": "DECISION 2026-08-18: un solo formato, TEXTO con guiones (Tango los exige en el alta). NO usar tipo numero: no soporta guiones. Ojo: el campo no siempre trae un CUIT; segun ID_TIPO_DOCUMENTO_GV puede traer un DNI. 267 CUIT duplicados en el padron: no sirve como clave primaria.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "E_MAIL",
-      "hubspot": "tango_email",
-      "label": "Email Tango",
+      "hubspot": "correo_electronico",
+      "label": "Correo electronico",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 26,
       "autoritativoTango": false,
-      "notas": "Solo 25% cargado. Companies no tiene propiedad de email estandar."
+      "notas": "Solo 25% cargado. Companies no tiene propiedad de email estandar.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "WEB",
@@ -97,7 +113,8 @@
       "hsFieldType": "text",
       "autoritativoTango": false,
       "transform": "normalizarUrl",
-      "notas": "Viene sin protocolo: 'www.arrayamed.com'. HubSpot deriva 'domain' de aca."
+      "notas": "Viene sin protocolo: 'www.arrayamed.com'. HubSpot deriva 'domain' de aca.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "TELEFONO_1",
@@ -108,7 +125,8 @@
       "porcentajeCarga": 64,
       "autoritativoTango": false,
       "transform": "normalizarTelefono",
-      "notas": "Formato argentino con parentesis: '(0376)4434782'."
+      "notas": "CORREGIDO 2026-08-18: la fila 16 de la planilla mapeaba TELEFONO_1 a domicilio_fiscal (fila corrida). El telefono va a la propiedad estandar phone.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "TELEFONO_MOVIL_WA",
@@ -116,34 +134,38 @@
       "label": "WhatsApp",
       "tipo": "string",
       "hsFieldType": "text",
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "DOMICILIO",
-      "hubspot": "address",
-      "label": "Direccion",
+      "hubspot": "domicilio_del_consultorio",
+      "label": "Domicilio consultorio",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "DIR_COM",
-      "hubspot": "tango_direccion_comercial",
-      "label": "Direccion comercial",
+      "hubspot": "domicilio_de_envio",
+      "label": "Direccion de entrega",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 99,
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "LOCALIDAD",
-      "hubspot": "city",
-      "label": "Ciudad",
+      "hubspot": "localidad",
+      "label": "Localidad",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 98,
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "C_POSTAL",
@@ -152,7 +174,8 @@
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 50,
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA18_DESCRIPCION",
@@ -162,7 +185,8 @@
       "hsFieldType": "text",
       "porcentajeCarga": 100,
       "autoritativoTango": false,
-      "notas": "CONFIRMADO: GVA18 = provincias (el payload de alta pide ID_GVA18 junto a GVA133_NOM_PAIS)."
+      "notas": "CONFIRMADO: GVA18 = provincias (el payload de alta pide ID_GVA18 junto a GVA133_NOM_PAIS).",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA133_NOM_PAIS",
@@ -171,7 +195,8 @@
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "HABILITADO",
@@ -181,7 +206,8 @@
       "hsFieldType": "booleancheckbox",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "Util para filtrar en listas: clientes inhabilitados no deberian trabajarse."
+      "notas": "Util para filtrar en listas: clientes inhabilitados no deberian trabajarse.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "FECHA_ALTA",
@@ -192,7 +218,8 @@
       "porcentajeCarga": 100,
       "autoritativoTango": true,
       "transform": "fechaTangoAEpoch",
-      "notas": "Formato origen: '2018-08-30T00:00:00'. HubSpot espera epoch ms a medianoche UTC."
+      "notas": "Formato origen: '2018-08-30T00:00:00'. HubSpot espera epoch ms a medianoche UTC.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "DESC_CATEGORIA_IVA",
@@ -202,7 +229,8 @@
       "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "Generar las opciones del select desde los valores distintos del ERP."
+      "notas": "Generar las opciones del select desde los valores distintos del ERP.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA01_DESC_COND",
@@ -211,7 +239,8 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA01_COND_VTA",
@@ -222,7 +251,8 @@
       "porcentajeCarga": 100,
       "autoritativoTango": true,
       "notas": "RESUELTO POR LOOKUP contra condicionesVenta. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
-      "lookup": "condicionesVenta"
+      "lookup": "condicionesVenta",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA10_NOMBRE_LIS",
@@ -231,7 +261,8 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 30,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA10_NRO_DE_LIS",
@@ -242,7 +273,8 @@
       "porcentajeCarga": 87,
       "autoritativoTango": true,
       "notas": "PENDIENTE de lookup: falta el process de GVA10. Hoy guarda el CODIGO, no el ID interno: NO usarlo para crear pedidos hasta resolverlo. Carga real 87% (no 30% como se estimo).",
-      "lookupPendiente": "listasDePrecios"
+      "lookupPendiente": "listasDePrecios",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA05_DESCRIPCION",
@@ -252,7 +284,8 @@
       "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "CORREGIDO 2026-08-14: GVA05 son zonas geograficas (CABA, NEA, NOA, CUYO...), NO vendedores. Antes mapeaba a tango_vendedor."
+      "notas": "CORREGIDO 2026-08-14: GVA05 son zonas geograficas (CABA, NEA, NOA, CUYO...), NO vendedores. Antes mapeaba a tango_vendedor.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA23_DESCRIPCION",
@@ -262,7 +295,8 @@
       "hsFieldType": "select",
       "porcentajeCarga": 88,
       "autoritativoTango": true,
-      "notas": "GVA23 es la tabla de vendedores (verificado 2026-08-14). Candidato a mapear contra hubspot_owner_id. OJO: FACUNDO concentra el 63% de la cartera, confirmar si es un vendedor real o un cajon de sastre."
+      "notas": "GVA23 es la tabla de vendedores (verificado 2026-08-14). Candidato a mapear contra hubspot_owner_id. OJO: FACUNDO concentra el 63% de la cartera, confirmar si es un vendedor real o un cajon de sastre.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA23_CODIGO",
@@ -273,7 +307,8 @@
       "porcentajeCarga": 88,
       "autoritativoTango": true,
       "notas": "RESUELTO POR LOOKUP contra vendedores. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
-      "lookup": "vendedores"
+      "lookup": "vendedores",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA24_DESCRIPCION",
@@ -283,7 +318,8 @@
       "hsFieldType": "select",
       "porcentajeCarga": 86,
       "autoritativoTango": true,
-      "notas": "GVA24 = transporte / forma de envio (verificado 2026-08-14)."
+      "notas": "GVA24 = transporte / forma de envio (verificado 2026-08-14).",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA24_CODIGO",
@@ -294,7 +330,8 @@
       "porcentajeCarga": 86,
       "autoritativoTango": true,
       "notas": "RESUELTO POR LOOKUP contra transportes. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
-      "lookup": "transportes"
+      "lookup": "transportes",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "CUPO_CREDI",
@@ -303,7 +340,8 @@
       "tipo": "number",
       "hsFieldType": "number",
       "porcentajeCarga": 100,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "PORC_DESC",
@@ -312,7 +350,8 @@
       "tipo": "number",
       "hsFieldType": "number",
       "porcentajeCarga": 100,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "MON_CTE",
@@ -322,7 +361,8 @@
       "hsFieldType": "booleancheckbox",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "CORREGIDO: el payload de alta lo manda como boolean (true), no es el nombre de una moneda."
+      "notas": "CORREGIDO: el payload de alta lo manda como boolean (true), no es el nombre de una moneda.",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "GVA05_CODIGO",
@@ -333,28 +373,40 @@
       "porcentajeCarga": 100,
       "autoritativoTango": true,
       "notas": "RESUELTO POR LOOKUP contra zonas. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
-      "lookup": "zonas"
+      "lookup": "zonas",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "COD_CATEGORIA_IVA",
-      "hubspot": "tango_cod_categoria_iva",
-      "label": "ID categoria de IVA",
+      "hubspot": "condicion_iva",
+      "label": "Condicion IVA",
       "tipo": "string",
-      "hsFieldType": "text",
+      "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "PENDIENTE: COD_CATEGORIA_IVA es ALFABETICO (RI, RS, EX, CF, EXE). No se puede castear a number. Falta el process de su tabla para resolver ID_CATEGORIA_IVA. Por ahora se guarda el codigo tal cual.",
-      "lookupPendiente": "categoriaIva"
+      "notas": "La planilla de Ultraschall aporta la equivalencia ID_CATEGORIA_IVA: 1 Resp.Inscripto, 4 Exento, 5 Cons.Final, 6 Monotributo. PENDIENTE: los datos reales tienen 5 codigos (RI, RS, EX, CF, EXE) y falta confirmar a que ID corresponden RS y EXE. Hasta entonces no se puede dar de alta un cliente con esos dos.",
+      "lookupPendiente": "categoriaIva",
+      "direccion": "tango->hubspot",
+      "equivalenciaConocida": {
+        "RI": 1,
+        "EX": 4,
+        "CF": 5,
+        "RS": 6
+      }
     },
     {
       "tango": "COD_TIPO_DOCUMENTO_GV",
-      "hubspot": "tango_id_tipo_documento",
-      "label": "ID tipo de documento",
+      "hubspot": "tipo_de_documento",
+      "label": "Tipo de documento",
       "tipo": "number",
-      "hsFieldType": "number",
+      "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "CONFIRMAR codigo vs ID interno. El alta exige ID_TIPO_DOCUMENTO_GV."
+      "notas": "La planilla dice ID_TIPO_DOCUMENTO_GV = 1 para C.U.I.T.; en la lectura ese tipo viene con COD = 80 (otra confirmacion de que codigo != ID). ATENCION: el 54% de los clientes tiene COD = 0 (\"C.I. POLICIA FEDERAL\"), que en los hechos es \"sin definir\" — 132 de ellos tienen un CUIT bien formado. Para el alta hay que inferir el tipo del formato del documento.",
+      "direccion": "tango->hubspot",
+      "equivalenciaConocida": {
+        "80": 1
+      }
     },
     {
       "tango": "GVA18_CODIGO",
@@ -365,7 +417,8 @@
       "porcentajeCarga": 100,
       "autoritativoTango": true,
       "notas": "RESUELTO POR LOOKUP contra provincias. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
-      "lookup": "provincias"
+      "lookup": "provincias",
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "OBSERVACIONES",
@@ -373,7 +426,8 @@
       "label": "Observaciones Tango",
       "tipo": "string",
       "hsFieldType": "textarea",
-      "autoritativoTango": false
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot"
     },
     {
       "tango": "__hash__",
