@@ -178,3 +178,50 @@ test('mapea los 300 clientes de la muestra sin excepciones', () => {
     assert.ok(hashes.size > clientes.length * 0.95, `hashes distintos: ${hashes.size}/${clientes.length}`);
     assert.ok(conProblemas < clientes.length, 'no todos los clientes pueden tener problemas');
 });
+
+// ------------------------------------------------- dominio y deduplicacion
+
+test('dominioDeMail descarta proveedores gratuitos', () => {
+    // El dominio de un gmail no identifica a la empresa: usarlo como `domain`
+    // haria que HubSpot fusione todos los clientes con gmail.
+    assert.strictEqual(transforms.dominioDeMail('juan@gmail.com'), null);
+    assert.strictEqual(transforms.dominioDeMail('x@hotmail.com.ar'), null);
+    assert.strictEqual(transforms.dominioDeMail('x@fibertel.com.ar'), null);
+    assert.strictEqual(transforms.dominioDeMail('ventas@conmil.com.ar'), 'conmil.com.ar');
+});
+
+test('dominioDeMail descarta el dominio de Ultraschall', () => {
+    // MAIL_DE incluye al vendedor de Ultraschall que recibe copia de los
+    // comprobantes: 903 clientes quedarian con este dominio y se fusionarian.
+    assert.strictEqual(transforms.dominioDeMail('farancibia@ultraschall.com.ar'), null);
+});
+
+test('dominioDeMail toma la primera direccion de una lista', () => {
+    // MAIL_DE viene como "a@x.com; b@y.com; c@z.com"
+    assert.strictEqual(
+        transforms.dominioDeMail('altatecnologia@empresa.com.ar; otro@fibertel.com.ar'),
+        'empresa.com.ar'
+    );
+    assert.strictEqual(transforms.dominioDeMail(''), null);
+    assert.strictEqual(transforms.dominioDeMail('no es un mail'), null);
+});
+
+test('un dominio compartido por dos clientes no se asigna a ninguno', () => {
+    const { calcularDominiosUnicos } = require('../src/lib/syncClientes');
+    const base = clientes[0];
+    const lote = [
+        { ...base, COD_GVA14: 'A1', MAIL_DE: 'uno@compartido.com.ar' },
+        { ...base, COD_GVA14: 'A2', MAIL_DE: 'dos@compartido.com.ar' },
+        { ...base, COD_GVA14: 'A3', MAIL_DE: 'tres@propio.com.ar' },
+    ];
+    const unicos = calcularDominiosUnicos(lote, mapper);
+    assert.ok(unicos.has('propio.com.ar'), 'el dominio de un solo cliente si se asigna');
+    assert.ok(!unicos.has('compartido.com.ar'), 'el compartido NO, porque HubSpot fusionaria');
+});
+
+test('MAIL_DE se guarda como texto, no como email', () => {
+    const c = clientes.find((x) => x.MAIL_DE);
+    if (!c) return;
+    const { propiedades } = mapper.aHubSpot(c);
+    assert.strictEqual(propiedades.tango_mails_comprobantes, String(c.MAIL_DE).trim());
+});

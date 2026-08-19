@@ -60,6 +60,31 @@ const transforms = {
     },
 
     /**
+     * Dominio corporativo a partir de una direccion de mail.
+     *
+     * HubSpot usa `domain` como clave natural para deduplicar companies, asi
+     * que un dominio mal asignado FUSIONA empresas. Por eso descarta:
+     *  - proveedores gratuitos (gmail, hotmail, fibertel...): el dominio no
+     *    identifica a la empresa.
+     *  - ultraschall.com.ar: MAIL_DE es la lista de destinatarios de
+     *    comprobantes e incluye al vendedor de Ultraschall que recibe copia.
+     *    Sin este filtro, 903 clientes quedarian con el mismo dominio.
+     *
+     * Devolver un candidato NO alcanza: el sync ademas descarta los dominios
+     * que aparecen en mas de un cliente (ver syncClientes.dominiosUnicos).
+     */
+    dominioDeMail(v) {
+        if (!v) return null;
+        const primera = String(v).split(/[;,]/)[0].trim().toLowerCase();
+        const m = primera.match(/@([a-z0-9.-]+\.[a-z]{2,})$/);
+        if (!m) return null;
+        const d = m[1];
+        if (/^(gmail|hotmail|yahoo|outlook|live|icloud|speedy|fibertel|arnet|ciudad|uolsinectis|infovia|aol|msn|terra|sion|datafull|velocom)\./.test(d)) return null;
+        if (d === 'ultraschall.com.ar') return null;
+        return d;
+    },
+
+    /**
      * '2018-08-29T00:00:00' -> epoch ms UTC a medianoche.
      * HubSpot exige medianoche UTC en las propiedades de tipo date.
      */
@@ -121,7 +146,11 @@ function crear(mapeo, lookups = null) {
             const problemas = [];
 
             for (const campo of campos) {
-                let valor = registro[campo.tango];
+                // Un campo derivado no existe en Tango: se calcula a partir de
+                // otros. Toma el primero de la lista que tenga dato.
+                let valor = campo.derivadoDe
+                    ? campo.derivadoDe.map((f) => registro[f]).find((v) => v !== null && v !== undefined && String(v).trim() !== '')
+                    : registro[campo.tango];
 
                 if (campo.lookup) {
                     const r = lookups.resolver(campo.lookup, valor, `${mapeo._meta?.entidad} ${registro[mapeo._meta?.claveIdempotencia?.tango] ?? ''}`.trim());

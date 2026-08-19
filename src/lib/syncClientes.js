@@ -14,9 +14,14 @@ const mapeoClientes = require('../../config/mapeo.clientes.json');
  * un script sin levantar el runtime (Tango solo acepta trafico desde Azure,
  * pero la comparacion y el mapeo se pueden auditar desde cualquier lado).
  *
- * Estrategia (ARQUITECTURA.md 8.2): Tango no tiene fecha de modificacion y
- * no se puede preguntar "que cambio". Se lee todo y se escribe solo lo que
- * cambio, comparando un hash por registro guardado en tango_sync_hash.
+ * Estrategia (ARQUITECTURA.md 8.2): se lee el padron completo y se escribe
+ * solo lo que cambio, comparando un hash por registro guardado en
+ * tango_sync_hash. Sin el hash, cada corrida reescribiria 5.670 companies.
+ *
+ * Existe GVA14.FECHA_MODI y permite una lectura incremental (9 s contra 107),
+ * pero depende de una subconsulta SQL no documentada y de que Tango mantenga
+ * el campo. Queda para una segunda etapa: el hash ya evita las escrituras
+ * innecesarias, que es donde estaba el costo real.
  */
 
 const PROP_HASH = 'tango_sync_hash';
@@ -63,6 +68,14 @@ async function correr({ config, log, dryRun = true }) {
     const ahora = new Date();
     const aEscribir = [];
 
+    // El dominio se guarda como SUGERENCIA (tango_dominio_sugerido), nunca en
+    // la propiedad `domain` de HubSpot: HubSpot deduplica companies por domain
+    // y un dominio equivocado FUSIONA empresas. Aun asi se limpia el que
+    // aparece en mas de un cliente, para que la sugerencia sea util. Requiere
+    // ver el lote entero, asi que va en una pasada previa.
+    const dominiosUnicos = calcularDominiosUnicos(registros, m);
+    resumen.dominiosSugeridos = dominiosUnicos.size;
+
     for (const registro of registros) {
         const clave = m.clave(registro);
         if (!clave) {
@@ -72,6 +85,11 @@ async function correr({ config, log, dryRun = true }) {
 
         const { propiedades, problemas } = m.aHubSpot(registro);
         for (const p of problemas) resumen.problemas.push(p);
+
+        // Se cae la sugerencia si el dominio lo comparte otro cliente.
+        if (propiedades.tango_dominio_sugerido && !dominiosUnicos.has(propiedades.tango_dominio_sugerido)) {
+            delete propiedades.tango_dominio_sugerido;
+        }
 
         const hash = m.hash(propiedades);
         const previo = hashPorClave.get(clave);
@@ -106,6 +124,28 @@ async function correr({ config, log, dryRun = true }) {
     return resumen;
 }
 
+/**
+ * Dominios que pertenecen a un solo cliente del lote.
+ *
+ * Un dominio compartido no identifica a nadie. El caso real que motivo esto: MAIL_DE
+ * incluye al vendedor de Ultraschall que recibe copia de los comprobantes,
+ * y 903 clientes quedarian con ultraschall.com.ar. Ese dominio ya lo
+ * descarta el transform; esta pasada cubre el resto.
+ *
+ * @returns {Set<string>} dominios que sirven como sugerencia
+ */
+function calcularDominiosUnicos(registros, m) {
+    const cuenta = new Map();
+    for (const r of registros) {
+        const { propiedades } = m.aHubSpot(r);
+        const d = propiedades.tango_dominio_sugerido;
+        if (d) cuenta.set(d, (cuenta.get(d) || 0) + 1);
+    }
+    const unicos = new Set();
+    for (const [d, n] of cuenta) if (n === 1) unicos.add(d);
+    return unicos;
+}
+
 /** Lee y valida la configuracion. Falla temprano y claro si falta algo. */
 function leerConfig(env = process.env) {
     const faltan = [];
@@ -122,4 +162,4 @@ function leerConfig(env = process.env) {
     return cfg;
 }
 
-module.exports = { correr, leerConfig, PROP_HASH, PROP_SYNC };
+module.exports = { correr, leerConfig, calcularDominiosUnicos, PROP_HASH, PROP_SYNC };

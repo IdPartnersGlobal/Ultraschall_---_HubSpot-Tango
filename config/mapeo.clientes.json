@@ -1,7 +1,7 @@
 {
   "_meta": {
     "entidad": "clientes",
-    "estado": "ALINEADO CON LA PLANILLA DE ULTRASCHALL 2026-08-18. Pendiente: equivalencia de RS y EXE en categoria de IVA, y el process de listas de precios.",
+    "estado": "ALINEADO CON LA PLANILLA + AMPLIADO 2026-08-19 con los campos de identidad. Pendiente: listas de precios y categoria de IVA.",
     "origen": {
       "sistema": "Tango",
       "process": 2117,
@@ -34,6 +34,16 @@
         "Fila 16: TELEFONO_1 mapeaba a domicilio_fiscal por una fila corrida. Corregido a phone.",
         "Filas 30-35: los valores de ejemplo de los campos ID_GVA* son CODIGOS, no IDs internos. Ver ARQUITECTURA.md §5.4."
       ]
+    },
+    "identidad": {
+      "nota": "Campos que sostienen la identidad del registro y evitan duplicados.",
+      "claveUnica": "codigo_tango (COD_GVA14) — 5670 valores, sin duplicados. Es el idProperty del batch upsert.",
+      "secundarias": [
+        "tango_id_gva14 — ID interno, imprescindible para crear pedidos.",
+        "cuit — util para conciliar a mano, NO como clave (142 valores repetidos).",
+        "tango_dominio_sugerido — candidato a , para revision manual. NO se escribe en  porque un dominio equivocado fusiona companies."
+      ],
+      "riesgoConocido": "HubSpot fusiona companies que comparten . Por eso la integracion NUNCA escribe esa propiedad: solo sugiere un candidato en tango_dominio_sugerido."
     }
   },
   "campos": [
@@ -91,7 +101,7 @@
       "porcentajeCarga": 100,
       "autoritativoTango": true,
       "transform": "documentoConGuiones",
-      "notas": "DECISION 2026-08-18: un solo formato, TEXTO con guiones (Tango los exige en el alta). NO usar tipo numero: no soporta guiones. Ojo: el campo no siempre trae un CUIT; segun ID_TIPO_DOCUMENTO_GV puede traer un DNI. 267 CUIT duplicados en el padron: no sirve como clave primaria.",
+      "notas": "DECISION 2026-08-18: un solo formato, TEXTO con guiones (Tango los exige en el alta). No siempre es un CUIT: segun ID_TIPO_DOCUMENTO_GV puede traer DNI o CUIL. NO sirve como clave: 142 valores se repiten en 267 clientes, y no son sucursales sino placeholders (11111111 lo usan 44 clientes) e instituciones grandes con varias cuentas.",
       "direccion": "tango->hubspot"
     },
     {
@@ -106,6 +116,16 @@
       "direccion": "tango->hubspot"
     },
     {
+      "tango": "MAIL_DE",
+      "hubspot": "tango_mails_comprobantes",
+      "label": "Mails de comprobantes",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 82,
+      "autoritativoTango": true,
+      "notas": "Lista de destinatarios a los que Tango envia los comprobantes, separados por \";\". NO es el mail del cliente: incluye al vendedor de Ultraschall que recibe copia (903 clientes tienen una direccion @ultraschall.com.ar). Se guarda como texto informativo, no como email."
+    },
+    {
       "tango": "WEB",
       "hubspot": "website",
       "label": "Sitio web",
@@ -117,24 +137,31 @@
       "direccion": "tango->hubspot"
     },
     {
+      "tango": "__dominio__",
+      "hubspot": "tango_dominio_sugerido",
+      "label": "Dominio sugerido",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 8,
+      "autoritativoTango": true,
+      "derivadoDe": [
+        "MAIL_DE",
+        "E_MAIL"
+      ],
+      "transform": "dominioDeMail",
+      "soloSiUnico": true,
+      "notas": "DERIVADO del primer mail de MAIL_DE. NO se escribe en la propiedad  de HubSpot a proposito: HubSpot deduplica companies por domain, y un dominio equivocado FUSIONA empresas. La derivacion acierta la mayoria de las veces pero no siempre: MAIL_DE es una lista de destinatarios de comprobantes, asi que la primera direccion puede ser de un proveedor de internet (fibercorp, satlink) o de otra empresa. Se deja como sugerencia para que comercial la revise y la promueva a  a mano. Ademas se descarta todo dominio compartido por mas de un cliente."
+    },
+    {
       "tango": "TELEFONO_1",
       "hubspot": "phone",
       "label": "Telefono",
       "tipo": "string",
       "hsFieldType": "phonenumber",
-      "porcentajeCarga": 64,
+      "porcentajeCarga": 32,
       "autoritativoTango": false,
       "transform": "normalizarTelefono",
       "notas": "CORREGIDO 2026-08-18: la fila 16 de la planilla mapeaba TELEFONO_1 a domicilio_fiscal (fila corrida). El telefono va a la propiedad estandar phone.",
-      "direccion": "tango->hubspot"
-    },
-    {
-      "tango": "TELEFONO_MOVIL_WA",
-      "hubspot": "tango_whatsapp",
-      "label": "WhatsApp",
-      "tipo": "string",
-      "hsFieldType": "text",
-      "autoritativoTango": false,
       "direccion": "tango->hubspot"
     },
     {
@@ -153,7 +180,7 @@
       "label": "Direccion de entrega",
       "tipo": "string",
       "hsFieldType": "text",
-      "porcentajeCarga": 99,
+      "porcentajeCarga": 85,
       "autoritativoTango": false,
       "direccion": "tango->hubspot"
     },
@@ -163,7 +190,7 @@
       "label": "Localidad",
       "tipo": "string",
       "hsFieldType": "text",
-      "porcentajeCarga": 98,
+      "porcentajeCarga": 99,
       "autoritativoTango": false,
       "direccion": "tango->hubspot"
     },
@@ -173,7 +200,7 @@
       "label": "Codigo postal",
       "tipo": "string",
       "hsFieldType": "text",
-      "porcentajeCarga": 50,
+      "porcentajeCarga": 85,
       "autoritativoTango": false,
       "direccion": "tango->hubspot"
     },
