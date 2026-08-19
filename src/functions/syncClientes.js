@@ -17,8 +17,24 @@ const sync = require('../lib/syncClientes');
 
 const CRON = process.env.SYNC_CLIENTES_CRON || '0 0 3 * * *';
 
+/**
+ * Interruptor explicito. Apagado por defecto: desplegar este archivo NO
+ * hace que el sync empiece a correr solo. Para activarlo hay que poner
+ * SYNC_CLIENTES_ENABLED=true en las Application Settings, a proposito.
+ *
+ * Existe para que subir codigo y activar un proceso que escribe en el CRM
+ * sean dos decisiones separadas.
+ */
+const HABILITADO = String(process.env.SYNC_CLIENTES_ENABLED || 'false').toLowerCase() === 'true';
+
 async function handler(_timer, context) {
     const log = logger.crear(context, 'SYNC-CLI');
+
+    if (!HABILITADO) {
+        context.log('[SYNC-CLI] deshabilitado (SYNC_CLIENTES_ENABLED != true). No se hace nada.');
+        return;
+    }
+
     log.inicio('Sincronizacion de clientes Tango -> HubSpot Companies');
 
     try {
@@ -60,4 +76,4 @@ async function handler(_timer, context) {
 
 app.timer('syncClientes', { schedule: CRON, runOnStartup: false, handler });
 
-module.exports = { handler, CRON };
+module.exports = { handler, CRON, HABILITADO };
