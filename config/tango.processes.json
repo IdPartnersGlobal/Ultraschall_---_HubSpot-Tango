@@ -11,7 +11,9 @@
     "porFiltro": "GET Api/GetByFilter?process={p}&filtroSql=WHERE {condicion}  -> devuelve { list: [...] }",
     "alta": "POST Api/Create?process={p}",
     "_filtroSql": "El filtro DEBE incluir la palabra WHERE. Sin ella, SQL Server tira 'Incorrect syntax'. Vacio devuelve todo.",
-    "_baja_modificacion": "Api/Delete y Api/Update figuran en la lista de endpoints de Tango pero NO se probaron: son destructivos y esto es produccion."
+    "_baja_modificacion": "Api/Delete y Api/Update figuran en la lista de endpoints de Tango pero NO se probaron: son destructivos y esto es produccion.",
+    "_proyecciones": "Api/Get y Api/GetByFilter devuelven 116 campos (vista). Api/GetById devuelve 147, e incluye CONTACTOS, DIRECCION_ENTREGA, FECHA_MODI y los ID_ internos ya resueltos.",
+    "_incremental": "GVA14.FECHA_MODI existe pero NO esta en la vista: filtrar directo da Invalid column name. Hay que ir a la tabla base: WHERE ID_GVA14 IN (SELECT ID_GVA14 FROM GVA14 WHERE FECHA_MODI > '...')"
   },
   "entidades": {
     "clientes": {
@@ -35,6 +37,16 @@
       "process": 19845,
       "tabla": "GVA21",
       "uso": "alta"
+    },
+    "contactos": {
+      "process": 2117,
+      "tabla": "GVA27",
+      "registros": 5875,
+      "id": "ID_GVA27",
+      "codigo": null,
+      "uso": "lectura",
+      "comoSeObtiene": "SOLO en el array CONTACTOS de Api/GetById?process=2117&id={ID_GVA14}. Api/Get y Api/GetByFilter usan una vista de 116 campos que no lo incluye.",
+      "costo": "1 request por cliente; 5670 en ~7,5 min con concurrencia 16"
     }
   },
   "auxiliares": {
@@ -160,7 +172,7 @@
     }
   },
   "registrosDePrueba": {
-    "_nota": "Clientes creados en PRODUCCION durante el relevamiento del 2026-08-18 para descubrir la equivalencia de tipos de documento. BORRAR cuando se pueda.",
+    "_nota": "Clientes creados durante el relevamiento del 2026-08-18. El entorno es una COPIA del ERP, no produccion: borrarlos es tramite. Requiere DELETE habilitado en el proxy (agregado 2026-08-19, falta desplegar).",
     "codigos": [
       "999902",
       "999903",

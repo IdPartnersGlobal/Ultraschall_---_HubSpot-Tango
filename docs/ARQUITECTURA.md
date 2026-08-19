@@ -292,6 +292,19 @@ Así el mapeo (`config/mapeo.*.json`) queda limpio: sólo lo que realmente viaja
 
 ⚠️ Los valores actuales de `defaults.tango.json` salieron de los ejemplos de Postman. **Antes de producción los tiene que validar administración**, sobre todo talonario, depósito, alícuotas de IVA y clasificaciones SIAP.
 
+### 5.9 🟢 El entorno de Tango es una COPIA, no producción
+
+Confirmado por Matías el 2026-08-19: **la instancia contra la que trabajamos es una copia del ERP, no el sistema productivo.**
+
+Buena parte de las precauciones de este documento se tomaron asumiendo producción. Con la copia:
+
+- Escribir registros de prueba es barato: se crean, se miden y se borran.
+- Los 8 clientes `999902`-`999909` del relevamiento de tipos de documento se borran sin ceremonia (§5.4).
+- El sondeo de `process` y las consultas pesadas dejan de ser un riesgo operativo.
+- **D2 (proxy anónimo) baja de severidad mientras apunte acá.** Sigue siendo bloqueante antes de apuntar a producción: ver §10.0, que no cambia como diseño, sólo como urgencia.
+
+⚠️ Lo que **no** cambia: los datos son reales (5.670 clientes con razón social, CUIT y contactos). Sigue aplicando el cuidado con datos personales — ver §10 y la nota sobre `test/fixtures/`.
+
 ### 5.6 ⚠️ Tango sólo es accesible desde Azure
 
 El ERP está **restringido por IP: sólo acepta tráfico desde la Function App**. No se puede pegarle a Tango desde una máquina de desarrollo, ni desde Postman apuntando directo a `138.99.6.77:17000`.
@@ -451,13 +464,45 @@ Ante un conflicto de nombres, gana la planilla.
 | `CUIT` | 100% | 5.401 | ⚠️ **267 duplicados.** Confirma que no puede ser clave primaria (sucursales con mismo CUIT). Sirve sólo como clave secundaria de conciliación. |
 | `E_MAIL` | 26% | 1.465 | ❌ Inservible como clave. Ver §7.3. |
 
-### 7.3 ¿Contacts? (Fase 3)
+### 7.3 Contacts (Fase 3) — ⛔ RECOMENDACIÓN ANTERIOR REVERTIDA
 
-Dato duro del relevamiento: **`E_MAIL` está cargado en apenas el 25% de los clientes** y `TELEFONO_1` en el 64%.
+> **Mi recomendación previa era no generar Contacts, y estaba basada en una fuente equivocada.** Yo miré `E_MAIL` de `GVA14` (26% cargado) y concluí que no había datos de personas. **Los contactos existen y están en otra tabla**: `GVA27`, que llega en el array `CONTACTOS` de `Api/GetById`. `GVA14` efectivamente no tiene personas — pero `GVA27` sí.
 
-`GVA14` es una tabla de *cuentas*, no de personas: un registro = una empresa, con un mail genérico (`consultas@...`). No hay nombre y apellido de contacto.
+**Relevado el 2026-08-19 sobre los 5.670 clientes:**
 
-**Recomendación:** no generar Contacts desde `GVA14`. Los contactos los carga/capta comercial en HubSpot y se asocian a la Company sincronizada. 🟡 Confirmar.
+| Dato | Valor |
+|---|---|
+| Contactos totales | **5.875** |
+| Clientes con al menos un contacto | **3.428 (60,5%)** |
+| `NOMBRE` cargado | **100%** |
+| `E_MAIL_CONTACTO` | 74% (vs. 26% en `GVA14`) |
+| `TELEFONO` | 73% |
+| `CARGO` | 27% |
+| `TELEFONO_MOVIL` | 0% — no se usa |
+
+**Cómo se obtienen:** sólo por `GET Api/GetById?process=2117&id={ID_GVA14}`. Ni `Api/Get` ni `Api/GetByFilter` los devuelven: esos usan una vista reducida de 116 campos, mientras `GetById` proyecta 147. Cuesta **1 request por cliente**: los 5.670 tardan ~7,5 min con concurrencia 16 (12,6 req/s), sin errores.
+
+Mapeo detallado: **`config/mapeo.contactos.json`**.
+
+#### ⚠️ El email no sirve como clave
+
+HubSpot trata el email como clave natural de Contacts: dos contactos con el mismo email **se fusionan**.
+
+- 1.518 contactos (26%) **no tienen** email.
+- **288 direcciones se repiten en 679 contactos.**
+- 58 tienen formato inválido.
+
+Lo importante es *por qué* se repiten: **no son la misma persona cargada dos veces, son personas distintas compartiendo una casilla genérica** (`ventas@`, `info@`). Ejemplo real: `ventas@conmil.com.ar` lo comparten "Ceitlin Lucas" y "Lucila Tornadore" del mismo cliente. De los 288 casos, 173 son dentro del mismo cliente y 115 entre clientes distintos.
+
+Si se asigna el email compartido a todos, **HubSpot los fusiona y se pierden personas**.
+
+**Estrategia:** la clave de idempotencia es `tango_id_gva27` (5.875 valores, todos únicos). El `email` se asigna a **un solo contacto por dirección** — el que tenga `DEFECTO='S'`, y si ninguno, el de menor `ID_GVA27`. Al resto se le deja `email` vacío y la dirección va a `tango_email_contacto`, que no es clave y por lo tanto no fusiona.
+
+#### ⚠️ `NOMBRE` no se puede partir en nombre y apellido
+
+Tango tiene un solo campo y el orden es inconsistente: `"Carolina Molina"` (nombre apellido) y `"Levy Patricia"` (apellido nombre) conviven. Además hay 596 contactos de una sola palabra y varios que son razones sociales (`"CIRAMED - Electromedicina"`).
+
+**Propuesta:** volcar el nombre completo a `lastname` y dejar `firstname` vacío. HubSpot muestra el nombre completo igual, y no se inventa un split que se equivoca en silencio. 🟡 Confirmar.
 
 ### 7.4 Vendedor → Owner
 
@@ -500,18 +545,33 @@ Es un buen candidato a propiedad de segmentación en HubSpot, no a owner.
 
 ### 8.2 Full vs. incremental
 
-✅ **DECIDIDO (2026-08-14). Ojo: la razón cambió respecto de la versión anterior de este documento.**
+> ⛔ **CORRECCIÓN (2026-08-19). Este documento afirmó dos veces que no existe fecha de modificación. Es falso: existe `GVA14.FECHA_MODI`.**
+>
+> El error fue mío y de método: sondeé `FECHA_MODIF`, `FEC_MODIF`, `FECHA_ULT_MODIF` y `ULT_MODIF`, y las cuatro dieron `Invalid column name`. El campo real es **`FECHA_MODI`, sin la F final**. Apareció solo, en la proyección de 147 campos de `Api/GetById` (§7.3). Cuatro variantes probadas no son una prueba de inexistencia.
 
-Sí existe filtrado del lado del servidor (`Api/GetByFilter`, §5.8). Pero eso **no** habilita el sync incremental, porque falta la otra mitad:
+✅ **El sync incremental SÍ es posible.** Verificado el 2026-08-19:
 
-1. **No hay fecha de modificación.** Los campos de fecha de `GVA14` son `FECHA_ALTA`, `FECHA_INHA` y `FECHA_VTO`.
-2. Como `filtroSql` es SQL crudo contra la tabla, se pudo **sondear si existía una columna oculta** que la vista no expone: se probaron `FECHA_MODIF`, `FEC_MODIF`, `FECHA_ULT_MODIF` y `ULT_MODIF`. SQL Server respondió `Invalid column name` a las cuatro. **La columna no existe, ni oculta.**
+| Consulta | Resultado | Tiempo |
+|---|---|---|
+| Lectura full (sin filtro) | 5.678 clientes | **107 s** |
+| `FECHA_MODI > '2026-01-01'` | 558 clientes | **9 s** |
+| `FECHA_MODI > '2026-08-01'` | 1 cliente | 7 s |
 
-Se puede filtrar, pero no hay por qué campo preguntar "¿qué cambió desde ayer?".
+**Detalle importante:** `FECHA_MODI` **no está en la vista** que consulta `Api/GetByFilter` (filtrar por él directo da `Invalid column name`). Hay que ir contra la tabla base con una subconsulta:
 
-**Estrategia: full read desde Tango + escritura diferencial por hash a HubSpot.** Sigue siendo la única opción para el sync masivo.
+```sql
+WHERE ID_GVA14 IN (SELECT ID_GVA14 FROM GVA14 WHERE FECHA_MODI > '{ultimaCorrida}')
+```
 
-> Donde `Api/GetByFilter` **sí** cambia el diseño es en la Fase 4: resolver un cliente puntual tarda <1 s, así que `dealToTango` no necesita ningún cache de companies (§5.8).
+**Estrategia propuesta:**
+
+- **Incremental** en cada corrida: sólo los modificados desde la última. De 107 s a ~9 s.
+- **Full de reconciliación** periódica (semanal), porque no está verificado que Tango actualice `FECHA_MODI` en todos los casos. El hash sigue siendo la red de seguridad: aunque el incremental traiga de más, sólo se escribe lo que cambió.
+- El hash en `tango_sync_hash` se mantiene: es lo que evita reescribir 5.670 companies por corrida.
+
+⚠️ El incremental depende de la subconsulta SQL, que es un mecanismo no documentado y frágil. Si algún día deja de funcionar, el full read sigue siendo el camino de respaldo.
+
+> Donde `Api/GetByFilter` también cambia el diseño es en la Fase 4: resolver un cliente puntual tarda <1 s, así que `dealToTango` no necesita ningún cache de companies (§5.8).
 
 El hash por registro se guarda en `tango_sync_hash`; sólo se manda a HubSpot lo que cambió. Sin eso, cada corrida escribiría 5.670 companies y quemaría la cuota de API de HubSpot al pedo.
 

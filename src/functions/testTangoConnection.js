@@ -5,8 +5,12 @@ const { app } = require('@azure/functions');
 // ⚠️ DEUDA D2 (docs/ARQUITECTURA.md §10): authLevel 'anonymous' expone el ERP a internet sin
 // autenticación, incluido el POST → Api/Create. Se mantiene sólo durante el relevamiento.
 // Antes de producción pasar a 'function' (header 'x-functions-key' o query '?code=...').
+// ⚠️ DELETE y PUT habilitados el 2026-08-19 para poder limpiar los registros de
+// prueba (Api/Delete, Api/Update). Suman superficie destructiva a un endpoint
+// que sigue siendo anonimo: aceptable mientras apunte a la COPIA del ERP, no a
+// produccion. Antes de apuntar a produccion, sacarlos o cerrar D2.
 app.http('testTangoConnection', {
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'DELETE', 'PUT'],
     authLevel: 'anonymous',
     handler: async (request, context) => {
         const requestId = Math.random().toString(36).substring(2, 9).toUpperCase();
@@ -46,8 +50,9 @@ app.http('testTangoConnection', {
             // 2. PROCESAR URL ENTRANTE Y CONSTRUIR DESTINO
             const incomingUrl = new URL(request.url);
             
-            // Lógica inteligente: Si es POST por defecto asume 'Api/Create', si es GET asume 'Api/Get'
-            const defaultPath = reqMethod === 'POST' ? 'Api/Create' : 'Api/Get';
+            // Ruta por defecto segun el metodo. Se puede forzar con ?tangoPath=
+            const rutaPorMetodo = { POST: 'Api/Create', DELETE: 'Api/Delete', PUT: 'Api/Update' };
+            const defaultPath = rutaPorMetodo[reqMethod] || 'Api/Get';
             const tangoPath = incomingUrl.searchParams.get('tangoPath') || defaultPath;
             
             incomingUrl.searchParams.delete('tangoPath'); // Lo borramos para que no ensucie a Tango

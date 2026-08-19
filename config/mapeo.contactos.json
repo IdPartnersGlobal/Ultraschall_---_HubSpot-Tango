@@ -1,0 +1,210 @@
+{
+  "_meta": {
+    "entidad": "contactos",
+    "estado": "PROPUESTA 2026-08-19 — pendiente de dos definiciones (ver decisionesPendientes)",
+    "origen": {
+      "sistema": "Tango",
+      "process": 2117,
+      "tabla": "GVA27",
+      "comoSeObtiene": "SOLO por GET Api/GetById?process=2117&id={ID_GVA14}, en el array CONTACTOS. Ni Api/Get ni Api/GetByFilter lo devuelven: usan una vista reducida de 116 campos.",
+      "costo": "1 request por cliente. Los 5670 tardan ~7,5 min con concurrencia 16 (12,6 req/s).",
+      "medido": {
+        "contactosTotales": 5875,
+        "clientesConContactos": 3428,
+        "porcentajeClientesConContactos": 60.5,
+        "promedioPorClienteQueTiene": 1.7
+      }
+    },
+    "destino": {
+      "sistema": "HubSpot",
+      "objeto": "contacts",
+      "grupoPropiedades": "tango_erp",
+      "asociacion": "Cada contacto se asocia a la Company cuyo codigo_tango = COD_CLIENT (equivale a ID_GVA14 del contacto)."
+    },
+    "claveIdempotencia": {
+      "tango": "ID_GVA27",
+      "hubspot": "tango_id_gva27",
+      "unique": true,
+      "nota": "NO se usa el email como clave. 1518 contactos (26%) no tienen, y 288 emails se repiten en 679 contactos. Ver problemaDelEmail."
+    },
+
+    "problemaDelEmail": {
+      "resumen": "HubSpot trata el email como clave natural de Contacts: dos contactos con el mismo email se fusionan en uno.",
+      "datos": {
+        "conEmail": 4357,
+        "sinEmail": 1518,
+        "formatoInvalido": 58,
+        "emailsRepetidos": 288,
+        "contactosAfectados": 679,
+        "repetidosDentroDelMismoCliente": 173,
+        "repetidosEntreClientesDistintos": 115
+      },
+      "hallazgo": "Los repetidos NO son la misma persona cargada dos veces: son personas DISTINTAS compartiendo una casilla generica (ventas@, info@, bioingenieria.durand@). Ejemplo: ventas@conmil.com.ar lo comparten 'Ceitlin Lucas' y 'Lucila Tornadore' del mismo cliente.",
+      "consecuencia": "Si se asigna el email compartido a todos, HubSpot los fusiona y se PIERDEN personas.",
+      "estrategiaPropuesta": "Asignar `email` a un solo contacto por direccion (el que tenga DEFECTO='S', y si ninguno, el de menor ID_GVA27). Al resto se le deja `email` vacio y la direccion queda en la propiedad tango_email_contacto, que no es clave. Asi se conservan las 5875 personas como contactos distintos y no se pierde el dato."
+    },
+
+    "decisionesPendientes": [
+      "EMAIL: confirmar la estrategia de arriba, o definir otra (ej. no crear contactos sin email propio).",
+      "NOMBRE: Tango tiene un unico campo NOMBRE y el orden es inconsistente ('Carolina Molina' vs 'Levy Patricia'), ademas de 596 contactos con una sola palabra y varios que son razones sociales ('CIRAMED - Electromedicina'). No hay forma confiable de partirlo en firstname/lastname. Ver campoNombre."
+    ],
+
+    "campoNombre": {
+      "distribucion": { "1 palabra": 596, "2 palabras": 3339, "3 palabras": 1575, "4+": 361 },
+      "opcionA": "Todo el nombre a `lastname` y `firstname` vacio. No inventa nada; HubSpot muestra el nombre completo igual. Es lo mas fiel al origen.",
+      "opcionB": "Split best-effort: primera palabra a firstname, resto a lastname. Queda mas prolijo pero se equivoca en los casos 'Apellido Nombre'.",
+      "recomendacion": "opcionA. El dato de Tango no distingue nombre de apellido; inventarlo genera errores silenciosos que despues nadie revisa. El nombre completo queda ademas en tango_nombre_contacto."
+    }
+  },
+
+  "campos": [
+    {
+      "tango": "ID_GVA27",
+      "hubspot": "tango_id_gva27",
+      "label": "ID contacto Tango",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "unique": true,
+      "autoritativoTango": true,
+      "notas": "Clave de la integracion. 5875 valores, todos unicos."
+    },
+    {
+      "tango": "ID_GVA14",
+      "hubspot": "tango_id_gva14",
+      "label": "ID cliente Tango",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Cliente al que pertenece. Se usa para asociar el contacto a la Company."
+    },
+    {
+      "tango": "COD_CLIENT",
+      "hubspot": "tango_cod_cliente",
+      "label": "Codigo cliente Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Equivale a codigo_tango de la Company. Es por donde se arma la asociacion."
+    },
+    {
+      "tango": "NOMBRE",
+      "hubspot": "lastname",
+      "label": "Apellido y nombre",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Ver _meta.campoNombre: Tango tiene un solo campo y el orden es inconsistente. Se vuelca completo aca en vez de adivinar el split."
+    },
+    {
+      "tango": "NOMBRE",
+      "hubspot": "tango_nombre_contacto",
+      "label": "Nombre en Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "Copia fiel del campo de Tango, por si despues se decide otro criterio de split."
+    },
+    {
+      "tango": "E_MAIL_CONTACTO",
+      "hubspot": "email",
+      "label": "Correo electronico",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 74,
+      "autoritativoTango": false,
+      "soloSiUnico": true,
+      "notas": "OJO: solo se escribe cuando la direccion NO esta repetida en otro contacto (ver _meta.problemaDelEmail). 58 tienen formato invalido y se descartan."
+    },
+    {
+      "tango": "E_MAIL_CONTACTO",
+      "hubspot": "tango_email_contacto",
+      "label": "Email en Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 74,
+      "autoritativoTango": true,
+      "notas": "Siempre se escribe, tambien cuando el email esta compartido. No es clave, asi que no fusiona contactos."
+    },
+    {
+      "tango": "TELEFONO",
+      "hubspot": "phone",
+      "label": "Telefono",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 73,
+      "autoritativoTango": false,
+      "transform": "normalizarTelefono"
+    },
+    {
+      "tango": "CARGO",
+      "hubspot": "jobtitle",
+      "label": "Cargo",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 27,
+      "autoritativoTango": false
+    },
+    {
+      "tango": "DEFECTO",
+      "hubspot": "tango_contacto_defecto",
+      "label": "Contacto por defecto",
+      "tipo": "bool",
+      "hsFieldType": "checkbox",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true,
+      "notas": "'S'/'N'. Se usa para elegir quien se queda con el email cuando esta compartido."
+    },
+    {
+      "tango": "PAGADOR_HABITUAL",
+      "hubspot": "tango_pagador_habitual",
+      "label": "Pagador habitual",
+      "tipo": "bool",
+      "hsFieldType": "checkbox",
+      "porcentajeCarga": 100,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "OBSERVACIO",
+      "hubspot": "tango_observaciones",
+      "label": "Observaciones Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 8,
+      "autoritativoTango": true
+    },
+    {
+      "tango": "__hash__",
+      "hubspot": "tango_sync_hash",
+      "label": "Hash de sincronizacion",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": true,
+      "notas": "Campo tecnico, igual que en companies."
+    },
+    {
+      "tango": "__timestamp__",
+      "hubspot": "tango_ultima_sync",
+      "label": "Ultima sincronizacion",
+      "tipo": "datetime",
+      "hsFieldType": "date",
+      "autoritativoTango": true,
+      "notas": "Campo tecnico."
+    }
+  ],
+
+  "sinMapear": {
+    "motivo": "Campos operativos de Tango sin valor para el CRM, o vacios en el padron real.",
+    "campos": [
+      "TELEFONO_MOVIL (2 de 5875 cargados: en los hechos no se usa)",
+      "NUMERO_DOCUMENTO y TIPO_DOCUMENTO / ID_TIPO_DOCUMENTO (6 de 5875)",
+      "ENVIA_PDF_COTIZACION, ENVIA_PDF_RECIBO, ENVIA_PDF_PEDIDO (parametria de envio de comprobantes)",
+      "INVITA_WEB_CLIENTES, USUARIO_TIENDA (portal web de Tango)",
+      "FILLER"
+    ]
+  }
+}
