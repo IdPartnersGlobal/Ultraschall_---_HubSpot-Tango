@@ -55,6 +55,7 @@ async function handler(_timer, context) {
             'a crear': r.aCrear,
             'a actualizar': r.aActualizar,
             'sin cambios': r.sinCambios,
+            'campos respetados (migracion manual)': r.respetados,
             'escritos': r.dryRun ? '(dry-run)' : r.escritos,
             'con problemas de mapeo': r.problemas.length,
             'fallidos': r.fallidos.length,

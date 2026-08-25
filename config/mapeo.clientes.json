@@ -1,7 +1,7 @@
 {
   "_meta": {
     "entidad": "clientes",
-    "estado": "ALINEADO CON LA PLANILLA + AMPLIADO 2026-08-19 con los campos de identidad. Pendiente: listas de precios y categoria de IVA.",
+    "estado": "ALINEADO CON LA PLANILLA (2026-08-19) y CON LA MIGRACION MANUAL DE ULTRASCHALL (2026-08-21, ver ARQUITECTURA.md 7.5). Pendiente: listas de precios.",
     "origen": {
       "sistema": "Tango",
       "process": 2117,
@@ -18,6 +18,9 @@
       "hubspot": "codigo_tango",
       "unique": true,
       "nota": "CUIT NO se usa como clave primaria: 267 duplicados en el padron (sucursales del mismo grupo). Nombre interno segun la planilla de Ultraschall."
+    },
+    "removidos": {
+      "domain": "REMOVIDO 2026-08-24 por decision de Matias. `domain` es la SEGUNDA clave de matcheo de HubSpot: la aplica sola, sin que se la pidamos, y dos companies que lo comparten SE FUSIONAN. Mientras se escribia habia que filtrar por unicidad sobre el padron entero para que no fusionara clientes distintos (caso real: arrayamed.com en 'ARCANA SRL' y 'ARCANA SRL (Medinor SRL / Armando Arraya)'). Sacandolo, la identidad del sync queda reducida a una sola llave que controlamos nosotros: codigo_tango. Alcanzaba al 6% de las companies. El dato del sitio web NO se pierde: sigue yendo a `website`, que es inerte. El dominio derivado de los mails sigue en `tango_dominio_sugerido` para que comercial lo promueva a mano. Se pierden la asociacion automatica contacto->empresa por dominio y el enriquecimiento de HubSpot. Ver ARQUITECTURA.md 7.2."
     },
     "convenciones": {
       "prefijo": "tango_",
@@ -41,9 +44,11 @@
       "secundarias": [
         "tango_id_gva14 — ID interno, imprescindible para crear pedidos.",
         "cuit — util para conciliar a mano, NO como clave (142 valores repetidos).",
-        "tango_dominio_sugerido — candidato a , para revision manual. NO se escribe en  porque un dominio equivocado fusiona companies."
+        "domain — se escribe desde WEB, solo si ningun otro cliente declara el mismo dominio.",
+        "tango_dominio_sugerido — candidato derivado de los mails, para revision manual. Nunca se promueve solo a domain."
       ],
-      "riesgoConocido": "HubSpot fusiona companies que comparten . Por eso la integracion NUNCA escribe esa propiedad: solo sugiere un candidato en tango_dominio_sugerido."
+      "riesgoConocido": "HubSpot fusiona companies que comparten `domain`. ACTUALIZADO 2026-08-21: la integracion SI escribe `domain` (decision de Matias, para alinearse con la migracion manual que ya lo carga), pero solo cuando el dominio pertenece a un unico cliente del lote. La verificacion la hace syncClientes.calcularDominiosUnicos sobre el padron entero, no registro por registro: mirar un cliente aislado no alcanza para saber si su dominio esta repetido. En la muestra de 300 hay un caso real (arrayamed.com en dos clientes) y ninguno de los dos recibe domain.",
+      "porQueNoDerivarDominioDelMail": "Se midio el 2026-08-21: sobre los clientes que tienen WEB y mail, la derivacion desde MAIL_DE contradice al sitio web declarado en 5 de 13 (38%). MAIL_DE es la lista de destinatarios de comprobantes y la primera direccion puede ser de un proveedor de internet o de otra empresa. Por eso `domain` sale de WEB y no del mail."
     }
   },
   "campos": [
@@ -88,8 +93,8 @@
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
-      "autoritativoTango": true,
-      "notas": "La planilla define name = nombre de fantasia (NOM_COM). Suele coincidir con la razon social cuando el cliente no tiene fantasia.",
+      "autoritativoTango": false,
+      "notas": "La planilla define name = nombre de fantasia (NOM_COM). Suele coincidir con la razon social cuando el cliente no tiene fantasia. DEJO DE SER AUTORITATIVO el 2026-08-21: la migracion manual cargo estos nombres normalizados a Title Case y corrigio varios a mano (Tango dice 'ARCANA SRL', la migracion 'Arraya Equipamiento Medico', que es la fantasia de verdad). Si el sync pisara `name` en cada corrida, devolveria todo a MAYUSCULAS y borraria ese trabajo. Ahora solo se escribe si esta vacio.",
       "direccion": "tango->hubspot"
     },
     {
@@ -118,7 +123,7 @@
     {
       "tango": "MAIL_DE",
       "hubspot": "tango_mails_comprobantes",
-      "label": "Mails de comprobantes",
+      "label": "Mail Factura",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 82,
@@ -206,14 +211,95 @@
     },
     {
       "tango": "GVA18_DESCRIPCION",
-      "hubspot": "state",
+      "hubspot": "provincia",
       "label": "Provincia",
       "tipo": "string",
-      "hsFieldType": "text",
+      "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": false,
-      "notas": "CONFIRMADO: GVA18 = provincias (el payload de alta pide ID_GVA18 junto a GVA133_NOM_PAIS).",
-      "direccion": "tango->hubspot"
+      "notas": "CONFIRMADO: GVA18 = provincias (el payload de alta pide ID_GVA18 junto a GVA133_NOM_PAIS). ALINEADO 2026-08-21 con la migracion manual: el destino NO es `state` sino la propiedad custom `provincia`, que Ultraschall creo como desplegable con 24 opciones en snake_case. Escribir `state` habria dejado la provincia en dos lugares distintos y ninguno de los dos completo.",
+      "direccion": "tango->hubspot",
+      "opciones": {
+        "Capital Federal": "caba",
+        "CABA": "caba",
+        "Buenos Aires": "buenos_aires",
+        "Gran Buenos Aires": "buenos_aires",
+        "Catamarca": "catamarca",
+        "Chaco": "chaco",
+        "Chubut": "chubut",
+        "Córdoba": "cordoba",
+        "Corrientes": "corrientes",
+        "Entre Ríos": "entre_rios",
+        "Formosa": "formosa",
+        "Jujuy": "jujuy",
+        "La Pampa": "la_pampa",
+        "La Rioja": "la_rioja",
+        "Mendoza": "mendoza",
+        "Misiones": "misiones",
+        "Neuquén": "neuquen",
+        "Río Negro": "rio_negro",
+        "Salta": "salta",
+        "San Juan": "san_juan",
+        "San Luis": "san_luis",
+        "Santa Cruz": "santa_cruz",
+        "Santa Fe": "santa_fe",
+        "Santiago del Estero": "santiago_del_estero",
+        "Tierra del Fuego": "tierra_del_fuego_antartida_e_islas_del_atlantico_sur",
+        "Tucumán": "tucuman",
+        "La paz": "la_paz",
+        "Guayaquil": "guayaquil",
+        "Encarnacion": "encarnacion",
+        "Peru": "peru",
+        "Lima": "lima",
+        "Montevideo": "montevideo",
+        "Asuncion": "asuncion",
+        "Ciudad del este": "ciudad_del_este",
+        "Madrid": "madrid",
+        "Quito": "quito",
+        "S. Cruz de la Sierra": "s_cruz_de_la_sierra",
+        "Cochabamba": "cochabamba"
+      },
+      "opcionesNota": "NOMBRE_PRO de Tango -> valor de la opcion en HubSpot. La tabla GVA18 tiene 40 filas y estan las 40 contempladas: 26 mapean a las 24 opciones (Capital Federal y CABA caen las dos en 'caba'; Gran Buenos Aires en 'buenos_aires') y las 14 restantes quedan sin mapear a proposito porque NO son provincias argentinas: La paz, Guayaquil, Encarnacion, Peru, Lima, Montevideo, Asuncion, Ciudad del este, Madrid, Quito, S. Cruz de la Sierra, Cochabamba, Desconocido y '0'. Esos clientes quedan sin provincia y el sync lo reporta; el pais igual se escribe en `country`.",
+      "opcionesInversas": {
+        "asuncion": "33",
+        "buenos_aires": "01",
+        "caba": "00",
+        "catamarca": "02",
+        "chaco": "16",
+        "chubut": "17",
+        "ciudad_del_este": "34",
+        "cochabamba": "43",
+        "cordoba": "03",
+        "corrientes": "04",
+        "encarnacion": "27",
+        "entre_rios": "05",
+        "formosa": "18",
+        "guayaquil": "26",
+        "jujuy": "06",
+        "la_pampa": "21",
+        "la_paz": "25",
+        "la_rioja": "08",
+        "lima": "29",
+        "madrid": "36",
+        "mendoza": "07",
+        "misiones": "19",
+        "montevideo": "30",
+        "neuquen": "20",
+        "peru": "28",
+        "quito": "37",
+        "rio_negro": "22",
+        "s_cruz_de_la_sierra": "40",
+        "salta": "09",
+        "san_juan": "10",
+        "san_luis": "11",
+        "santa_cruz": "23",
+        "santa_fe": "12",
+        "santiago_del_estero": "13",
+        "tierra_del_fuego_antartida_e_islas_del_atlantico_sur": "24",
+        "tucuman": "14"
+      },
+      "notasInversa": "Mapa opcion de HubSpot -> COD_GVA18, para el alta (HubSpot -> Tango). Guarda el CODIGO, no el ID interno: el ID lo resuelve lookups contra la tabla GVA18 viva, asi no queda un ID hardcodeado que se desincronice. Generado y verificado el 2026-08-24 contra las 40 filas de GVA18 y los 5670 clientes. Los empates se resolvieron por cantidad de clientes reales: buenos_aires: Buenos Aires(cod 01, 1667) vs Gran Buenos Aires(cod 35, 6) | caba: Capital Federal(cod 00, 812) vs CABA(cod 32, 237)",
+      "lookupInverso": "provincias"
     },
     {
       "tango": "GVA133_NOM_PAIS",
@@ -262,7 +348,7 @@
     {
       "tango": "GVA01_DESC_COND",
       "hubspot": "tango_condicion_venta",
-      "label": "Condicion de venta",
+      "label": "Condiciones de Pago",
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
@@ -299,9 +385,9 @@
       "hsFieldType": "number",
       "porcentajeCarga": 87,
       "autoritativoTango": true,
-      "notas": "PENDIENTE de lookup: falta el process de GVA10. Hoy guarda el CODIGO, no el ID interno: NO usarlo para crear pedidos hasta resolverlo. Carga real 87% (no 30% como se estimo).",
-      "lookupPendiente": "listasDePrecios",
-      "direccion": "tango->hubspot"
+      "notas": "RESUELTO 2026-08-24. El process 10348 no sirve (ver tango.processes.json). Los IDs se consiguieron por oraculo booleano contra GVA10 y quedaron estaticos en el catalogo. Aca codigo == ID, pero es suerte estructural: si aparece una sexta lista, re-verificar.",
+      "direccion": "tango->hubspot",
+      "lookup": "listasPrecios"
     },
     {
       "tango": "GVA05_DESCRIPCION",
@@ -361,26 +447,6 @@
       "direccion": "tango->hubspot"
     },
     {
-      "tango": "CUPO_CREDI",
-      "hubspot": "tango_cupo_credito",
-      "label": "Cupo de credito",
-      "tipo": "number",
-      "hsFieldType": "number",
-      "porcentajeCarga": 100,
-      "autoritativoTango": true,
-      "direccion": "tango->hubspot"
-    },
-    {
-      "tango": "PORC_DESC",
-      "hubspot": "tango_porc_descuento",
-      "label": "% descuento",
-      "tipo": "number",
-      "hsFieldType": "number",
-      "porcentajeCarga": 100,
-      "autoritativoTango": true,
-      "direccion": "tango->hubspot"
-    },
-    {
       "tango": "MON_CTE",
       "hubspot": "tango_mon_cte",
       "label": "Cuenta en moneda corriente",
@@ -411,9 +477,23 @@
       "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "La planilla de Ultraschall aporta la equivalencia ID_CATEGORIA_IVA: 1 Resp.Inscripto, 4 Exento, 5 Cons.Final, 6 Monotributo. PENDIENTE: los datos reales tienen 5 codigos (RI, RS, EX, CF, EXE) y falta confirmar a que ID corresponden RS y EXE. Hasta entonces no se puede dar de alta un cliente con esos dos.",
-      "lookupPendiente": "categoriaIva",
+      "notas": "La planilla de Ultraschall aporta la equivalencia ID_CATEGORIA_IVA: 1 Resp.Inscripto, 4 Exento, 5 Cons.Final, 6 Monotributo. PENDIENTE: falta confirmar el ID de RS y EXE, necesario para el ALTA (Fase 4). Para la LECTURA no hace falta el ID, solo la etiqueta: eso lo resuelve `opciones`. | CATALOGO COMPLETO (11 categorias) desde el 2026-08-24. Las etiquetas de RI, CF y RS son las que YA tiene el portal (planilla de Ultraschall, 6.0) y NO se tocan: el PATCH agrega opciones, no las renombra, asi que cambiarlas dejaria duplicados como 'Responsable Inscripto' y 'Responsable inscripto' conviviendo. Los IDs internos para el alta viven en tango_id_categoria_iva.",
       "direccion": "tango->hubspot",
+      "opciones": {
+        "RI": "Responsable Inscripto",
+        "CF": "Consumidor Final",
+        "INR": "No responsable",
+        "RS": "Monotributista",
+        "EX": "Exento",
+        "PCE": "Pequeño contribuyente eventual",
+        "RSS": "Monotributista social",
+        "PCS": "Pequeño contribuyente eventual social",
+        "EXE": "Iva exento operacion de exportacion",
+        "SNC": "Sujeto no categorizado",
+        "INA": "Iva no alcanzado"
+      },
+      "opcionesNota": "Codigo de Tango -> valor de la opcion en HubSpot. Las tres primeras ya existen en el portal; 'Exento' hay que crearla. NO son etiquetas inventadas: Tango se autodescribe en DESC_CATEGORIA_IVA y la correspondencia es 1 a 1 en la muestra de 300 (RI='Responsable inscripto', RS='Responsable monotributista', EX='Exento', CF='Consumidor final'). EXE queda A PROPOSITO sin mapear: no aparece en la muestra, asi que no se conoce su descripcion. Mientras siga asi, esos clientes se sincronizan sin condicion_iva y el sync lo reporta como problema, que es preferible a inventar la etiqueta. El dato NO se pierde: DESC_CATEGORIA_IVA va igual a tango_categoria_iva como texto libre.",
+      "comoResolverEXE": "No hace falta preguntarle a Ultraschall que significa: leer DESC_CATEGORIA_IVA de cualquier cliente con COD_CATEGORIA_IVA='EXE' contra el ERP. A Ultraschall solo hay que pedirle el ID_CATEGORIA_IVA, que hace falta para el ALTA.",
       "equivalenciaConocida": {
         "RI": 1,
         "EX": 4,
@@ -422,15 +502,34 @@
       }
     },
     {
+      "tango": "COD_CATEGORIA_IVA",
+      "hubspot": "tango_id_categoria_iva",
+      "label": "ID categoria IVA (Tango)",
+      "tipo": "number",
+      "hsFieldType": "number",
+      "autoritativoTango": true,
+      "lookup": "categoriasIva",
+      "notas": "ID interno de la categoria de IVA. Sin esto la Fase 4 no puede dar de alta un cliente en Tango: el alta exige ID_CATEGORIA_IVA, no el codigo. IDs confirmados con prueba de falsacion el 2026-08-24 (ARQUITECTURA.md 7.7).",
+      "direccion": "tango->hubspot"
+    },
+    {
       "tango": "COD_TIPO_DOCUMENTO_GV",
       "hubspot": "tipo_de_documento",
       "label": "Tipo de documento",
-      "tipo": "number",
+      "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "La planilla dice ID_TIPO_DOCUMENTO_GV = 1 para C.U.I.T.; en la lectura ese tipo viene con COD = 80 (otra confirmacion de que codigo != ID). ATENCION: el 54% de los clientes tiene COD = 0 (\"C.I. POLICIA FEDERAL\"), que en los hechos es \"sin definir\" — 132 de ellos tienen un CUIT bien formado. Para el alta hay que inferir el tipo del formato del documento.",
+      "notas": "La planilla dice ID_TIPO_DOCUMENTO_GV = 1 para C.U.I.T.; en la lectura ese tipo viene con COD = 80 (otra confirmacion de que codigo != ID). ATENCION: el 54% de los clientes tiene COD = 0 (\"C.I. POLICIA FEDERAL\"), que en los hechos es \"sin definir\" — 132 de ellos tienen un CUIT bien formado. Por eso NO se copia el codigo: se resuelve con lib/documento, que respeta el tipo cuando Tango lo declara e infiere solo cuando dice \"sin definir\".",
       "direccion": "tango->hubspot",
+      "transformRegistro": "tipoDocumento",
+      "opciones": {
+        "CUIT": "CUIT",
+        "DNI": "DNI",
+        "CUIL": "CUIL",
+        "CI_EXTRANJERA": "C.I. Extranjera"
+      },
+      "opcionesNota": "Tipo logico de lib/documento -> valor de la opcion en HubSpot. CUIT y DNI ya existen en el portal; CUIL y C.I. Extranjera hay que crearlas. Cuando no se puede determinar el tipo, documento.resolver devuelve null y la propiedad se omite.",
       "equivalenciaConocida": {
         "80": 1
       }
@@ -445,15 +544,6 @@
       "autoritativoTango": true,
       "notas": "RESUELTO POR LOOKUP contra provincias. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
       "lookup": "provincias",
-      "direccion": "tango->hubspot"
-    },
-    {
-      "tango": "OBSERVACIONES",
-      "hubspot": "tango_observaciones",
-      "label": "Observaciones Tango",
-      "tipo": "string",
-      "hsFieldType": "textarea",
-      "autoritativoTango": false,
       "direccion": "tango->hubspot"
     },
     {
@@ -473,6 +563,20 @@
       "hsFieldType": "date",
       "autoritativoTango": true,
       "notas": "Campo tecnico."
+    },
+    {
+      "hubspot": "description",
+      "label": "Description",
+      "tipo": "string",
+      "hsFieldType": "textarea",
+      "autoritativoTango": false,
+      "direccion": "tango->hubspot",
+      "tango": "__observaciones__",
+      "derivadoDe": [
+        "OBSERVACIO",
+        "OBSERVACIONES"
+      ],
+      "notas": "Las observaciones de Tango van al campo de texto libre estandar de la company (decision de Matias, 2026-08-24). No se crea una propiedad propia. OJO: la columna con datos es OBSERVACIO (2 clientes, ej. 'DEJAR EN TRASNPORTE'); OBSERVACIONES existe pero esta al 0%. Se toman las dos con derivadoDe para no depender de cual llene Tango. NO autoritativo: si comercial escribio algo en Description, no se pisa."
     }
   ],
   "sinMapear": {

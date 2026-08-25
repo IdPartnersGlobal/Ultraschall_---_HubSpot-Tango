@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const documento = require('./documento');
 
 /**
  * Traduce registros de Tango a propiedades de HubSpot segun config/mapeo.*.json.
@@ -11,9 +12,33 @@ const crypto = require('node:crypto');
  *    cual, se resuelve codigo -> ID interno contra la tabla auxiliar. Sin eso
  *    se guardarian codigos en campos llamados tango_id_*, que es justo el bug
  *    que produce datos incorrectos silenciosamente (ARQUITECTURA.md 5.4).
+ *  - `opciones` cumple el mismo papel para las propiedades de tipo desplegable:
+ *    HubSpot RECHAZA un valor que no este en la lista de opciones, y en un
+ *    batch de 100 el rechazo se lleva puesta la tanda entera. Ver `opciones`
+ *    mas abajo.
  */
 
 // ---------------------------------------------------------------- transforms
+
+/**
+ * Proveedores de mail e ISPs: su dominio identifica al proveedor, no al
+ * cliente. Asignarlo fusionaria empresas que no tienen nada que ver.
+ *
+ * `fibercorp` y `satlink` estaban nombrados como casos problematicos en las
+ * notas del mapeo pero faltaban en la lista; se agregaron el 2026-08-21 al
+ * medirlo (SOCIEDAD DE AUXILIOS SANITARIOS SALUD quedaba con fibercorp.com.ar).
+ */
+const PROVEEDORES = /^(gmail|hotmail|yahoo|outlook|live|icloud|speedy|fibertel|fibercorp|satlink|arnet|ciudad|uolsinectis|infovia|aol|msn|terra|sion|datafull|velocom)\./;
+
+/** Descarta lo que no identifica al cliente. Devuelve el dominio o null. */
+function dominioUtil(d) {
+    if (!d || !d.includes('.')) return null;
+    if (PROVEEDORES.test(d)) return null;
+    // MAIL_DE incluye al vendedor de Ultraschall que recibe copia de los
+    // comprobantes: sin este filtro 903 clientes comparten el mismo dominio.
+    if (d === 'ultraschall.com.ar') return null;
+    return d;
+}
 
 const transforms = {
     /**
@@ -78,10 +103,7 @@ const transforms = {
         const primera = String(v).split(/[;,]/)[0].trim().toLowerCase();
         const m = primera.match(/@([a-z0-9.-]+\.[a-z]{2,})$/);
         if (!m) return null;
-        const d = m[1];
-        if (/^(gmail|hotmail|yahoo|outlook|live|icloud|speedy|fibertel|arnet|ciudad|uolsinectis|infovia|aol|msn|terra|sion|datafull|velocom)\./.test(d)) return null;
-        if (d === 'ultraschall.com.ar') return null;
-        return d;
+        return dominioUtil(m[1]);
     },
 
     /**
@@ -93,6 +115,30 @@ const transforms = {
         const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
         if (!m) return null;
         return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    },
+};
+
+// ------------------------------------------------- transforms de registro
+//
+// Reciben el registro COMPLETO, no un campo. Son para los casos en que el
+// valor de una propiedad no sale de una sola columna de Tango.
+
+const transformsRegistro = {
+    /**
+     * Tipo de documento como tipo logico, no como codigo crudo.
+     *
+     * COD_TIPO_DOCUMENTO_GV = 0 lo etiqueta Tango "C.I. POLICIA FEDERAL" pero
+     * en los hechos es el default de un campo sin cargar, y lo tiene el 54% de
+     * la muestra. Copiarlo tal cual llenaria mas de media cartera con una
+     * etiqueta falsa. `documento.resolver` respeta el tipo cuando Tango lo
+     * declara y solo infiere cuando dice "sin definir", cruzando digito
+     * verificador y prefijo AFIP (ver lib/documento.js).
+     *
+     * Devuelve null cuando no se puede determinar: la propiedad se omite en
+     * vez de escribir un valor inventado.
+     */
+    tipoDocumento(registro) {
+        return documento.resolver(registro).tipo;
     },
 };
 
@@ -163,7 +209,14 @@ function crear(mapeo, lookups = null) {
                     continue;
                 }
 
-                if (campo.transform) {
+                if (campo.transformRegistro) {
+                    const fn = transformsRegistro[campo.transformRegistro];
+                    if (!fn) {
+                        problemas.push(`transformRegistro desconocido '${campo.transformRegistro}' en el campo ${campo.hubspot}`);
+                        continue;
+                    }
+                    valor = fn(registro);
+                } else if (campo.transform) {
                     const fn = transforms[campo.transform];
                     if (!fn) {
                         problemas.push(`transform desconocido '${campo.transform}' en el campo ${campo.tango}`);
@@ -174,10 +227,62 @@ function crear(mapeo, lookups = null) {
                     valor = castear(valor, campo.tipo);
                 }
 
+                // Desplegable: el valor tiene que ser una opcion existente. Si
+                // no esta en la tabla se omite y se reporta; escribirlo igual
+                // haria que HubSpot rechace la tanda completa de 100.
+                if (campo.opciones && valor !== null && valor !== undefined) {
+                    const opcion = campo.opciones[String(valor)];
+                    if (opcion === undefined) {
+                        problemas.push(`${campo.hubspot}: el valor '${valor}' no tiene opcion definida en el mapeo`);
+                        continue;
+                    }
+                    valor = opcion;
+                }
+
                 if (valor !== null && valor !== undefined) propiedades[campo.hubspot] = valor;
             }
 
             return { propiedades, problemas };
+        },
+
+        /**
+         * Direccion inversa, para el alta: valor de un desplegable de HubSpot
+         * -> ID interno de Tango.
+         *
+         * Existe porque una company creada a mano en HubSpot NO tiene
+         * `tango_id_gva18`: lo unico que hay es lo que comercial eligio en el
+         * desplegable. Para las companies que vinieron del sync esto no hace
+         * falta — el ID ya esta guardado (ARQUITECTURA.md 5.3).
+         *
+         * El mapeo guarda el CODIGO de Tango, no el ID: el ID lo resuelve
+         * `lookups` contra la tabla viva, asi no queda hardcodeado y no se
+         * desincroniza si el ERP cambia.
+         *
+         * ⚠️ Varias descripciones de Tango pueden caer en la misma opcion de
+         * HubSpot con IDs distintos ('Capital Federal' y 'CABA' son dos filas
+         * de GVA18). El empate NO se adivina aca: viene resuelto y documentado
+         * en `opcionesInversas` del mapeo.
+         *
+         * @returns {{ok: boolean, id: number|null, codigo: string|null, motivo?: string}}
+         */
+        desdeOpcion(nombreHubSpot, valorOpcion) {
+            const campo = campos.find((c) => c.hubspot === nombreHubSpot && c.opcionesInversas);
+            if (!campo) return { ok: false, id: null, codigo: null, motivo: `${nombreHubSpot}: el mapeo no declara opcionesInversas` };
+            if (valorOpcion === null || valorOpcion === undefined || String(valorOpcion).trim() === '') {
+                return { ok: false, id: null, codigo: null, motivo: `${nombreHubSpot}: sin valor` };
+            }
+            const codigo = campo.opcionesInversas[String(valorOpcion).trim()];
+            if (codigo === undefined) {
+                return { ok: false, id: null, codigo: null, motivo: `${nombreHubSpot}: la opcion '${valorOpcion}' no tiene equivalencia en Tango` };
+            }
+            // La tabla puede declararse en el campo del desplegable
+            // (`lookupInverso`) o venir de un campo que ya la usa: en el mapeo
+            // de clientes el desplegable es `provincia` pero el lookup vive en
+            // `tango_id_gva18`, que es otro campo.
+            const tabla = campo.lookupInverso || campo.lookup;
+            if (!tabla) return { ok: true, id: null, codigo };
+            const r = lookups.resolver(tabla, codigo, nombreHubSpot);
+            return r.ok ? { ok: true, id: r.id, codigo } : { ok: false, id: null, codigo, motivo: r.motivo };
         },
 
         /** Clave de idempotencia del registro. */
@@ -194,6 +299,16 @@ function crear(mapeo, lookups = null) {
         },
 
         /**
+         * Campos que NO se pisan: si el registro ya tiene valor en HubSpot, se
+         * respeta. Es lo que protege la migracion manual que hizo Ultraschall
+         * (nombres normalizados a mano, direcciones corregidas) de volver a
+         * quedar como los tiene Tango en la proxima corrida.
+         */
+        camposNoAutoritativos() {
+            return [...new Set(campos.filter((c) => !c.autoritativoTango).map((c) => c.hubspot))];
+        },
+
+        /**
          * Hash del resultado mapeado. Base de la escritura diferencial:
          * como Tango no tiene fecha de modificacion (ARQUITECTURA.md 8.2),
          * es la unica forma de no reescribir 5670 companies por corrida.
@@ -205,4 +320,4 @@ function crear(mapeo, lookups = null) {
     };
 }
 
-module.exports = { crear, transforms, castear };
+module.exports = { crear, transforms, transformsRegistro, castear };

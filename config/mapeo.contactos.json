@@ -1,7 +1,7 @@
 {
   "_meta": {
     "entidad": "contactos",
-    "estado": "PROPUESTA 2026-08-19 — pendiente de dos definiciones (ver decisionesPendientes)",
+    "estado": "⛔ FUERA DE ALCANCE desde el 2026-08-24: por decision de Matias no se sincronizan contactos, solo empresas <- clientes de Tango. Este mapeo NO se usa. Se conserva como relevamiento por si algun dia se retoma. Ver ARQUITECTURA.md 7.3. (Estado previo: PROPUESTA 2026-08-19, pendiente de dos definiciones.)",
     "origen": {
       "sistema": "Tango",
       "process": 2117,

@@ -32,7 +32,7 @@ async function correr({ config, log, dryRun = true }) {
     const claveHs = mapeoClientes._meta.claveIdempotencia.hubspot;
     const resumen = {
         dryRun, leidosTango: 0, enHubSpot: 0,
-        aCrear: 0, aActualizar: 0, sinCambios: 0,
+        aCrear: 0, aActualizar: 0, sinCambios: 0, respetados: 0,
         escritos: 0, problemas: [], fallidos: [],
     };
 
@@ -53,28 +53,34 @@ async function correr({ config, log, dryRun = true }) {
     resumen.leidosTango = registros.length;
     log.datos('TANGO-OK', { 'registros leidos': registros.length, 'totalCount informado': total });
 
-    // 3. Estado actual en HubSpot, solo lo necesario para comparar.
+    // 3. Estado actual en HubSpot.
+    //    Ademas de la clave y el hash se leen los campos NO autoritativos: hay
+    //    que saber si ya tienen valor para no pisarlos (paso 4).
+    const m = mapper.crear(mapeoClientes, lk);
+    const noAutoritativos = m.camposNoAutoritativos();
+
     log.paso('HUBSPOT', 'leyendo companies existentes...');
-    const existentes = await hs.leerTodos('companies', [claveHs, PROP_HASH]);
+    const existentes = await hs.leerTodos('companies', [claveHs, PROP_HASH, ...noAutoritativos]);
     resumen.enHubSpot = existentes.length;
-    const hashPorClave = new Map();
+    const estadoPorClave = new Map();
     for (const c of existentes) {
         const k = c.properties[claveHs];
-        if (k) hashPorClave.set(String(k).trim(), c.properties[PROP_HASH] || null);
+        if (k) estadoPorClave.set(String(k).trim(), { hash: c.properties[PROP_HASH] || null, props: c.properties });
     }
 
     // 4. Mapear y decidir que escribir.
-    const m = mapper.crear(mapeoClientes, lk);
     const ahora = new Date();
     const aEscribir = [];
 
-    // El dominio se guarda como SUGERENCIA (tango_dominio_sugerido), nunca en
-    // la propiedad `domain` de HubSpot: HubSpot deduplica companies por domain
-    // y un dominio equivocado FUSIONA empresas. Aun asi se limpia el que
-    // aparece en mas de un cliente, para que la sugerencia sea util. Requiere
-    // ver el lote entero, asi que va en una pasada previa.
-    const dominiosUnicos = calcularDominiosUnicos(registros, m);
-    resumen.dominiosSugeridos = dominiosUnicos.size;
+    // El sync ya NO escribe `domain` (decision 2026-08-24, ARQUITECTURA.md 7.2):
+    // era la segunda clave de matcheo de HubSpot y la unica via por la que dos
+    // clientes distintos podian terminar fusionados en una company.
+    //
+    // La sugerencia derivada de los mails si se escribe, pero solo cuando
+    // pertenece a un unico cliente: un dominio compartido no sugiere nada.
+    // Requiere ver el lote entero, asi que va en una pasada previa.
+    const sugeridosUnicos = calcularDominiosUnicos(registros, m, 'tango_dominio_sugerido');
+    resumen.dominiosSugeridos = sugeridosUnicos.size;
 
     for (const registro of registros) {
         const clave = m.clave(registro);
@@ -86,16 +92,31 @@ async function correr({ config, log, dryRun = true }) {
         const { propiedades, problemas } = m.aHubSpot(registro);
         for (const p of problemas) resumen.problemas.push(p);
 
-        // Se cae la sugerencia si el dominio lo comparte otro cliente.
-        if (propiedades.tango_dominio_sugerido && !dominiosUnicos.has(propiedades.tango_dominio_sugerido)) {
+        if (propiedades.tango_dominio_sugerido && !sugeridosUnicos.has(propiedades.tango_dominio_sugerido)) {
             delete propiedades.tango_dominio_sugerido;
         }
 
+        // El hash representa lo que dice TANGO, asi que se calcula antes de
+        // descartar nada. Si se calculara despues, un campo protegido haria
+        // que el hash cambiara en cada corrida y el registro nunca cerraria.
         const hash = m.hash(propiedades);
-        const previo = hashPorClave.get(clave);
-        const existe = hashPorClave.has(clave);
+        const estado = estadoPorClave.get(clave);
+        const existe = estadoPorClave.has(clave);
 
-        if (existe && previo === hash) { resumen.sinCambios++; continue; }
+        if (existe && estado.hash === hash) { resumen.sinCambios++; continue; }
+
+        // Los campos no autoritativos solo se escriben si estan vacios en
+        // HubSpot. Protege la migracion manual de Ultraschall: los nombres
+        // normalizados a mano no vuelven a MAYUSCULAS en la proxima corrida.
+        if (existe) {
+            for (const p of noAutoritativos) {
+                const actual = estado.props[p];
+                if (actual !== null && actual !== undefined && String(actual).trim() !== '') {
+                    if (propiedades[p] !== undefined) { delete propiedades[p]; resumen.respetados++; }
+                }
+            }
+        }
+
         existe ? resumen.aActualizar++ : resumen.aCrear++;
 
         aEscribir.push({
@@ -134,11 +155,11 @@ async function correr({ config, log, dryRun = true }) {
  *
  * @returns {Set<string>} dominios que sirven como sugerencia
  */
-function calcularDominiosUnicos(registros, m) {
+function calcularDominiosUnicos(registros, m, prop = 'tango_dominio_sugerido') {
     const cuenta = new Map();
     for (const r of registros) {
         const { propiedades } = m.aHubSpot(r);
-        const d = propiedades.tango_dominio_sugerido;
+        const d = propiedades[prop];
         if (d) cuenta.set(d, (cuenta.get(d) || 0) + 1);
     }
     const unicos = new Set();
