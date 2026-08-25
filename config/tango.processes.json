@@ -107,7 +107,129 @@
       "registros": 9,
       "id": "ID_GVA41",
       "codigo": "COD_ALICUO",
-      "divergen": "9/9"
+      "divergen": "9/9",
+      "cargar": false,
+      "motivoNoCarga": "NO SE CARGA desde el 2026-08-24 (decision de Matias). Ningun campo del mapeo de clientes la usa: era un request por corrida al pedido. La definicion queda porque GVA41 aparece en el payload de alta de pedidos (Fase 4); si algun dia hace falta, sacar este flag."
+    },
+    "listasPrecios": {
+      "process": null,
+      "tabla": "GVA10",
+      "registros": 5,
+      "id": "ID_GVA10",
+      "codigo": "NRO_DE_LIS",
+      "descripcion": "NOMBRE_LIS",
+      "campoEnCliente": "GVA10_NRO_DE_LIS",
+      "divergen": "0/5",
+      "estatica": true,
+      "verificado": "2026-08-24",
+      "nota": "El process 10348 que paso administracion NO sirve: Api/Get, GetByFilter y GetById fallan con 'An exception was thrown while activating ViewsFacade'. Tampoco se puede resolver por columna interna: ni GVA14 ni GVA21 tienen ID_GVA10. Se resolvio con un oraculo booleano por subconsulta contra GVA10 (busqueda binaria sobre ID_GVA10) y se verifico para cada codigo que no hay mas de un ID. OJO: aca codigo == ID, pero es SUERTE ESTRUCTURAL de una tabla chica y temprana, igual que GVA05. Si Ultraschall crea una sexta lista hay que re-verificar: NO asumir que la coincidencia se mantiene.",
+      "filas": [
+        {
+          "ID_GVA10": 1,
+          "NRO_DE_LIS": 1,
+          "NOMBRE_LIS": "SIN IVA EN $"
+        },
+        {
+          "ID_GVA10": 2,
+          "NRO_DE_LIS": 2,
+          "NOMBRE_LIS": "SIN IVA EN U$S"
+        },
+        {
+          "ID_GVA10": 3,
+          "NRO_DE_LIS": 3,
+          "NOMBRE_LIS": "CON IVA EN $"
+        },
+        {
+          "ID_GVA10": 4,
+          "NRO_DE_LIS": 4,
+          "NOMBRE_LIS": "MEDICO SIN IVA $"
+        },
+        {
+          "ID_GVA10": 5,
+          "NRO_DE_LIS": 5,
+          "NOMBRE_LIS": "CON IVA EN U$S"
+        }
+      ]
+    },
+    "categoriasIva": {
+      "process": null,
+      "tabla": "CATEGORIA_IVA",
+      "registros": 11,
+      "id": "ID_CATEGORIA_IVA",
+      "codigo": "COD_CATEGORIA_IVA",
+      "descripcion": "DESC_CATEGORIA_IVA",
+      "campoEnCliente": "COD_CATEGORIA_IVA",
+      "estatica": true,
+      "verificado": "2026-08-24",
+      "nota": "CATALOGO COMPLETO, 11 categorias — verificado contra el ERP el 2026-08-24. Las 5 con clientes se confirmaron con prueba de falsacion (WHERE ID_CATEGORIA_IVA = N AND COD_CATEGORIA_IVA <> '<cod>' devuelve CERO filas) y sus conteos suman 5670, el padron entero. Las 6 sin clientes (3 INR, 6 PCE, 7 RSS, 8 PCS, 10 SNC, 11 INA) se extrajeron con oraculo booleano por subconsulta —largo con LEN, cada caracter con ASCII(SUBSTRING(...)) y busqueda binaria— y la descripcion se confirmo con igualdad exacta contra el ERP. La planilla de Ultraschall estaba mal en 3 de 5: daba 4=Exento, 5=Cons.Final, 6=Monotributo.",
+      "filas": [
+        {
+          "ID_CATEGORIA_IVA": 1,
+          "COD_CATEGORIA_IVA": "RI",
+          "DESC_CATEGORIA_IVA": "Responsable inscripto",
+          "clientes": 2805
+        },
+        {
+          "ID_CATEGORIA_IVA": 2,
+          "COD_CATEGORIA_IVA": "CF",
+          "DESC_CATEGORIA_IVA": "Consumidor final",
+          "clientes": 993
+        },
+        {
+          "ID_CATEGORIA_IVA": 3,
+          "COD_CATEGORIA_IVA": "INR",
+          "DESC_CATEGORIA_IVA": "No responsable",
+          "clientes": 0
+        },
+        {
+          "ID_CATEGORIA_IVA": 4,
+          "COD_CATEGORIA_IVA": "RS",
+          "DESC_CATEGORIA_IVA": "Responsable monotributista",
+          "clientes": 1543
+        },
+        {
+          "ID_CATEGORIA_IVA": 5,
+          "COD_CATEGORIA_IVA": "EX",
+          "DESC_CATEGORIA_IVA": "Exento",
+          "clientes": 308
+        },
+        {
+          "ID_CATEGORIA_IVA": 6,
+          "COD_CATEGORIA_IVA": "PCE",
+          "DESC_CATEGORIA_IVA": "Pequeño contribuyente eventual",
+          "clientes": 0
+        },
+        {
+          "ID_CATEGORIA_IVA": 7,
+          "COD_CATEGORIA_IVA": "RSS",
+          "DESC_CATEGORIA_IVA": "Monotributista social",
+          "clientes": 0
+        },
+        {
+          "ID_CATEGORIA_IVA": 8,
+          "COD_CATEGORIA_IVA": "PCS",
+          "DESC_CATEGORIA_IVA": "Pequeño contribuyente eventual social",
+          "clientes": 0
+        },
+        {
+          "ID_CATEGORIA_IVA": 9,
+          "COD_CATEGORIA_IVA": "EXE",
+          "DESC_CATEGORIA_IVA": "Iva exento operación de exportación",
+          "clientes": 21
+        },
+        {
+          "ID_CATEGORIA_IVA": 10,
+          "COD_CATEGORIA_IVA": "SNC",
+          "DESC_CATEGORIA_IVA": "Sujeto no categorizado",
+          "clientes": 0
+        },
+        {
+          "ID_CATEGORIA_IVA": 11,
+          "COD_CATEGORIA_IVA": "INA",
+          "DESC_CATEGORIA_IVA": "Iva no alcanzado",
+          "clientes": 0
+        }
+      ]
     }
   },
   "faltantes": {

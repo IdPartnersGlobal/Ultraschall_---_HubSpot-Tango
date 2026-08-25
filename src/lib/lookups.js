@@ -95,6 +95,22 @@ async function cargar(tango, log = require('./logger').silencioso) {
 
     for (const [nombre, def] of Object.entries(procesos.auxiliares)) {
         if (nombre.startsWith('_')) continue;
+
+        // Tablas que no se piden al ERP. Dos motivos distintos:
+        //  - `cargar: false`  -> ningun campo del mapeo la usa. Era un request al pedo.
+        //  - `estatica: true` -> su `process` no existe o no funciona, y las filas se
+        //    consiguieron por otro camino y quedaron verificadas en el catalogo.
+        //    Son tablas de 5 registros que no cambian; el dia que cambien, se re-verifica.
+        if (def.cargar === false) {
+            log.paso('LOOKUP', `${nombre} (${def.tabla}): no se carga a proposito`);
+            continue;
+        }
+        if (Array.isArray(def.filas)) {
+            tablas[nombre] = new TablaAuxiliar(nombre, def, def.filas);
+            log.paso('LOOKUP', `${nombre} (${def.tabla}): ${def.filas.length} registros estaticos (verificado ${def.verificado})`);
+            continue;
+        }
+
         try {
             const { registros } = await tango.get(def.process);
             tablas[nombre] = new TablaAuxiliar(nombre, def, registros);
@@ -137,6 +153,8 @@ class Lookups {
     provincia(cod)      { return this.tabla('provincias').id(cod); }
     zona(cod)           { return this.tabla('zonas').id(cod); }
     alicuotaIva(cod)    { return this.tabla('alicuotasIva').id(cod); }
+    listaPrecios(cod)   { return this.tabla('listasPrecios').id(cod); }
+    categoriaIva(cod)   { return this.tabla('categoriasIva').id(cod); }
 
     /**
      * Resuelve un codigo y explica el fallo si no se puede.
@@ -161,6 +179,12 @@ class Lookups {
             const def = procesos.auxiliares[nombre];
             if (!def) throw new Error(`lookups: '${nombre}' no esta en config/tango.processes.json`);
             tablas[nombre] = new TablaAuxiliar(nombre, def, registros);
+        }
+        // Las estaticas se arman solas: sus filas viven en el catalogo, asi que
+        // un test no tiene que acordarse de pasarlas para que el mapeo resuelva.
+        for (const [nombre, def] of Object.entries(procesos.auxiliares)) {
+            if (nombre.startsWith('_') || tablas[nombre] || !Array.isArray(def.filas)) continue;
+            tablas[nombre] = new TablaAuxiliar(nombre, def, def.filas);
         }
         return new Lookups(tablas);
     }
