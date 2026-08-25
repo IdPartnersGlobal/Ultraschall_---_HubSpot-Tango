@@ -20,7 +20,7 @@ Sincronizar la información maestra y transaccional entre **Tango Gestión** (ER
 | Fase | Flujo | Origen → Destino | Estado |
 |---|---|---|---|
 | 0 | Conectividad y proxy a Tango | — | ✅ Hecho |
-| 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | ⛔ Bloqueada: `process=87` no trae precio (826 reg.) |
+| 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | 🔨 Sync construido el 2026-08-25, **sin precio**: `process=87` no lo trae y el process de precios sigue sin conseguirse (826 art.) |
 | 2 | Clientes → cuentas | Tango `GVA14` → HubSpot **Companies** | 🔨 A construir (5.670 reg.) |
 | 3 | Contactos | Tango `GVA27` → HubSpot **Contacts** | ⛔ **FUERA DE ALCANCE** (decidido 2026-08-24, §7.3). El relevamiento y `config/mapeo.contactos.json` se conservan. |
 | 4 | Pedidos | HubSpot **Deal** ganado → Tango `Api/Create` (`process=19845`) | 🔨 Circuito construido el 2026-08-25 (§9). ⛔ Los renglones esperan el catálogo de productos (Fase 1) |
@@ -117,10 +117,10 @@ flowchart LR
 | `lib/verificarPedido.js` | módulo | Verificación del pedido y armado del payload, cabecera y renglones. | ✅ 2026-08-25 |
 | `lib/dealToTango.js` | módulo | El circuito de la Fase 4, testeable con dobles. | ✅ 2026-08-25 |
 
-**Tests:** `npm test` (runner nativo de Node, sin dependencias). 219 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
+**Tests:** `npm test` (runner nativo de Node, sin dependencias). 231 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
 
 Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms, con 5.670 hashes distintos y 0 problemas de resolución.
-| `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products. |
+| `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products, dos veces por día. ✅ 2026-08-25, apagado por defecto. |
 | `functions/syncClientes.js` | Timer | Fase 2. Tango `process=2117` → HubSpot Companies. |
 | `functions/dealToTango.js` | HTTP | Fase 4. Recibe el Deal desde HubSpot y crea el pedido en Tango. ✅ 2026-08-25, apagada por defecto (`DEAL_TO_TANGO_ENABLED`). |
 | `functions/testTangoConnection.js` | HTTP | Ya existe. Queda como diagnóstico, anónimo pero contenido por `lib/politicaProxy` (§10.0). |
@@ -1307,6 +1307,9 @@ Deploy: push a `main` → GitHub Actions → Azure.
 | `TANGO_PROXY_MODO` | `cerrado` (default) \| `relevamiento`. Abre `process` fuera del catálogo y `filtroSql` en el proxy (§10.0). |
 | `TANGO_PROXY_ESCRITURA` | `true` habilita `Api/Create`/`Update`/`Delete` en el proxy. Default apagado (§10.0). |
 | `DEAL_TO_TANGO_ENABLED` | `true` activa el webhook de negocios ganados (§9). Apagado por defecto: desplegar y activar son dos decisiones distintas. |
+| `SYNC_PRODUCTOS_ENABLED` | `true` activa el timer de artículos. Apagado por defecto. |
+| `SYNC_PRODUCTOS_CRON` | Default `0 0 6,18 * * *` — dos veces por día, 06:00 y 18:00. |
+| `SYNC_PRODUCTOS_SOLO` | Lista de `COD_STA11` separados por coma. Vacío = todos. Sirve para publicar un artículo de prueba. |
 
 ---
 

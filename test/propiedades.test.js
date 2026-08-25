@@ -134,3 +134,16 @@ test('planificar es idempotente: contra su propio resultado no queda nada por ha
     assert.strictEqual(segunda.aParchear.length, 0);
     assert.strictEqual(segunda.aRehacer.length, 0);
 });
+
+test('una propiedad booleana lleva sus dos opciones o HubSpot la rechaza', () => {
+    // Caso real del 2026-08-25: `tango_lleva_stock` fallo con "Boolean
+    // properties must have exactly two options" y quedo sin crear mientras las
+    // otras 13 si se creaban.
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{ tango: 'STOCK', hubspot: 'lleva_stock', label: 'Lleva stock', tipo: 'boolean' }],
+    };
+    const { aCrear } = planificar(mapeo, []);
+    assert.strictEqual(aCrear[0].fieldType, 'booleancheckbox');
+    assert.deepStrictEqual(aCrear[0].options.map((o) => o.value), ['true', 'false'], 'exactamente dos, y en ese orden');
+});

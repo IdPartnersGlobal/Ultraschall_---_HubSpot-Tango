@@ -41,10 +41,21 @@ function tipoHubSpot(campo) {
 }
 
 /**
+ * Las dos opciones que HubSpot exige en un `booleancheckbox`. Sin ellas la
+ * creacion falla con "Boolean properties must have exactly two options".
+ * Detectado el 2026-08-25 creando `tango_lleva_stock` en products.
+ */
+const OPCIONES_BOOL = [
+    { label: 'Si', value: 'true', displayOrder: 0, hidden: false },
+    { label: 'No', value: 'false', displayOrder: 1, hidden: false },
+];
+
+/**
  * Opciones de HubSpot a partir del mapeo. `opciones` es codigo -> valor de la
  * opcion, y varios codigos pueden apuntar al mismo valor, asi que se deduplica.
  */
 function opcionesDe(campo) {
+    if (tipoHubSpot(campo).fieldType === 'booleancheckbox') return OPCIONES_BOOL;
     if (!campo.opciones) return undefined;
     const vistos = new Set();
     const salida = [];
@@ -150,4 +161,4 @@ function planificar(mapeo, existentes, { grupo = GRUPO.name } = {}) {
     return { aCrear, yaEstan, aParchear, aRehacer };
 }
 
-module.exports = { GRUPO, ESTANDAR, tipoHubSpot, opcionesDe, planificar };
+module.exports = { GRUPO, ESTANDAR, OPCIONES_BOOL, tipoHubSpot, opcionesDe, planificar };
