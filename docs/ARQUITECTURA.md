@@ -114,7 +114,7 @@ flowchart LR
 | `lib/firmaHubSpot.js` | módulo | Firma v3: la única autenticación del webhook de negocios ganados. | ✅ 2026-08-21 |
 | `lib/politicaProxy.js` | módulo | Contención del proxy anónimo de diagnóstico. | ✅ 2026-08-25 |
 
-**Tests:** `npm test` (runner nativo de Node, sin dependencias). 179 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
+**Tests:** `npm test` (runner nativo de Node, sin dependencias). 190 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
 
 Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms, con 5.670 hashes distintos y 0 problemas de resolución.
 | `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products. |
@@ -948,12 +948,11 @@ El módulo es `lib/verificarEmpresa.js` y devuelve tres cosas. La distinción en
 
 | | Qué es | Quién lo resuelve |
 |---|---|---|
-| `problemas` | Falta la razón social, el CUIT no tiene dígitos, la provincia elegida no tiene equivalencia en Tango | Comercial, en HubSpot, ahora mismo |
-| `pendientes` | Qué lista de precios, qué vendedor, qué transporte lleva un cliente nuevo | **Administración.** No es un dato que exista en ningún lado todavía |
+| `problemas` | Falta la razón social, falta el domicilio, el documento no tiene un solo dígito, la condición de IVA elegida no existe en Tango | Comercial, en HubSpot, ahora mismo |
+| `pendientes` | Un campo de parametría que nadie definió todavía | **Administración.** Hoy está vacío: los cinco que había se resolvieron el 2026-08-25 |
 | `valores` | Los campos de Tango ya resueltos, listos para mezclar sobre los defaults de §5.5 | — |
 
-Mezclar las dos primeras mandaría a comercial a buscar un dato que no existe. Por eso van separadas.
-
+Mezclar las dos primeras mandaría a comercial a buscar un dato que no existe. Por eso van separadas, aunque hoy la segunda esté vacía: el catálogo sigue admitiendo `origen: "sinDefinir"` para el próximo campo que aparezca.
 **Verificar y armar el payload son la misma pasada.** Si fueran dos módulos se desincronizarían, y el modo de falla sería el peor: verifica bien y manda otra cosa.
 
 **Qué exige Tango vive en `config/defaults.tango.json` → `clientes.alta`, no en el código.** Cada campo declara de dónde sale (`hubspot`, `numeracion`, `sinDefinir`), cómo se resuelve y **con qué evidencia** se lo marcó obligatorio.
@@ -967,11 +966,60 @@ Mezclar las dos primeras mandaría a comercial a buscar un dato que no existe. P
 - **Sin nombre de fantasía se cae a la razón social.** `NOM_COM` es obligatorio para Tango, pero no es un dato que comercial tenga que inventar.
 - **Teléfono y mail no frenan el alta**, aunque figuren en el payload mínimo.
 
-**Duplicados: por código Y por documento.** Mirar sólo el código deja pasar el duplicado justo en el caso que importa — la company que cargó comercial a mano **no tiene** código. El CUIT es el único dato del negocio que se puede cruzar.
+
+#### Qué frena el alta, medido contra 300 clientes reales
+
+Con la primera versión, **142 de 300 (47%) no se podían crear**. Después de las decisiones del 2026-08-25 son **0 de 300**, y quedan 2 marcados para que alguien los mire. La diferencia no fue arreglar datos: fue que la lista de obligatorios estaba mal.
+
+| Regla (decidida el 2026-08-25) | Qué pasaba antes | Por qué |
+|---|---|---|
+| **Código postal y localidad no son obligatorios.** Si vienen vacíos va `" "` | 137 y 9 de 300 frenaban el alta | El ERP tiene esos clientes guardados con `null` o `" "` — ULTRASCHALL S.A. entre ellos. Si Tango los exigiera, no podrían existir. El neutro no se inventó: es el valor que el propio ERP tiene ahí |
+| **Provincia sin equivalencia → `Desconocido`** | 1 de 300 frenaba | `COD_GVA18 = 31` es una fila propia de GVA18 (`ID_GVA18` 32), no un valor inventado |
+| **Documento mal tipeado viaja tal cual**, y el tipo va `SIN_IDENTIFICAR` (ID 41) | 2 de 300 frenaban | Normalizarlo sería inventar un documento que nadie cargó, y taparía el error justo cuando conviene que se vea |
+
+⚠️ **El documento va en la dirección contraria a `transforms.documentoConGuiones`**, que sí normaliza. No es una inconsistencia: esa transformación corre en la **lectura**, donde el dato ya es de Tango. En el alta el dato lo tipeó una persona hace un minuto. Un documento de 11 dígitos igual sale con guiones — Tango los exige (§7.2) — pero cualquier otra cosa se manda como la escribieron y queda señalada en `resueltos.documentoARevisar`, para poder revisarla después sin salir a buscarla. Un DNI de 7 u 8 dígitos **no** se marca: es normal.
+
+Los dos casos reales de la muestra son `000576 Angeloni, Italo Domingo` (CUIT `20-17627556-7`: 11 dígitos, prefijo válido, **dígito verificador que no cierra**) y `000928 Asoc Cooperadora Hospital San Francisco Solano` (CUIT `30-6959420-3`: **10 dígitos, le falta uno**).
+
+#### Los cinco campos de parametría que faltaba definir
+
+Decisión de Matías: usar la **moda del padrón** — el valor que más se repite entre los clientes que ya existen.
+
+| Campo | Default | Cómo salió |
+|---|---|---|
+| `ID_GVA01` condición de venta | `1` CONTADO | 270 de 300 (90%) |
+| `ID_GVA10` lista de precios | `3` CON IVA EN $ | Moda **de los que tienen valor** (83 de 124). Se manda igual aunque el pedido después elija la suya (§7.9) |
+| `ID_GVA24` transporte | `01` RETIRA CLIENTE | Moda de los que tienen valor (51 de 124) |
+| `ID_GVA05` zona | `09` ZONA NO DEFINIDA | 138 de 300 (46%). Es la zona neutra del propio ERP |
+| `ID_GVA23` vendedor | Del **owner** de la company; si no matchea, `10` FACUNDO | FACUNDO es un vendedor real (confirmado 2026-08-25) y tiene el 63% de la cartera |
+
+En dos de los cinco la moda verdadera es **"vacío"** (176 de 300 no tienen lista de precios ni transporte). Un default vacío no sirve de default, así que se toma la moda de los que sí tienen valor — y el informe del script muestra cuántos vacíos hay para que la decisión quede a la vista.
+
+En el catálogo se guarda el **código**, no el ID: el ID se resuelve contra la tabla viva en cada corrida (§5.4). `zonas` es el recordatorio de por qué — el código `09` es el `ID_GVA05` `10`.
+
+🔴 **Los cuatro primeros son provisorios.** Se calcularon sobre `test/fixtures/clientes-muestra.json`, que **no es una muestra representativa**: 300 clientes de código `000003` a `002311`, la parte más vieja del padrón, ninguno por encima de 3000. Se nota en el vendedor — ahí FACUNDO sale 42 de 300 (14%) cuando en el padrón entero tiene el 63%. Recalcular es `node scripts/defaultsPorModa.js` (dry-run por defecto; `--aplicar` reescribe el JSON). Necesita Azure (§5.6).
+
+#### El vendedor no se puede matchear por mail contra Tango
+
+`GVA23.E_MAIL` está **vacío en 26 de los 27 vendedores** — el único cargado es `gerencia@pairasrl.com`, que parece un distribuidor externo, no un comercial de Ultraschall. Así que la equivalencia no se puede leer del ERP: vive en el catálogo (`porOwner`), armada cruzando `NOMBRE_VEN` con los 18 owners del portal.
+
+| Vendedor en Tango | Owner en HubSpot |
+|---|---|
+| `08` MARIA LAURA | `mlguelerman@ultraschall.com.ar` |
+| `10` FACUNDO | `farancibia@ultraschall.com.ar` |
+| `24` Juan Butorac | `jbutorac@ultraschall.com.ar` |
+| `25` Julian Gomez | `jgomez@ultraschall.com.ar` |
+
+🟡 **Sólo cerraron 4 de 27.** Los otros 23 (FERNANDO, DAVID, DOMENECH ROMINA, MELINA, VANESA, Narkys Garmendia, Natali Vazquez…) no tienen un owner con nombre parecido, y quedan 8 owners `@ultraschall.com.ar` sin vendedor (`pthaler`, `emiccelli`, `jquiroga`, `agaston`, `ggarcia`, `cgscaputo`…). Hay que completar la tabla a mano. Mientras tanto esos casos caen en FACUNDO, y queda registrado en `resueltos.ID_GVA23.ownerSinEquivalencia` de qué mail se trataba — para no confundir el default con un dato real del owner.
+
+
+#### Duplicados
+
+**Por código Y por documento.** Mirar sólo el código deja pasar el duplicado justo en el caso que importa — la company que cargó comercial a mano **no tiene** código. El CUIT es el único dato del negocio que se puede cruzar.
 
 ⚠️ Pero **el CUIT no es clave**: 142 valores se repiten en 267 clientes (placeholders como `11111111`, instituciones con varias cuentas). Por eso `buscarDuplicados` devuelve las coincidencias **para que decida una persona**, nunca un veredicto automático.
 
-Los dos valores entran a `filtroSql` —SQL concatenado del lado del ERP (§10.0)— y pueden venir de un webhook, así que se valida su forma antes de concatenar: código `/^[A-Za-z0-9]{1,15}$/`, documento `/^[0-9-]{7,15}$/`. Lo que no tiene esa forma no se consulta.
+Los dos valores entran a `filtroSql`** —SQL concatenado del lado del ERP (§10.0)— y pueden venir de un webhook, así que se valida su forma antes de concatenar: código `/^[A-Za-z0-9]{1,15}$/`, documento `/^[0-9-]{7,15}$/`. Lo que no tiene esa forma no se consulta.
 
 **Lo que falta para tener el alta entera:** la función HTTP del hook y el `POST Api/Create` en sí. La verificación, la numeración (§7.6) y la escritura de vuelta (§7.8) ya están.
 
@@ -1224,7 +1272,7 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 | 4 | **Variables de entorno en Azure**: token nuevo de HubSpot + deuda D1 (`TANGO_API_KEY`, `TANGO_COMPANY`) | Toda corrida real |
 | 5 | **Revisar los mapeos propuestos** en `config/mapeo.*.json` | Fases 1 y 2 |
 | 6 | **Validar `config/defaults.tango.json`** con administración (talonario, depósito, alícuotas, SIAP) | Toda escritura a Tango |
-| 7 | **¿`FACUNDO` es un vendedor real o un cajón de sastre?** Tiene 3.569 de 5.670 clientes (63%). | Mapeo de owners |
+| 7 | ✅ **Resuelto 2026-08-25: `FACUNDO` es un vendedor real.** Queda pendiente completar a mano la tabla `porOwner` (§7.12): sólo 4 de 27 vendedores tienen owner, porque `GVA23.E_MAIL` está vacío en 26. | Mapeo de owners |
 | 8 | `process` de stock, frecuencia de sync, ambiente de pruebas | Optimizaciones |
 
 **Cerrado el 2026-08-20:** el modelo de auth y el Hub ID (§5.2) — private app del proyecto `IdPartners/`, portal `51311915`. Y Contacts **entra** en alcance (§7.3): los scopes ya están declarados para no repetir el ciclo de aprobación.
@@ -1249,6 +1297,8 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 | `src/lib/propiedades.js` | Compara el mapeo contra el portal: qué crear, qué parchear, qué rehacer. |
 | `scripts/crearPropiedades.js` | Crea el grupo y las propiedades que faltan; parchea las opciones de los desplegables. Dry-run por defecto. |
 | `scripts/repararPropiedades.js` | ⚠️ Destructivo. Borra y recrea las propiedades mal definidas, con backup previo. Dry-run por defecto. |
+| `src/lib/verificarEmpresa.js` | Verificación previa del alta (§7.12): qué falta, quién lo resuelve, y el payload ya resuelto. |
+| `scripts/defaultsPorModa.js` | Recalcula los defaults de parametría con la moda del padrón real. Dry-run por defecto. Necesita Azure. |
 | `docs/payloads/cliente-create.json` | Payload de alta de cliente (`process=2117`). |
 | `docs/payloads/producto-create.json` | Payload de alta de artículo (`process=87`). |
 | `docs/payloads/pedido-create.json` | Payload de alta de pedido (`process=19845`). |

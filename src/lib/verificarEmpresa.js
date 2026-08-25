@@ -63,12 +63,29 @@ function resolverCampo(campo, props, m, lookups) {
 
         case 'documento': {
             if (vacio(crudo)) return {};
-            const formateado = documento.formatear(crudo);
-            if (!formateado) return { motivo: `'${crudo}' no tiene digitos`, comoSeArregla: 'cargar el CUIT o documento en la company' };
-            // Tango exige los guiones (2026-08-18), asi que se manda formateado
-            // siempre. Que el digito verificador no cierre no frena el alta: hay
-            // documentos que no son CUIT.
-            return { valor: formateado };
+            const texto = String(crudo).trim();
+            const digitos = documento.soloDigitos(texto);
+
+            // Un documento de 11 digitos va al formato canonico con guiones,
+            // que es lo que Tango exige (decision 2026-08-18).
+            if (digitos.length === 11) return { valor: documento.formatear(texto), revisar: !documento.digitoVerificadorOk(digitos) };
+
+            // Cualquier otra cosa viaja TAL CUAL la escribieron. Decision de
+            // Matias (2026-08-25): si esta mal tipeado se deja mal tipeado.
+            // Normalizarlo seria inventar un documento que nadie cargo, y
+            // ademas taparia el error justo cuando conviene que se vea.
+            //
+            // ⚠️ Va en la direccion contraria a `transforms.documentoConGuiones`,
+            // que SI normaliza — pero esa corre en la lectura, donde el dato ya
+            // es de Tango. Aca el dato lo tipeo una persona hace un minuto.
+            if (!digitos) return { motivo: `'${texto}' no tiene ningun digito`, comoSeArregla: 'cargar el CUIT o documento en la company' };
+
+            // Un DNI de 7 u 8 digitos es normal y no hay nada que revisar. Lo
+            // que se marca es lo que no cierra como ningun documento: 10
+            // digitos, o 11 con el verificador mal. El criterio es el mismo que
+            // usa la lectura, asi que vive en lib/documento y no se duplica.
+            const { revisar } = documento.resolver({ COD_TIPO_DOCUMENTO_GV: 0, CUIT: texto });
+            return { valor: texto, revisar, sinNormalizar: true };
         }
 
         case 'tipoDocumento': {
@@ -84,6 +101,15 @@ function resolverCampo(campo, props, m, lookups) {
             // Sin tipo elegido se infiere del numero, igual que en la lectura.
             const r = documento.idParaAlta({ COD_TIPO_DOCUMENTO_GV: 0, CUIT: props.cuit });
             if (r.ok) return { valor: r.id, tipo: r.tipo, inferido: true };
+
+            // Ni declarado ni inferible: el numero esta mal tipeado o no es un
+            // documento. NO se corrige y NO se frena el alta (decision de Matias
+            // 2026-08-25): el documento viaja tal cual y el tipo va
+            // SIN_IDENTIFICAR, que es una fila real de TIPO_DOCUMENTO_GV.
+            if (campo.tipoSiFalta) {
+                const id = documento.TIPO_A_ID[campo.tipoSiFalta];
+                if (id) return { valor: id, tipo: campo.tipoSiFalta, porDefecto: true };
+            }
             return {
                 motivo: vacio(crudo) ? 'sin tipo de documento, y no se pudo inferir del numero' : `tipo de documento '${crudo}' desconocido`,
                 comoSeArregla: 'elegir el tipo de documento en la company, o corregir el CUIT',
@@ -91,10 +117,19 @@ function resolverCampo(campo, props, m, lookups) {
         }
 
         case 'opcionInversa': {
-            if (vacio(crudo)) return {};
-            const r = m.desdeOpcion(campo.hubspot, crudo);
-            if (r.ok && r.id !== null) return { valor: r.id, codigo: r.codigo };
-            return { motivo: r.motivo || `no se pudo resolver '${crudo}'`, comoSeArregla: `elegir una opcion de ${campo.hubspot} que exista en Tango` };
+            if (!vacio(crudo)) {
+                const r = m.desdeOpcion(campo.hubspot, crudo);
+                if (r.ok && r.id !== null) return { valor: r.id, codigo: r.codigo };
+            }
+            // La opcion no existe en Tango, o no hay opcion elegida. Antes de
+            // frenar el alta se prueba el neutro que declara el catalogo — para
+            // la provincia es 'Desconocido', una fila propia de GVA18.
+            const alterno = porCodigo(campo, campo.codigoSiFalta, lookups);
+            if (alterno) return { ...alterno, porDefecto: true };
+            return {
+                motivo: vacio(crudo) ? 'sin valor' : `la opcion '${crudo}' no tiene equivalencia en Tango`,
+                comoSeArregla: `elegir una opcion de ${campo.hubspot} que exista en Tango`,
+            };
         }
 
         case 'opcionLookup': {
@@ -114,6 +149,20 @@ function resolverCampo(campo, props, m, lookups) {
     }
 }
 
+/**
+ * Codigo de Tango -> ID interno, contra la tabla viva. Devuelve null si el
+ * campo no declara codigo o si la tabla no lo tiene.
+ *
+ * Se guarda el CODIGO en el catalogo y no el ID a proposito: el ID se resuelve
+ * contra el ERP en cada corrida, asi no queda hardcodeado un numero que puede
+ * cambiar (5.4). `zonas` es el ejemplo: el codigo '09' es el ID 10.
+ */
+function porCodigo(campo, codigo, lookups) {
+    if (vacio(codigo) || !campo.lookup || !lookups) return null;
+    const r = lookups.resolver(campo.lookup, codigo, campo.tango);
+    return r.ok ? { valor: r.id, codigo: String(codigo) } : null;
+}
+
 /** Etiqueta del desplegable -> codigo de Tango, leyendo `opciones` al reves. */
 function codigoDesdeEtiqueta(nombreHubSpot, etiqueta, m) {
     const campo = m.campos.find((c) => c.hubspot === nombreHubSpot && c.opciones);
@@ -123,6 +172,18 @@ function codigoDesdeEtiqueta(nombreHubSpot, etiqueta, m) {
         if (String(valor).trim() === buscada) return codigo;
     }
     return null;
+}
+
+/**
+ * Mail del owner de la company. HubSpot guarda el ID, no el mail, asi que la
+ * tabla de owners hay que leerla aparte (es una llamada de red). Se acepta
+ * tambien el mail ya resuelto, para no obligar a leer owners en un test.
+ */
+function emailDelOwner(props, owners) {
+    if (!vacio(props.hubspot_owner_email)) return props.hubspot_owner_email;
+    const id = props.hubspot_owner_id;
+    if (vacio(id) || !owners) return null;
+    return (typeof owners.get === 'function' ? owners.get(String(id)) : owners[String(id)]) || null;
 }
 
 /** Etiqueta de `tipo_de_documento` -> tipo logico de lib/documento. */
@@ -140,11 +201,13 @@ function tipoLogicoDesdeEtiqueta(etiqueta, m) {
  * @param {object} p.lookups      tablas auxiliares ya cargadas
  * @param {object} [p.decididos]  valores que administracion ya definio, por
  *                                campo de Tango: { ID_GVA10: 3, ... }
+ * @param {object} [p.owners]     id de owner de HubSpot -> mail, para resolver
+ *                                el vendedor. Sin esto el vendedor cae al default.
  * @returns {{ok, problemas, pendientes, valores, resueltos}}
  *
  * Nunca lanza. Una company incompleta es un informe, no una excepcion.
  */
-function verificar({ propiedades = {}, mapper: m, lookups, decididos = {} } = {}) {
+function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owners = null } = {}) {
     if (!m) throw new Error('verificarEmpresa: falta el mapper');
 
     const problemas = [];
@@ -153,22 +216,49 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {} } = {}
     const resueltos = {};
 
     for (const campo of ALTA.campos) {
-        // Lo que administracion todavia no definio. Si ya lo decidio, entra por
-        // `decididos` y deja de ser pendiente; si la company lo trae cargado
-        // (vino del sync), vale lo de la company.
-        if (campo.origen === 'sinDefinir') {
+        // El codigo lo elige lib/numeracion, no se verifica desde la company.
+        if (campo.origen === 'numeracion') continue;
+
+        // Los campos de parametria que no vienen de HubSpot. En los tres casos
+        // gana lo mas especifico que haya: lo que la company ya trae cargado
+        // (vino del sync), despues lo que se pase por `decididos`, y recien al
+        // final el default del catalogo.
+        if (campo.origen === 'sinDefinir' || campo.origen === 'default' || campo.origen === 'owner') {
             const yaCargado = campo.hubspot ? propiedades[campo.hubspot] : undefined;
             const decidido = decididos[campo.tango];
-            const valor = !vacio(decidido) ? decidido : yaCargado;
-            if (!vacio(valor)) { valores[campo.tango] = Number(valor); continue; }
+            const explicito = !vacio(decidido) ? decidido : yaCargado;
+            if (!vacio(explicito)) { valores[campo.tango] = Number(explicito); continue; }
+
+            // El vendedor sale del owner de la company. El match NO puede ser
+            // por el mail de Tango: GVA23.E_MAIL esta vacio en 26 de 27
+            // vendedores, asi que la equivalencia vive en el catalogo.
+            if (campo.origen === 'owner') {
+                const mail = String(emailDelOwner(propiedades, owners) || '').trim().toLowerCase();
+                const codigo = mail ? (campo.porOwner || {})[mail] : undefined;
+                const r = porCodigo(campo, codigo, lookups);
+                if (r) {
+                    valores[campo.tango] = r.valor;
+                    resueltos[campo.tango] = { codigo: r.codigo, porOwner: mail };
+                    continue;
+                }
+                // Owner sin equivalencia: se sigue con el default, pero queda
+                // dicho de donde salio para que no parezca un dato del owner.
+                const d = porCodigo(campo, campo.codigoPorDefecto, lookups);
+                if (d) {
+                    valores[campo.tango] = d.valor;
+                    resueltos[campo.tango] = { codigo: d.codigo, porDefecto: true, ownerSinEquivalencia: mail || null };
+                    continue;
+                }
+            } else {
+                const d = porCodigo(campo, campo.codigoPorDefecto, lookups);
+                if (d) { valores[campo.tango] = d.valor; resueltos[campo.tango] = { codigo: d.codigo, porDefecto: true }; continue; }
+            }
+
             if (campo.obligatorio) {
                 pendientes.push({ campo: campo.tango, queFalta: campo.queFalta, quienLoDefine: campo.quienLoDefine || 'administracion' });
             }
             continue;
         }
-
-        // El codigo lo elige lib/numeracion, no se verifica desde la company.
-        if (campo.origen === 'numeracion') continue;
 
         const r = resolverCampo(campo, propiedades, m, lookups);
 
@@ -184,8 +274,11 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {} } = {}
         }
 
         valores[campo.tango] = r.valor;
-        if (r.tipo) resueltos.tipoDocumento = { tipo: r.tipo, inferido: !!r.inferido };
-        if (r.codigo) resueltos[campo.tango] = r.codigo;
+        if (r.tipo) resueltos.tipoDocumento = { tipo: r.tipo, inferido: !!r.inferido, porDefecto: !!r.porDefecto };
+        if (r.codigo) resueltos[campo.tango] = { codigo: r.codigo, porDefecto: !!r.porDefecto };
+        // Un documento raro no frena el alta, pero queda senalado: es lo que
+        // deja que alguien lo revise despues sin tener que buscarlo.
+        if (r.revisar) resueltos.documentoARevisar = { valor: r.valor, sinNormalizar: !!r.sinNormalizar };
     }
 
     return { ok: problemas.length === 0 && pendientes.length === 0, problemas, pendientes, valores, resueltos };

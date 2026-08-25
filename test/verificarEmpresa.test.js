@@ -38,11 +38,8 @@ const COMPANY = {
     correo_electronico: 'contacto@prueba.com',
 };
 
-/** Lo que administracion todavia no definio, resuelto a mano para los tests. */
-const DECIDIDOS = { ID_GVA01: 1, ID_GVA10: 3, ID_GVA23: 10, ID_GVA24: 1, ID_GVA05: 1 };
-
-const verificar = (props, decididos = DECIDIDOS) =>
-    verificarEmpresa.verificar({ propiedades: props, mapper: m, lookups: lk, decididos });
+const verificar = (props, extra = {}) =>
+    verificarEmpresa.verificar({ propiedades: props, mapper: m, lookups: lk, ...extra });
 
 // ── El caso feliz ────────────────────────────────────────────────────────
 
@@ -61,7 +58,8 @@ test('los desplegables se resuelven al ID interno, no al codigo', () => {
     assert.strictEqual(r.valores.ID_TIPO_DOCUMENTO_GV, 26, 'C.U.I.T. es el 26, no el 80 ni el 1');
     assert.strictEqual(r.valores.ID_CATEGORIA_IVA, 1, 'RI');
     assert.strictEqual(typeof r.valores.ID_GVA18, 'number');
-    assert.strictEqual(r.resueltos.ID_GVA18, '00', 'y deja a la vista el codigo del que salio');
+    assert.deepStrictEqual(r.resueltos.ID_GVA18, { codigo: '00', porDefecto: false }, 'deja a la vista el codigo del que salio');
+    assert.strictEqual(r.valores.ID_GVA05, 10, 'zona: el codigo 09 es el ID 10, no el 9');
 });
 
 test('el CUIT sale con guiones aunque venga sin ellos', () => {
@@ -89,10 +87,13 @@ test('sin nombre de fantasia se cae a la razon social en vez de frenar', () => {
     assert.strictEqual(r.valores.NOM_COM, 'CLINICA PRUEBA S.A.');
 });
 
-test('una provincia sin equivalencia en Tango se reporta, no se adivina', () => {
+test('una provincia sin equivalencia en Tango cae en Desconocido, no frena', () => {
+    // Decision de Matias 2026-08-25: default neutro en vez de bloquear. Y el
+    // neutro no se inventa: 'Desconocido' es una fila propia de GVA18.
     const r = verificar({ ...COMPANY, provincia: 'ushuaia_centro' });
-    assert.strictEqual(r.ok, false);
-    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA18'));
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.valores.ID_GVA18, 32);
+    assert.deepStrictEqual(r.resueltos.ID_GVA18, { codigo: '31', porDefecto: true }, 'queda dicho que salio del default');
 });
 
 test('una condicion de IVA que no esta en el catalogo se reporta', () => {
@@ -110,11 +111,11 @@ test('sin tipo de documento se infiere del numero, como en la lectura', () => {
     assert.strictEqual(r.resueltos.tipoDocumento.inferido, true, 'queda constancia de que fue inferido');
 });
 
-test('sin documento y sin tipo no se puede inventar el ID: es problema', () => {
+test('sin documento el tipo va SIN_IDENTIFICAR, pero el CUIT sigue haciendo falta', () => {
     const r = verificar({ ...COMPANY, cuit: '', tipo_de_documento: '' });
+    assert.strictEqual(r.valores.ID_TIPO_DOCUMENTO_GV, 41, 'SIN_IDENTIFICAR es una fila real de TIPO_DOCUMENTO_GV');
     assert.strictEqual(r.ok, false);
-    assert.ok(r.problemas.some((p) => p.campo === 'ID_TIPO_DOCUMENTO_GV'));
-    assert.ok(r.problemas.some((p) => p.campo === 'CUIT'), 'y tambien falta el CUIT');
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['CUIT'], 'lo unico que falta es el documento');
 });
 
 test('telefono y mail no frenan el alta', () => {
@@ -130,31 +131,33 @@ test('sin pais se manda ARGENTINA', () => {
 
 // ── Lo que NO puede arreglar nadie desde HubSpot ─────────────────────────
 
-test('lo que falta definir va a `pendientes`, separado de los problemas', () => {
-    // El punto de la separacion: mandar a comercial a buscar la lista de
-    // precios de un cliente nuevo es mandarlo a buscar un dato que no existe.
-    const r = verificar(COMPANY, {});
-    assert.strictEqual(r.ok, false);
-    assert.strictEqual(r.problemas.length, 0, 'la company esta completa: no hay nada que arreglar en HubSpot');
-    assert.deepStrictEqual(
-        r.pendientes.map((p) => p.campo).sort(),
-        ['ID_GVA01', 'ID_GVA05', 'ID_GVA10', 'ID_GVA23', 'ID_GVA24']
-    );
-    assert.ok(r.pendientes.every((p) => p.quienLoDefine === 'administracion'));
-    assert.ok(r.pendientes.every((p) => p.queFalta), 'cada pendiente dice que falta decidir');
-});
-
-test('lo que administracion ya decidio deja de ser pendiente', () => {
-    const r = verificar(COMPANY, { ...DECIDIDOS });
+test('la parametria sale del default por moda y ya no frena el alta', () => {
+    // Decision de Matias 2026-08-25: para lo que faltaba definir se usa el
+    // valor que mas se repite en el padron. Los codigos viven en el catalogo
+    // y el ID se resuelve contra la tabla viva.
+    const r = verificar(COMPANY);
     assert.strictEqual(r.pendientes.length, 0);
-    assert.strictEqual(r.valores.ID_GVA10, 3);
+    assert.strictEqual(r.valores.ID_GVA01, 1, 'CONTADO');
+    assert.strictEqual(r.valores.ID_GVA10, 3, 'CON IVA EN $');
+    assert.strictEqual(r.valores.ID_GVA24, 1, 'RETIRA CLIENTE');
+    assert.strictEqual(r.valores.ID_GVA05, 10, 'ZONA NO DEFINIDA');
+    for (const c of ['ID_GVA01', 'ID_GVA10', 'ID_GVA24', 'ID_GVA05']) {
+        assert.strictEqual(r.resueltos[c].porDefecto, true, c + ' tiene que quedar marcado como default');
+    }
 });
 
-test('si la company ya trae el dato del sync, no hace falta la decision', () => {
-    // Una company que vino del timer tiene los tango_id_* cargados.
-    const r = verificar({ ...COMPANY, tango_id_gva01: '14', tango_id_gva10: '2', tango_id_gva23: '7', tango_id_gva24: '3', tango_id_gva05: '1' }, {});
+test('lo que administracion decida despues pisa al default', () => {
+    const r = verificar(COMPANY, { decididos: { ID_GVA10: 5 } });
+    assert.strictEqual(r.valores.ID_GVA10, 5);
+});
+
+test('si la company ya trae el dato del sync, gana sobre el default', () => {
+    // Una company que vino del timer tiene los tango_id_* cargados: son los del
+    // cliente real, no un valor generico.
+    const r = verificar({ ...COMPANY, tango_id_gva01: '14', tango_id_gva10: '2', tango_id_gva23: '7', tango_id_gva24: '3', tango_id_gva05: '1' });
     assert.strictEqual(r.pendientes.length, 0);
     assert.strictEqual(r.valores.ID_GVA01, 14, 'y llega como numero, no como el texto de HubSpot');
+    assert.strictEqual(r.valores.ID_GVA10, 2);
 });
 
 // ── Duplicados ───────────────────────────────────────────────────────────
@@ -216,6 +219,100 @@ test('el catalogo de campos del alta vive en config, no en el codigo', () => {
 test('verificar no explota con una company vacia: informa', () => {
     const r = verificarEmpresa.verificar({ propiedades: {}, mapper: m, lookups: lk });
     assert.strictEqual(r.ok, false);
-    assert.ok(r.problemas.length > 0);
-    assert.ok(r.pendientes.length > 0);
+    assert.deepStrictEqual(
+        r.problemas.map((p) => p.campo).sort(),
+        ['CUIT', 'DOMICILIO', 'ID_CATEGORIA_IVA', 'NOM_COM', 'RAZON_SOCI'],
+        'solo lo que una persona tiene que cargar'
+    );
+});
+
+// ── Neutros: lo que no frena el alta pero igual viaja ────────────────────
+
+test('sin codigo postal ni localidad va un neutro, no un problema', () => {
+    // MEDIDO 2026-08-25: 137 de 300 clientes del ERP no tienen codigo postal y
+    // 9 no tienen localidad, ULTRASCHALL S.A. entre ellos. Si Tango los
+    // exigiera, esos registros no podrian existir.
+    const r = verificar({ ...COMPANY, zip: '', localidad: null });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.valores.C_POSTAL, ' ');
+    assert.strictEqual(r.valores.LOCALIDAD, ' ');
+});
+
+// ── Documento mal tipeado ────────────────────────────────────────────────
+
+test('un documento mal tipeado viaja TAL CUAL y queda marcado', () => {
+    // Decision de Matias 2026-08-25. Normalizarlo seria inventar un documento
+    // que nadie cargo, y taparia el error justo cuando conviene que se vea.
+    const r = verificar({ ...COMPANY, cuit: '30-6959420-3', tipo_de_documento: '' });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.valores.CUIT, '30-6959420-3', 'ni se le sacan los guiones ni se completa');
+    assert.strictEqual(r.valores.ID_TIPO_DOCUMENTO_GV, 41, 'SIN_IDENTIFICAR');
+    assert.strictEqual(r.resueltos.documentoARevisar.sinNormalizar, true);
+});
+
+test('un CUIT de 11 digitos con el verificador mal tambien se marca', () => {
+    // Caso real: 000576 Angeloni, Italo Domingo, CUIT 20-17627556-7.
+    const r = verificar({ ...COMPANY, cuit: '20-17627556-7', tipo_de_documento: '' });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.valores.CUIT, '20-17627556-7');
+    assert.ok(r.resueltos.documentoARevisar);
+});
+
+test('un DNI de 7 u 8 digitos es normal: no se marca nada', () => {
+    for (const dni of ['38.901.611', '33835690', '4548032']) {
+        const r = verificar({ ...COMPANY, cuit: dni, tipo_de_documento: '' });
+        assert.strictEqual(r.valores.CUIT, dni, 'viaja como lo escribieron');
+        assert.strictEqual(r.resueltos.documentoARevisar, undefined, `${dni} no deberia marcarse`);
+    }
+});
+
+test('un documento sin ningun digito si es problema', () => {
+    const r = verificar({ ...COMPANY, cuit: 'a definir' });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'CUIT'));
+});
+
+// ── Vendedor por owner ───────────────────────────────────────────────────
+
+test('el vendedor sale del owner de la company', () => {
+    const r = verificar({ ...COMPANY, hubspot_owner_email: 'jbutorac@ultraschall.com.ar' });
+    assert.strictEqual(r.valores.ID_GVA23, 26, 'Juan Butorac es el codigo 24, que en GVA23 es el ID 26');
+    assert.strictEqual(r.resueltos.ID_GVA23.codigo, '24');
+    assert.strictEqual(r.resueltos.ID_GVA23.porOwner, 'jbutorac@ultraschall.com.ar');
+});
+
+test('el owner se puede resolver por id contra la tabla de owners', () => {
+    // HubSpot guarda el ID del owner, no el mail: la tabla se lee aparte.
+    const owners = { '90573355': 'jbutorac@ultraschall.com.ar' };
+    const r = verificar({ ...COMPANY, hubspot_owner_id: '90573355' }, { owners });
+    assert.strictEqual(r.valores.ID_GVA23, 26);
+});
+
+test('el mail del owner no distingue mayusculas', () => {
+    const r = verificar({ ...COMPANY, hubspot_owner_email: 'JButorac@Ultraschall.com.ar' });
+    assert.strictEqual(r.valores.ID_GVA23, 26);
+});
+
+test('un owner sin vendedor en Tango cae en FACUNDO y lo deja dicho', () => {
+    // 23 de 27 vendedores no tienen owner: el match no se puede completar solo
+    // porque GVA23.E_MAIL esta vacio en 26 de 27. Hasta que se complete a mano,
+    // el default es el vendedor con el 63% de la cartera.
+    const r = verificar({ ...COMPANY, hubspot_owner_email: 'pthaler@ultraschall.com.ar' });
+    assert.strictEqual(r.valores.ID_GVA23, 10, 'FACUNDO');
+    assert.strictEqual(r.resueltos.ID_GVA23.porDefecto, true);
+    assert.strictEqual(r.resueltos.ID_GVA23.ownerSinEquivalencia, 'pthaler@ultraschall.com.ar');
+});
+
+test('una company sin owner tambien cae en el default', () => {
+    const r = verificar(COMPANY);
+    assert.strictEqual(r.valores.ID_GVA23, 10);
+    assert.strictEqual(r.resueltos.ID_GVA23.ownerSinEquivalencia, null);
+});
+
+test('la tabla de owners del catalogo apunta a vendedores que existen', () => {
+    const campo = verificarEmpresa.ALTA.campos.find((c) => c.tango === 'ID_GVA23');
+    for (const [mail, codigo] of Object.entries(campo.porOwner)) {
+        assert.ok(lk.resolver('vendedores', codigo, mail).ok, `${mail} apunta al vendedor ${codigo}, que no existe`);
+    }
+    assert.ok(lk.resolver('vendedores', campo.codigoPorDefecto, 'default').ok);
 });
