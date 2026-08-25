@@ -24,3 +24,7 @@ Thumbs.db
 
 # 6. Carpetas de cache de herramientas de Azure
 .azurefunctions/
+
+# 7. Backups que genera scripts/repararPropiedades.js antes de borrar una
+#    propiedad. Traen datos reales de clientes (CUIT): no van al repo.
+backup-propiedades-*.json

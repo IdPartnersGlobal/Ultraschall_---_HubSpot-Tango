@@ -103,12 +103,37 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
             return pedir(`/crm/v3/properties/${objeto}/groups`, { metodo: 'POST', body: grupo });
         },
 
+        propiedad(objeto, nombre) {
+            return pedir(`/crm/v3/properties/${objeto}/${nombre}`);
+        },
+
         /**
          * ⚠️ `hasUniqueValue` NO se puede cambiar despues de crear la propiedad.
          * Si se crea mal hay que borrarla y rehacerla.
          */
         crearPropiedad(objeto, propiedad) {
             return pedir(`/crm/v3/properties/${objeto}`, { metodo: 'POST', body: propiedad });
+        },
+
+        /**
+         * PATCH de una propiedad existente. Sirve para agregar opciones a un
+         * desplegable o moverla de grupo. NO sirve para cambiar `type` ni
+         * `hasUniqueValue`: eso exige borrar y recrear.
+         *
+         * OJO con `options`: el PATCH REEMPLAZA la lista entera, no la agrega.
+         * Hay que mandar siempre las viejas junto con las nuevas o se pierden
+         * las opciones que ya tenian valor cargado.
+         */
+        actualizarPropiedad(objeto, nombre, cambios) {
+            return pedir(`/crm/v3/properties/${objeto}/${nombre}`, { metodo: 'PATCH', body: cambios });
+        },
+
+        /**
+         * ⚠️ DESTRUCTIVO: borra la propiedad y el valor que tenga en todos los
+         * registros. HubSpot la archiva 90 dias, pero no hay que contar con eso.
+         */
+        borrarPropiedad(objeto, nombre) {
+            return pedir(`/crm/v3/properties/${objeto}/${nombre}`, { metodo: 'DELETE' });
         },
 
         // ----------------------------------------------------------- objetos
