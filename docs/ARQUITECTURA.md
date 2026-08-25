@@ -110,8 +110,11 @@ flowchart LR
 | `lib/hubspotClient.js` | módulo | Auth con private app token, batch upsert, respeto de rate limits. | 🔨 Bloqueado: falta el token |
 | `lib/numeracion.js` | módulo | Elige el `COD_GVA14` del cliente nuevo. Dos estrategias, sin red. | ✅ 2026-08-24 |
 | `lib/altaCliente.js` | módulo | **Escritura de vuelta**: ata la company al cliente que Tango acaba de crear. | ✅ 2026-08-24 |
+| `lib/verificarEmpresa.js` | módulo | Verificación previa del alta: qué falta, quién lo resuelve, y el payload ya resuelto. | ✅ 2026-08-25 |
+| `lib/firmaHubSpot.js` | módulo | Firma v3: la única autenticación del webhook de negocios ganados. | ✅ 2026-08-21 |
+| `lib/politicaProxy.js` | módulo | Contención del proxy anónimo de diagnóstico. | ✅ 2026-08-25 |
 
-**Tests:** `npm test` (runner nativo de Node, sin dependencias). 159 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
+**Tests:** `npm test` (runner nativo de Node, sin dependencias). 179 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
 
 Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms, con 5.670 hashes distintos y 0 problemas de resolución.
 | `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products. |
@@ -293,6 +296,8 @@ payload = { ...defaults[entidad], ...camposMapeadosDesdeHubSpot }
 Así el mapeo (`config/mapeo.*.json`) queda limpio: sólo lo que realmente viaja entre los dos sistemas.
 
 ⚠️ Los valores actuales de `defaults.tango.json` salieron de los ejemplos de Postman. **Antes de producción los tiene que validar administración**, sobre todo talonario, depósito, alícuotas de IVA y clasificaciones SIAP.
+
+El mismo archivo declara, en `clientes.alta`, **qué campos exige Tango y de dónde sale cada uno**. Eso es lo que lee la verificación previa de §7.12, y también lo que hay que corregir cuando se sondee el ERP: la lista de obligatorios de hoy es una suposición tomada del payload de ejemplo.
 
 ### 5.9 🟢 El entorno de Tango es una COPIA, no producción
 
@@ -822,7 +827,7 @@ Ninguna de las dos rellena los 1.943 huecos entre 1 y 7610: un hueco es un códi
 
 🟡 **La estrategia no tiene default.** `planificar` exige que se la pasen y el error nombra la decisión pendiente. Es de administración de Ultraschall (§7.6), no técnica.
 
-**Lo que falta para tener el alta entera:** la función HTTP del hook, el armado del payload de alta (HubSpot → Tango, con `defaults.tango.json` de §5.5) y la verificación previa de §5.5/riesgo 3. La escritura de vuelta ya está y no depende de nada de eso.
+**Lo que falta para tener el alta entera:** la función HTTP del hook y el `POST Api/Create`. La verificación previa y el armado del payload se construyeron el 2026-08-25 (§7.12).
 
 ---
 
@@ -932,6 +937,43 @@ Repasadas las propiedades una por una contra la carga real de los 5.670 clientes
 | `FECHA_INHA` | Fecha de inhabilitación | 10 |
 
 De las 116 columnas que devuelve la lectura, el mapeo usa 34.
+
+---
+
+### 7.12 Verificación previa del alta (construido 2026-08-25)
+
+**Es el riesgo 3 del circuito.** "Verificar empresa" no es preguntar si existe el `COD_GVA14`: es contestar si esta company **se puede** dar de alta y, si no, **qué falta**. La alternativa es mandar el alta y comerse el rechazo del ERP, que llega como un mensaje suelto sin decir cuál de los 18 campos falló — y para entonces el número de la numeración ya se gastó.
+
+El módulo es `lib/verificarEmpresa.js` y devuelve tres cosas. La distinción entre las dos primeras es el punto:
+
+| | Qué es | Quién lo resuelve |
+|---|---|---|
+| `problemas` | Falta la razón social, el CUIT no tiene dígitos, la provincia elegida no tiene equivalencia en Tango | Comercial, en HubSpot, ahora mismo |
+| `pendientes` | Qué lista de precios, qué vendedor, qué transporte lleva un cliente nuevo | **Administración.** No es un dato que exista en ningún lado todavía |
+| `valores` | Los campos de Tango ya resueltos, listos para mezclar sobre los defaults de §5.5 | — |
+
+Mezclar las dos primeras mandaría a comercial a buscar un dato que no existe. Por eso van separadas.
+
+**Verificar y armar el payload son la misma pasada.** Si fueran dos módulos se desincronizarían, y el modo de falla sería el peor: verifica bien y manda otra cosa.
+
+**Qué exige Tango vive en `config/defaults.tango.json` → `clientes.alta`, no en el código.** Cada campo declara de dónde sale (`hubspot`, `numeracion`, `sinDefinir`), cómo se resuelve y **con qué evidencia** se lo marcó obligatorio.
+
+🟡 **`_verificadoContraElERP: false`.** Hoy la lista de obligatorios sale del payload de ejemplo (`docs/payloads/cliente-create.json`), que dice ser "los campos mínimos indispensables" pero nunca se contrastó. Confirmarlo es sondear con el **oráculo de clave foránea** de §7.6 — se manda el alta incompleta y Tango contesta qué falta **sin crear el registro** — y corregir el JSON. Requiere Azure (§5.6).
+
+**Resoluciones que hace, y por qué ninguna es copiar y pegar:**
+
+- **Los desplegables vuelven al ID interno**, no al código: `provincia` → `opcionesInversas` → `COD_GVA18` → tabla viva → `ID_GVA18`. Es §5.4 en la dirección contraria.
+- **El tipo de documento se infiere si no está elegido**, con `lib/documento`. El 54% del padrón lo tiene sin definir (§7.2): frenar el alta por eso sería pedirle a comercial un dato que el propio ERP no tiene. Queda constancia de que fue inferido.
+- **Sin nombre de fantasía se cae a la razón social.** `NOM_COM` es obligatorio para Tango, pero no es un dato que comercial tenga que inventar.
+- **Teléfono y mail no frenan el alta**, aunque figuren en el payload mínimo.
+
+**Duplicados: por código Y por documento.** Mirar sólo el código deja pasar el duplicado justo en el caso que importa — la company que cargó comercial a mano **no tiene** código. El CUIT es el único dato del negocio que se puede cruzar.
+
+⚠️ Pero **el CUIT no es clave**: 142 valores se repiten en 267 clientes (placeholders como `11111111`, instituciones con varias cuentas). Por eso `buscarDuplicados` devuelve las coincidencias **para que decida una persona**, nunca un veredicto automático.
+
+Los dos valores entran a `filtroSql` —SQL concatenado del lado del ERP (§10.0)— y pueden venir de un webhook, así que se valida su forma antes de concatenar: código `/^[A-Za-z0-9]{1,15}$/`, documento `/^[0-9-]{7,15}$/`. Lo que no tiene esa forma no se consulta.
+
+**Lo que falta para tener el alta entera:** la función HTTP del hook y el `POST Api/Create` en sí. La verificación, la numeración (§7.6) y la escritura de vuelta (§7.8) ya están.
 
 ---
 

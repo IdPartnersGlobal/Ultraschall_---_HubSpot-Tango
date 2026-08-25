@@ -9,6 +9,38 @@
   "clientes": {
     "process": 2117,
     "endpoint": "Api/Create",
+
+    "alta": {
+      "_nota": "Que exige Tango para dar de alta un cliente, y de donde sale cada cosa. Lo lee lib/verificarEmpresa ANTES de intentar el alta, para poder decir que falta en vez de comerse un rechazo del ERP. Es el riesgo 3 del circuito: 'verificar empresa' es mas que mirar si existe el COD_GVA14.",
+      "_verificadoContraElERP": false,
+      "_comoVerificar": "Sondeo con el oraculo de clave foranea (ARQUITECTURA.md 7.6): se manda el alta incompleta y Tango contesta que falta SIN crear el registro. Hay que correrlo desde Azure (5.6). Mientras `_verificadoContraElERP` sea false, los `obligatorio` marcados con evidencia 'payload minimo' son una suposicion tomada de docs/payloads/cliente-create.json.",
+      "campos": [
+        { "tango": "COD_GVA14", "origen": "numeracion", "obligatorio": true, "evidencia": "verificado 2026-08-21 (7.6): sin el, 'La codificacion automatica no esta disponible para este tipo de apertura'" },
+        { "tango": "RAZON_SOCI", "hubspot": "razon_social", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "evidencia": "payload minimo" },
+        { "tango": "NOM_COM", "hubspot": "name", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "siFalta": "razon_social", "evidencia": "payload minimo. Es el nombre de fantasia (7.2); si esta vacio se cae a la razon social en vez de frenar el alta." },
+        { "tango": "CUIT", "hubspot": "cuit", "origen": "hubspot", "resolucion": "documento", "obligatorio": true, "evidencia": "verificado 2026-08-18: texto CON guiones, Tango los exige" },
+        { "tango": "ID_TIPO_DOCUMENTO_GV", "hubspot": "tipo_de_documento", "origen": "hubspot", "resolucion": "tipoDocumento", "obligatorio": true, "evidencia": "payload minimo. El ID sale de lib/documento, no del codigo (5.4)." },
+        { "tango": "ID_CATEGORIA_IVA", "hubspot": "condicion_iva", "origen": "hubspot", "resolucion": "opcionLookup", "lookup": "categoriasIva", "obligatorio": true, "evidencia": "payload minimo. IDs confirmados con prueba de falsacion el 2026-08-24 (7.7)." },
+        { "tango": "DOMICILIO", "hubspot": "domicilio_del_consultorio", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "evidencia": "payload minimo" },
+        { "tango": "LOCALIDAD", "hubspot": "localidad", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "evidencia": "payload minimo" },
+        { "tango": "C_POSTAL", "hubspot": "zip", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "evidencia": "payload minimo" },
+        { "tango": "ID_GVA18", "hubspot": "provincia", "origen": "hubspot", "resolucion": "opcionInversa", "obligatorio": true, "evidencia": "payload minimo. El desplegable de HubSpot vuelve a codigo por `opcionesInversas` y de ahi a ID por la tabla viva (7.10)." },
+        { "tango": "GVA133_NOM_PAIS", "hubspot": "country", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "valorSiFalta": "ARGENTINA", "evidencia": "payload minimo" },
+        { "tango": "TELEFONO_1", "hubspot": "phone", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "evidencia": "payload minimo, pero no hay razon para frenar un alta por falta de telefono" },
+        { "tango": "E_MAIL", "hubspot": "correo_electronico", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "evidencia": "payload minimo, pero no hay razon para frenar un alta por falta de mail" },
+
+        { "tango": "ID_GVA01", "hubspot": "tango_id_gva01", "origen": "sinDefinir", "obligatorio": true, "quienLoDefine": "administracion", "queFalta": "condicion de venta por defecto para clientes nuevos", "evidencia": "payload minimo" },
+        { "tango": "ID_GVA10", "hubspot": "tango_id_gva10", "origen": "sinDefinir", "obligatorio": true, "quienLoDefine": "administracion", "queFalta": "lista de precios por defecto para clientes nuevos (7.9: no se hereda de la ficha, es decision por pedido)", "evidencia": "payload minimo" },
+        { "tango": "ID_GVA23", "hubspot": "tango_id_gva23", "origen": "sinDefinir", "obligatorio": true, "quienLoDefine": "administracion", "queFalta": "vendedor: deberia salir del owner de la company, pero FACUNDO tiene el 63% de la cartera y hay que confirmar si es un vendedor real (7.4)", "evidencia": "payload minimo" },
+        { "tango": "ID_GVA24", "hubspot": "tango_id_gva24", "origen": "sinDefinir", "obligatorio": true, "quienLoDefine": "administracion", "queFalta": "transporte por defecto para clientes nuevos", "evidencia": "payload minimo" },
+        { "tango": "ID_GVA05", "hubspot": "tango_id_gva05", "origen": "sinDefinir", "obligatorio": true, "quienLoDefine": "administracion", "queFalta": "zona por defecto para clientes nuevos", "evidencia": "payload minimo" }
+      ],
+      "duplicados": {
+        "_nota": "Antes de crear hay que mirar si el cliente YA esta en Tango. Por codigo solo no alcanza: una company creada a mano en HubSpot no tiene codigo, y el CUIT es el unico dato del negocio que se puede cruzar.",
+        "_ojo": "El CUIT NO es clave: 142 valores se repiten en 267 clientes (placeholders como 11111111 e instituciones con varias cuentas). Un CUIT repetido es un AVISO para que decida una persona, nunca un rechazo automatico."
+      }
+    },
+
     "confirmar": [
       "ID_TIPO_DOCUMENTO_GV y ID_CATEGORIA_IVA deberian derivarse del cliente real, no ser fijos",
       "ID_GVA05 (vendedor) deberia venir del owner del Deal/Company en HubSpot",

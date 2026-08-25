@@ -184,6 +184,13 @@ function crear(mapeo, lookups = null) {
 
     return {
         /**
+         * La definicion del mapeo ya filtrada. La necesita quien tiene que ir
+         * en la direccion contraria (lib/verificarEmpresa lee `opciones` al
+         * reves para volver de la etiqueta de HubSpot al codigo de Tango).
+         */
+        campos,
+
+        /**
          * Convierte un registro de Tango en propiedades de HubSpot.
          * @returns {{ propiedades: object, problemas: string[] }}
          */
