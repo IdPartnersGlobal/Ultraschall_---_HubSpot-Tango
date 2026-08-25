@@ -171,6 +171,28 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
             return { procesados, fallidos };
         },
 
+        /**
+         * Un registro puntual, por su ID de HubSpot. Devuelve null si no existe.
+         *
+         * Lo usa la escritura de vuelta del alta (lib/altaCliente): antes de
+         * pisar una company hay que saber que campos ya tienen valor cargado a
+         * mano, y para un solo registro leer el objeto entero es absurdo.
+         */
+        async objeto(objeto, id, propiedades = []) {
+            const qs = propiedades.length ? `?properties=${encodeURIComponent(propiedades.join(','))}` : '';
+            try {
+                return await pedir(`/crm/v3/objects/${objeto}/${id}${qs}`);
+            } catch (e) {
+                if (e instanceof HubSpotError && e.status === 404) return null;
+                throw e;
+            }
+        },
+
+        /** PATCH de un registro puntual, por su ID de HubSpot. */
+        actualizarObjeto(objeto, id, propiedades) {
+            return pedir(`/crm/v3/objects/${objeto}/${id}`, { metodo: 'PATCH', body: { properties: propiedades } });
+        },
+
         /** Lee todos los registros de un objeto con las propiedades pedidas. */
         async leerTodos(objeto, propiedades) {
             const salida = [];
