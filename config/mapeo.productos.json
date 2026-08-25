@@ -73,8 +73,8 @@
       "label": "Precio",
       "tipo": "number",
       "hsFieldType": "number",
-      "autoritativoTango": true,
-      "notas": "BLOQUEANTE: no viene en process=87. Debe salir del process de listas de precios. Definir que lista alimenta el catalogo de HubSpot."
+      "autoritativoTango": false,
+      "notas": "NO viene en process=87: ninguno de sus 141 campos es de precio, y el process de listas de precios sigue sin conseguirse. Mientras tanto el mapper no lo emite, asi que el sync nunca escribe un precio en blanco. | NO AUTORITATIVO desde el 2026-08-25 (decision de Matias): los precios se cargan A MANO en HubSpot, asi que el dia que aparezca el process de precios el sync NO los va a pisar — solo va a completar los que esten vacios. Si algun dia se quiere que Tango mande, cambiar este flag a proposito."
     },
     {
       "tango": "COD_BARRA",

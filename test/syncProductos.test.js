@@ -106,3 +106,20 @@ test('el hash evita reescribir un articulo que no cambio', () => {
     const h3 = m.hash(m.aHubSpot(articulo('001', { DESCRIPCIO: 'Otra cosa' })).propiedades);
     assert.notStrictEqual(h1, h3, 'y si cambia, cambia');
 });
+
+test('el precio cargado a mano no se puede pisar: hoy porque no se emite, manana porque no es autoritativo', () => {
+    // Decision de Matias 2026-08-25: los precios se cargan a mano en HubSpot.
+    // Son DOS protecciones distintas y conviene no confundirlas:
+    //
+    //  hoy      `price` no tiene origen en Tango (tango: null), asi que el
+    //           mapper ni siquiera lo incluye entre sus campos y nunca lo emite.
+    //  manana   si aparece el process de precios y alguien le pone origen, el
+    //           flag `autoritativoTango: false` hace que solo se escriba cuando
+    //           esta vacio.
+    const price = mapeoProductos.campos.find((c) => c.hubspot === 'price');
+    assert.strictEqual(price.tango, null, 'todavia no hay de donde sacarlo');
+    assert.strictEqual(price.autoritativoTango, false, 'y cuando lo haya, no pisa lo cargado a mano');
+
+    const m = crear(mapeoProductos);
+    assert.strictEqual(m.aHubSpot(articulo('BAT250')).propiedades.price, undefined);
+});
