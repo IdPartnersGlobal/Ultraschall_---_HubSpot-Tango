@@ -1,14 +1,18 @@
 const { app } = require('@azure/functions');
+const politicaProxy = require('../lib/politicaProxy');
 
-// Herramienta de diagnóstico: proxy pass-through contra Tango.
+// Herramienta de diagnóstico: proxy contra Tango.
 // No es la función de producción — el sync real vive en syncClientes / syncProductos / dealToTango.
-// ⚠️ DEUDA D2 (docs/ARQUITECTURA.md §10): authLevel 'anonymous' expone el ERP a internet sin
-// autenticación, incluido el POST → Api/Create. Se mantiene sólo durante el relevamiento.
-// Antes de producción pasar a 'function' (header 'x-functions-key' o query '?code=...').
-// ⚠️ DELETE y PUT habilitados el 2026-08-19 para poder limpiar los registros de
-// prueba (Api/Delete, Api/Update). Suman superficie destructiva a un endpoint
-// que sigue siendo anonimo: aceptable mientras apunte a la COPIA del ERP, no a
-// produccion. Antes de apuntar a produccion, sacarlos o cerrar D2.
+//
+// El endpoint es anónimo por decisión de Matías (docs/ARQUITECTURA.md §10.0) y así queda.
+// Como la autenticación no contiene nada, la contención la pone lib/politicaProxy:
+// allowlist de ruta, de método, de query params y de process. Ya no es pass-through.
+//
+// Los dos interruptores viven en las Application Settings, apagados por defecto:
+//   TANGO_PROXY_MODO=relevamiento  -> process fuera del catálogo + filtroSql (método §5.7)
+//   TANGO_PROXY_ESCRITURA=true     -> Api/Create, Api/Update, Api/Delete
+// Sin ellos el proxy sólo lee las entidades ya conocidas. El día que esto apunte
+// a producción, la configuración segura es la de no hacer nada.
 app.http('testTangoConnection', {
     methods: ['GET', 'POST', 'DELETE', 'PUT'],
     authLevel: 'anonymous',
@@ -54,16 +58,43 @@ app.http('testTangoConnection', {
             const rutaPorMetodo = { POST: 'Api/Create', DELETE: 'Api/Delete', PUT: 'Api/Update' };
             const defaultPath = rutaPorMetodo[reqMethod] || 'Api/Get';
             const tangoPath = incomingUrl.searchParams.get('tangoPath') || defaultPath;
-            
+
             incomingUrl.searchParams.delete('tangoPath'); // Lo borramos para que no ensucie a Tango
-            
-            const queryParamsString = incomingUrl.searchParams.toString();
-            const targetUrl = queryParamsString 
-                ? `${baseUrl}/${tangoPath}?${queryParamsString}` 
-                : `${baseUrl}/${tangoPath}`;
+
+            // 2b. POLÍTICA DE ACCESO — única contención de un endpoint anónimo (§10.0)
+            const politica = politicaProxy.politicaDelEntorno();
+            const decision = politicaProxy.decidir({
+                metodo: reqMethod,
+                tangoPath,
+                params: incomingUrl.searchParams,
+                modo: politica.modo,
+                escritura: politica.escritura,
+            });
+
+            context.log(`🛡️ [POLITICA] modo=${politica.modo} escritura=${politica.escritura}`);
+
+            if (!decision.ok) {
+                context.log.error(`⛔ [BLOQUEADO] [REQ-${requestId}] ${reqMethod} ${tangoPath} — ${decision.motivo}`);
+                return {
+                    status: decision.status,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        status: "blocked",
+                        message: "El proxy no reenvía esta petición.",
+                        motivo: decision.motivo,
+                        modo: politica.modo,
+                    })
+                };
+            }
+
+            // De acá en adelante se usa lo que devolvió la política, no lo que llegó.
+            const queryParamsString = decision.params.toString();
+            const targetUrl = queryParamsString
+                ? `${baseUrl}/${decision.tangoPath}?${queryParamsString}`
+                : `${baseUrl}/${decision.tangoPath}`;
 
             context.log(`🔌 [ROUTING-INFO] Mapeo de la petición proxy:`);
-            context.log(`   • Ruta interna Tango: ${tangoPath}`);
+            context.log(`   • Ruta interna Tango: ${decision.tangoPath}`);
             context.log(`   • Parámetros Query  : ${queryParamsString || 'Ninguno'}`);
             context.log(`   • URL Final Target  : ${targetUrl}`);
 
@@ -80,19 +111,23 @@ app.http('testTangoConnection', {
                 headers: headers
             };
 
-            // Si es un POST, extraemos el body de Postman y lo empaquetamos
-            if (reqMethod === 'POST') {
+            // POST (alta) y PUT (modificación) llevan cuerpo. DELETE no: va por ?id=.
+            if (reqMethod === 'POST' || reqMethod === 'PUT') {
                 try {
                     const requestBodyText = await request.text();
                     fetchOptions.body = requestBodyText; // Se lo pasamos directo a Tango
-                    
+
                     context.log(`📦 [PAYLOAD-OUT] Cuerpo de la petición detectado:`);
                     context.log(`   • Tamaño Payload : ${requestBodyText.length} bytes`);
-                    // Logueamos un preview seguro (hasta 300 caracteres) para no saturar la consola
-                    const bodyPreview = requestBodyText.length > 300 
-                        ? requestBodyText.substring(0, 300) + '... [TRUNCADO]' 
-                        : requestBodyText;
-                    context.log(`   • Preview Body   : ${bodyPreview}`);
+
+                    // El cuerpo de un alta trae CUIT, dirección y teléfono de una persona
+                    // real (§10.1). El preview queda sólo para el relevamiento.
+                    if (politica.modo === politicaProxy.MODO_RELEVAMIENTO) {
+                        const bodyPreview = requestBodyText.length > 300
+                            ? requestBodyText.substring(0, 300) + '... [TRUNCADO]'
+                            : requestBodyText;
+                        context.log(`   • Preview Body   : ${bodyPreview}`);
+                    }
 
                 } catch (err) {
                     context.log.error(`❌ [ERR-BODY] No se pudo leer el cuerpo de la petición enviada desde Postman.`);
