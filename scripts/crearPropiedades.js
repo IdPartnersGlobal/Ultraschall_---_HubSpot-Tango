@@ -31,6 +31,7 @@ const ENTIDADES = {
     // contactos: FUERA DE ALCANCE desde el 2026-08-24 (ARQUITECTURA.md 7.3). No correr.
     contactos: { mapeo: 'mapeo.contactos.json', objeto: 'contacts' },
     productos: { mapeo: 'mapeo.productos.json', objeto: 'products' },
+    pedidos: { mapeo: 'mapeo.pedidos.json', objeto: 'deals' },
 };
 
 function leerToken() {

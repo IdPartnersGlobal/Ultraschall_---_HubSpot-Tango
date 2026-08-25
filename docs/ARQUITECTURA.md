@@ -23,7 +23,7 @@ Sincronizar la información maestra y transaccional entre **Tango Gestión** (ER
 | 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | ⛔ Bloqueada: `process=87` no trae precio (826 reg.) |
 | 2 | Clientes → cuentas | Tango `GVA14` → HubSpot **Companies** | 🔨 A construir (5.670 reg.) |
 | 3 | Contactos | Tango `GVA27` → HubSpot **Contacts** | ⛔ **FUERA DE ALCANCE** (decidido 2026-08-24, §7.3). El relevamiento y `config/mapeo.contactos.json` se conservan. |
-| 4 | Pedidos | HubSpot **Deal** ganado → Tango `Api/Create` (`process=19845`) | 🔨 A construir — payload ya relevado (§9) |
+| 4 | Pedidos | HubSpot **Deal** ganado → Tango `Api/Create` (`process=19845`) | 🔨 Circuito construido el 2026-08-25 (§9). ⛔ Los renglones esperan el catálogo de productos (Fase 1) |
 
 🟡 **PENDIENTE:** confirmar si el alcance real es éste o si hay que sumar comprobantes/saldos de cuenta corriente.
 
@@ -113,13 +113,16 @@ flowchart LR
 | `lib/verificarEmpresa.js` | módulo | Verificación previa del alta: qué falta, quién lo resuelve, y el payload ya resuelto. | ✅ 2026-08-25 |
 | `lib/firmaHubSpot.js` | módulo | Firma v3: la única autenticación del webhook de negocios ganados. | ✅ 2026-08-21 |
 | `lib/politicaProxy.js` | módulo | Contención del proxy anónimo de diagnóstico. | ✅ 2026-08-25 |
+| `lib/etapas.js` | módulo | Qué etapa cuenta como negocio ganado. Los dos embudos, sin red. | ✅ 2026-08-25 |
+| `lib/verificarPedido.js` | módulo | Verificación del pedido y armado del payload, cabecera y renglones. | ✅ 2026-08-25 |
+| `lib/dealToTango.js` | módulo | El circuito de la Fase 4, testeable con dobles. | ✅ 2026-08-25 |
 
-**Tests:** `npm test` (runner nativo de Node, sin dependencias). 190 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
+**Tests:** `npm test` (runner nativo de Node, sin dependencias). 219 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
 
 Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms, con 5.670 hashes distintos y 0 problemas de resolución.
 | `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products. |
 | `functions/syncClientes.js` | Timer | Fase 2. Tango `process=2117` → HubSpot Companies. |
-| `functions/dealToTango.js` | HTTP | Fase 4. Recibe el Deal desde HubSpot y crea el comprobante en Tango. |
+| `functions/dealToTango.js` | HTTP | Fase 4. Recibe el Deal desde HubSpot y crea el pedido en Tango. ✅ 2026-08-25, apagada por defecto (`DEAL_TO_TANGO_ENABLED`). |
 | `functions/testTangoConnection.js` | HTTP | Ya existe. Queda como diagnóstico, anónimo pero contenido por `lib/politicaProxy` (§10.0). |
 
 **Criterio:** ninguna función habla directo con `fetch`. Todo pasa por `lib/`, así el mapeo y los reintentos se testean y se cambian en un solo lugar.
@@ -1092,12 +1095,42 @@ El hash por registro se guarda en `tango_sync_hash`; sólo se manda a HubSpot lo
 Se crea un **pedido** (no una factura), vía `POST /Api/Create` con `process=19845`.
 Payload de referencia validado: **`docs/payloads/pedido-create.json`**.
 
-### 9.1 Flujo
+### 9.1 Flujo (construido 2026-08-25)
 
-1. Workflow de HubSpot: Deal pasa a `closedwon` → webhook a `dealToTango`.
-2. La función lee el Deal + line items + Company asociada.
-3. Arma el payload resolviendo los IDs internos desde las propiedades sincronizadas (§5.3).
-4. `POST /Api/Create` y guarda el número de pedido devuelto en `tango_nro_pedido` del Deal.
+El circuito entero está en `lib/dealToTango.js`, y `functions/dealToTango.js` sólo lo cablea a Azure. La lógica vive en `lib/` para poder testear el recorrido completo con dobles, sin levantar la Function App ni tocar el ERP.
+
+| # | Paso | Si falla |
+|---|---|---|
+| 1 | Firma v3 válida (`lib/firmaHubSpot`) | `401` seco, sin detalle |
+| 2 | Timestamp dentro de los 5 minutos | `401`. Anti-replay |
+| 3 | La etapa es *ganada* (`lib/etapas`) | `204`. Es el caso mayoritario |
+| 4 | El negocio no tiene ya `tango_nro_pedido` | `204`. Idempotencia (§9.3) |
+| 5 | Leer company + line items + productos | — |
+| 6 | Si la empresa no está en Tango, **darla de alta** (§7.12) | Se anota en el Deal |
+| 7 | Verificar el pedido (`lib/verificarPedido`) | Se anota en el Deal |
+| 8 | `POST Api/Create` con `process=19845` | Se propaga: conviene que HubSpot reintente |
+| 9 | Escribir `tango_nro_pedido` en el Deal | — |
+
+Los pasos 1 a 4 no hacen **ninguna** llamada de red: rechazar una petición que no corresponde cuesta un HMAC. El paso 3 filtra el volumen antes de gastar en lecturas — llegan peticiones por *todo* cambio de etapa.
+
+#### ⚠️ Hay dos embudos, y cada uno tiene su propio "Cierre ganado"
+
+Verificado contra el portal el 2026-08-25:
+
+| Embudo | Etapa ganada |
+|---|---|
+| Embudo de Ventas Ultraschall | `closedwon` |
+| Embudo de Licitaciones | `1376134021` |
+
+Comparar contra el string `closedwon` **dejaría afuera todos los ganados de licitaciones, y en silencio**: no hay error, simplemente no pasa nada. `lib/etapas` conoce las dos y además sabe deducirlas de los pipelines (`isClosed` + probabilidad 1), así que un embudo nuevo entra solo.
+
+Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como booleano da verdadero también para `'false'`, y entonces *todas* las etapas parecen ganadas. (De paso: en este portal las etapas "Cierre perdido" están cargadas con `isClosed=false` en los dos embudos. Está mal, pero no nos afecta.)
+
+#### El disparador
+
+`IdPartners/src/app/webhooks/webhooks-hsmeta.json` — suscripción `object.propertyChange` sobre `deal.dealstage`, activa. El `targetUrl` apuntaba a `https://witty-rain-02.webhook.cool/`, un balde de pruebas descartable; corregido el 2026-08-25 a la Function App. **Requiere `hs project upload` para que tome efecto.**
+
+⚠️ La URL va **sin query params**: la firma cubre la URI completa (§10.2).
 
 ### 9.2 De dónde sale cada campo del pedido
 
@@ -1131,13 +1164,30 @@ Payload de referencia validado: **`docs/payloads/pedido-create.json`**.
 | `PORCENTAJE_BONIFICACION` | `discount` |
 | `ID_STA22` | depósito (mismo default de cabecera) |
 
-### 9.3 Casos de error a resolver
+### 9.3 Casos de error — resueltos el 2026-08-25
 
-🟡 **PENDIENTE — definir comportamiento:**
-- Company sin `tango_id_gva14` (cliente que no existe en el ERP): ¿se rechaza, se avisa, o se da de alta el cliente en Tango?
-- Line item cuyo producto no tiene `tango_id_sta11`.
-- Cliente sin lista de precios asignada.
-- Reintento de un Deal ya enviado: **¿cómo se evita el pedido duplicado?** Propuesta: no enviar si `tango_nro_pedido` ya tiene valor.
+| Caso | Qué hace |
+|---|---|
+| Company sin `tango_id_gva14` | **Se da de alta el cliente en Tango** y se le escribe el código a la company (§7.12 + §7.8). No es un error: es un cliente que todavía no existe. Y como la company queda con su `codigo_tango`, la próxima vez ya no se crea nada |
+| Line item sin `tango_id_sta11` | Se anota el problema en el Deal y **no se manda el pedido**. Es el bloqueo esperado hasta que corra el sync de productos |
+| Línea escrita a mano, sin producto del catálogo | Igual: se anota y no se manda. Sin producto no hay `ID_STA11` que resolver |
+| Cliente sin lista de precios | Va el default del catálogo (§7.12). No frena nada |
+| Reintento de un Deal ya enviado | `tango_nro_pedido` con valor ⇒ `204` y no se toca el ERP. Es lo primero que se mira |
+
+**Los problemas se escriben en el Deal, no sólo en los logs.** `tango_pedido_problema` dice qué falta y en qué línea. Sin eso, el único rastro de una falla queda en Application Insights, donde comercial no entra — y el negocio se quedaría "ganado" sin pedido y sin que nadie se entere.
+
+**Un negocio que falla no se lleva puestos a los otros.** HubSpot puede mandar varios eventos en la misma tanda; cada uno se procesa aparte. Y la respuesta es `200` aunque alguno haya fallado: devolver un error haría que HubSpot reintente la tanda **entera**, incluidos los pedidos que sí se crearon.
+
+### 9.4 Lo que falta
+
+| Qué | Quién |
+|---|---|
+| ⛔ **El catálogo de productos.** Ningún product de HubSpot tiene `tango_id_sta11` (verificado 2026-08-25: cero propiedades `tango_*` en products). Sin eso los renglones no se pueden armar, y el sync de productos sigue bloqueado porque falta el `process` de precios | Ultraschall |
+| 🟡 Talonario `GVA43` y depósito `STA22`: hoy van en `1`, un valor **provisorio**. No se pueden elegir bien porque ni siquiera se consiguieron sus `process` | Ultraschall |
+| 🟡 `FECHA_ENTREGA` y `NRO_ORDEN_COMPRA`: no hay propiedad de Deal que las lleve. El pedido va sin ellas | Definir |
+| 🟡 **Riesgo 5 — el hook tiene que responder rápido.** Hoy contesta después de trabajar; un alta de cliente más el pedido pueden pasarse del tiempo que HubSpot espera. Lo cubre la idempotencia (el reintento ve `tango_nro_pedido` y no hace nada), pero la solución de fondo es contestar `200` y encolar | Sin discutir |
+| 🟡 `hs project upload` para que el webhook apunte de verdad a la Function App | Matías |
+| 🟡 `DEAL_TO_TANGO_ENABLED=true` y `SYNC_DRY_RUN=false` en Azure. Ambos apagados por defecto | Matías |
 
 ---
 
@@ -1256,6 +1306,7 @@ Deploy: push a `main` → GitHub Actions → Azure.
 | `HUBSPOT_CLIENT_SECRET` | Client secret de la app, para la firma v3 del webhook (§10.2). **No** es `HUBSPOT_TOKEN`. 🟡 Falta cargarlo. |
 | `TANGO_PROXY_MODO` | `cerrado` (default) \| `relevamiento`. Abre `process` fuera del catálogo y `filtroSql` en el proxy (§10.0). |
 | `TANGO_PROXY_ESCRITURA` | `true` habilita `Api/Create`/`Update`/`Delete` en el proxy. Default apagado (§10.0). |
+| `DEAL_TO_TANGO_ENABLED` | `true` activa el webhook de negocios ganados (§9). Apagado por defecto: desplegar y activar son dos decisiones distintas. |
 
 ---
 
@@ -1299,6 +1350,8 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 | `scripts/repararPropiedades.js` | ⚠️ Destructivo. Borra y recrea las propiedades mal definidas, con backup previo. Dry-run por defecto. |
 | `src/lib/verificarEmpresa.js` | Verificación previa del alta (§7.12): qué falta, quién lo resuelve, y el payload ya resuelto. |
 | `scripts/defaultsPorModa.js` | Recalcula los defaults de parametría con la moda del padrón real. Dry-run por defecto. Necesita Azure. |
+| `config/mapeo.pedidos.json` | Propiedades de Deal donde se guarda el resultado de mandar el negocio al ERP (§9). |
+| `src/lib/dealToTango.js` | El circuito de la Fase 4. |
 | `docs/payloads/cliente-create.json` | Payload de alta de cliente (`process=2117`). |
 | `docs/payloads/producto-create.json` | Payload de alta de artículo (`process=87`). |
 | `docs/payloads/pedido-create.json` | Payload de alta de pedido (`process=19845`). |

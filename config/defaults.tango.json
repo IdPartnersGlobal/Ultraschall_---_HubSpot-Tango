@@ -95,16 +95,16 @@
     "process": 19845,
     "endpoint": "Api/Create",
     "confirmar": [
-      "ID_GVA43_TALON_PED: talonario de pedidos real de Ultraschall",
-      "ID_STA22: deposito real de Ultraschall",
-      "VALIDA_STOCK: el ejemplo va en false; definir si produccion debe validar stock",
-      "ID_MONEDA: confirmar si siempre es ARS"
+      "ID_GVA43_TALON_PED = 1: PROVISORIO por decision de Matias (2026-08-25). Se deja un valor cualquiera hasta conseguir el process de GVA43, que hoy no se puede ni leer.",
+      "ID_STA22 = 1: PROVISORIO, mismo motivo (falta el process de STA22).",
+      "VALIDA_STOCK = true desde el 2026-08-25 (decision de Matias). El ejemplo de Postman iba en false.",
+      "ID_MONEDA = 1: PROVISORIO, se asume ARS."
     ],
     "defaults": {
       "ID_MONEDA": 1,
       "ID_GVA43_TALON_PED": 1,
       "ID_STA22": 1,
-      "VALIDA_STOCK": false,
+      "VALIDA_STOCK": true,
       "CALCULA_PROMOCIONES": false,
       "APLICA_DESCUENTO_CLIENTE": false,
       "ES_CLIENTE_HABITUAL": true,

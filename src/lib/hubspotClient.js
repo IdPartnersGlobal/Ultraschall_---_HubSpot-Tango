@@ -193,6 +193,44 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
             return pedir(`/crm/v3/objects/${objeto}/${id}`, { metodo: 'PATCH', body: { properties: propiedades } });
         },
 
+        /**
+         * IDs asociados a un registro. Va por la v4, que es la unica que
+         * devuelve las asociaciones con su tipo.
+         *
+         * Lo usa el webhook de negocios ganados: del Deal salen la company
+         * (a que cliente de Tango va el pedido) y los line items (los renglones).
+         */
+        async asociaciones(objeto, id, destino) {
+            const d = await pedir(`/crm/v4/objects/${objeto}/${id}/associations/${destino}?limit=500`);
+            return (d.results || []).map((r) => String(r.toObjectId));
+        },
+
+        /**
+         * Varios registros de una, por sus IDs. Un Deal con 20 renglones son
+         * 20 productos: pedirlos de a uno serian 20 viajes con el reloj del
+         * webhook corriendo.
+         *
+         * Los que no existen no vienen en la respuesta; no es un error.
+         */
+        async objetos(objeto, ids, propiedades = []) {
+            if (!ids.length) return [];
+            const salida = [];
+            for (const tanda of trozos([...ids], 100)) {
+                const d = await pedir(`/crm/v3/objects/${objeto}/batch/read`, {
+                    metodo: 'POST',
+                    body: { properties: propiedades, inputs: tanda.map((id) => ({ id: String(id) })) },
+                });
+                salida.push(...(d.results || []));
+            }
+            return salida;
+        },
+
+        /** Pipelines de un objeto, con sus etapas. De ahi sale cual es 'ganado'. */
+        async pipelines(objeto) {
+            const d = await pedir(`/crm/v3/pipelines/${objeto}`);
+            return d.results || [];
+        },
+
         /** Lee todos los registros de un objeto con las propiedades pedidas. */
         async leerTodos(objeto, propiedades) {
             const salida = [];

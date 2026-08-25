@@ -5,6 +5,8 @@ const numeracion = require('./numeracion');
 const { silencioso } = require('./logger');
 const { PROP_HASH, PROP_SYNC } = require('./syncClientes');
 const procesos = require('../../config/tango.processes.json');
+const verificarEmpresa = require('./verificarEmpresa');
+const defaultsTango = require('../../config/defaults.tango.json');
 const mapeoClientes = require('../../config/mapeo.clientes.json');
 
 /**
@@ -206,7 +208,72 @@ async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, log = s
     return resumen;
 }
 
+/**
+ * Da de alta el cliente en Tango y ata la company al cliente creado.
+ *
+ * Es lo que falta cuando un negocio se gana y la empresa todavia no existe en
+ * el ERP: sin `tango_id_gva14` no hay pedido posible (§9.2). Al terminar, la
+ * company queda con su codigo y su ID interno, asi que la proxima vez —y el
+ * timer nocturno— ya no crean nada.
+ *
+ * El orden importa y es este:
+ *
+ *   1. verificarEmpresa dice si se puede y devuelve los campos ya resueltos.
+ *      Si falta algo, se corta ACA: sin haber tocado el ERP y sin gastar codigo.
+ *   2. numeracion elige el COD_GVA14, que Tango no autoasigna (§7.6).
+ *   3. POST Api/Create. Si el codigo colisiona con un alta manual hecha en el
+ *      mismo momento, se reintenta con el candidato siguiente: por eso
+ *      numeracion devuelve varios y no uno.
+ *   4. escribirDeVuelta lee el cliente creado y lo copia a la company.
+ *
+ * @returns {Promise<{creado, codigo, idGva14, companyId, problemas, pendientes, dryRun}>}
+ */
+async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, owners = null, log = silencioso, dryRun = true, ahora = new Date() }) {
+    if (!companyId) throw new Error('altaCliente.crear: falta companyId');
+    if (!estrategia) {
+        // Sin default a proposito: es una decision de administracion (§7.6).
+        throw new Error("altaCliente.crear: falta la estrategia de numeracion ('correlativo' o 'reservado', TANGO_NUMERACION)");
+    }
+
+    // 1. ¿Se puede?
+    const v = verificarEmpresa.verificar({ propiedades, mapper: mapper.crear(mapeoClientes, lookups), lookups, owners });
+    if (!v.ok) {
+        log.aviso('ALTA', `la company ${companyId} no se puede dar de alta todavia: ${v.problemas.map((p) => p.campo).join(', ')}`);
+        return { creado: false, codigo: null, idGva14: null, companyId, problemas: v.problemas, pendientes: v.pendientes, dryRun };
+    }
+
+    // 2. El codigo.
+    const padron = await tango.get(procesos.entidades.clientes.process);
+    const { codigos } = numeracion.planificar(padron.registros.map((r) => r.COD_GVA14), { estrategia });
+    log.paso('ALTA', `candidatos de codigo (${estrategia}): ${codigos.join(', ')}`);
+
+    if (dryRun) {
+        log.aviso('DRY-RUN', `no se crea nada: la company ${companyId} habria quedado como el cliente ${codigos[0]}`);
+        return { creado: false, codigo: codigos[0], idGva14: null, companyId, problemas: [], pendientes: [], dryRun: true, payload: { ...defaultsTango.clientes.defaults, ...v.valores, COD_GVA14: codigos[0] } };
+    }
+
+    // 3. El alta.
+    let ultimoError;
+    for (const codigo of codigos) {
+        const payload = { ...defaultsTango.clientes.defaults, ...v.valores, COD_GVA14: codigo };
+        try {
+            await tango.create(procesos.entidades.clientes.process, payload);
+            log.paso('ALTA-OK', `cliente ${codigo} creado en Tango`);
+
+            // 4. Atar la company. Si esto falla, el cliente YA existe en el ERP:
+            // el error tiene que decirlo, porque reintentar el alta duplicaria.
+            const vuelta = await escribirDeVuelta({ tango, hs, lookups, companyId, codigo, log, dryRun: false, ahora });
+            return { creado: true, codigo, idGva14: vuelta.idGva14, companyId, problemas: vuelta.problemas, pendientes: [], dryRun: false };
+        } catch (e) {
+            ultimoError = e;
+            log.aviso('ALTA-RETRY', `el codigo ${codigo} fallo (${e.message}). Probando el siguiente.`);
+        }
+    }
+    throw new Error(`altaCliente.crear: no se pudo crear el cliente con ninguno de los codigos ${codigos.join(', ')}. Ultimo error: ${ultimoError?.message}`);
+}
+
 module.exports = {
+    crear,
     escribirDeVuelta,
     planificarEscritura,
     condicionPorCodigo,

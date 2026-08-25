@@ -70,6 +70,11 @@ function opcionesDe(campo) {
 function planificar(mapeo, existentes, { grupo = GRUPO.name } = {}) {
     const porNombre = new Map((existentes || []).map((p) => [p.name, p]));
     const clave = mapeo._meta?.claveIdempotencia?.hubspot;
+    // La clave es unica salvo que el mapeo diga lo contrario. En pedidos NO lo
+    // es: la guarda de idempotencia es "si tiene valor, no se manda de nuevo",
+    // y una propiedad unica ahi haria fallar la escritura de vuelta del pedido
+    // que SI se creo, que es justo el rastro que no se puede perder.
+    const claveEsUnica = mapeo._meta?.claveIdempotencia?.unique !== false;
 
     const aCrear = [];
     const yaEstan = [];
@@ -81,7 +86,7 @@ function planificar(mapeo, existentes, { grupo = GRUPO.name } = {}) {
 
         const { type, fieldType } = tipoHubSpot(campo);
         const opciones = opcionesDe(campo);
-        const debeSerUnica = campo.hubspot === clave;
+        const debeSerUnica = campo.hubspot === clave && claveEsUnica;
 
         const definicion = {
             name: campo.hubspot,

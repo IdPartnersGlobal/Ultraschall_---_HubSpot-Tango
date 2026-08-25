@@ -1,0 +1,74 @@
+{
+  "_meta": {
+    "entidad": "pedidos",
+    "estado": "PROPUESTA 2026-08-25. Son las propiedades de Deal que necesita el webhook de negocios ganados (Fase 4, ARQUITECTURA.md 9). Ninguna existe todavia en el portal: se verificaron las 249 propiedades de deals el 2026-08-25 y no hay ninguna tango_*.",
+    "direccion": "Este mapeo va al reves que los otros: no trae datos de Tango a HubSpot, sino que guarda en el Deal el RESULTADO de haberlo mandado al ERP.",
+    "origen": {
+      "sistema": "Tango",
+      "process": 19845,
+      "tabla": "GVA21"
+    },
+    "destino": {
+      "sistema": "HubSpot",
+      "objeto": "deals",
+      "grupoPropiedades": "tango_erp"
+    },
+    "claveIdempotencia": {
+      "tango": "NRO_PEDIDO",
+      "hubspot": "tango_nro_pedido",
+      "unique": false,
+      "nota": "NO se marca unique. La guarda de idempotencia es 'si tiene valor, no se manda de nuevo' (9.3), no una restriccion del portal: si Tango devolviera dos veces el mismo numero, una propiedad unica haria fallar la escritura de vuelta y perderiamos el rastro del pedido que SI se creo."
+    },
+    "numeroDelPedido": {
+      "decision": "2026-08-25 (Matias): el numero que identifica al pedido del lado nuestro es el ID que HubSpot le da al Deal automaticamente (hs_object_id). No se inventa una numeracion propia como si se hizo con COD_GVA14 en clientes.",
+      "porQue": "El ID del Deal ya es unico, ya existe antes de llamar a Tango y no puede colisionar. Viaja en LEYENDA_4 para poder rastrear el pedido desde el ERP hasta el negocio que lo origino.",
+      "ojo": "`tango_nro_pedido` guarda lo que devuelve TANGO, que es otra cosa: el numero de su talonario. Son dos numeros distintos y conviene no mezclarlos."
+    }
+  },
+
+  "campos": [
+    {
+      "tango": "NRO_PEDIDO",
+      "hubspot": "tango_nro_pedido",
+      "label": "Nro de pedido (Tango)",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "direccion": "tango->hubspot",
+      "notas": "Lo que devuelve Tango al crear el pedido. Es ADEMAS la guarda de idempotencia: si tiene valor, el Deal ya se mando y no se vuelve a mandar (9.3). Por eso se escribe SIEMPRE que el alta salga bien, aunque despues falle cualquier otra cosa."
+    },
+    {
+      "tango": "__fecha__",
+      "hubspot": "tango_pedido_creado",
+      "label": "Pedido creado en Tango",
+      "tipo": "datetime",
+      "hsFieldType": "date",
+      "direccion": "tango->hubspot",
+      "notas": "Cuando se creo. Sirve para auditar y para distinguir un Deal que nunca se proceso de uno que se proceso y fallo."
+    },
+    {
+      "tango": "__problema__",
+      "hubspot": "tango_pedido_problema",
+      "label": "Problema al crear el pedido",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "direccion": "tango->hubspot",
+      "notas": "Por que NO se pudo crear: que campo falta, que producto no esta atado a Tango. Sin esto el unico rastro de una falla queda en los logs de Azure, donde comercial no entra. Se limpia cuando el pedido finalmente se crea."
+    },
+    {
+      "tango": "__idCliente__",
+      "hubspot": "tango_pedido_cliente",
+      "label": "Cliente Tango del pedido",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "direccion": "tango->hubspot",
+      "notas": "El COD_GVA14 contra el que se cargo el pedido. Queda en el Deal porque la company puede cambiar de dueno o reasignarse despues, y entonces ya no se sabria a que cliente del ERP fue a parar."
+    }
+  ],
+
+  "sinMapear": {
+    "_nota": "Campos del pedido que HOY no se guardan en el Deal y podrian hacer falta.",
+    "FECHA_ENTREGA": "🟡 No hay propiedad de Deal que la lleve. Hasta que se defina, el pedido va sin fecha de entrega.",
+    "NRO_ORDEN_COMPRA": "🟡 Idem. Es la orden de compra DEL CLIENTE, no un numero nuestro: tiene que salir de una propiedad del Deal que alguien cargue.",
+    "PORCENTAJE_DESCUENTO_GENERAL": "Se puede sacar de un descuento a nivel Deal si algun dia se usa. Hoy va 0."
+  }
+}
