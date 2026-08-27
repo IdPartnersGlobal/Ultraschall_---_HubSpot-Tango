@@ -15,9 +15,10 @@
     },
     "claveIdempotencia": {
       "tango": "COD_GVA14",
-      "hubspot": "codigo_tango",
+      "hubspot": "tango_codigo_cliente",
       "unique": true,
-      "nota": "CUIT NO se usa como clave primaria: 267 duplicados en el padron (sucursales del mismo grupo). Nombre interno segun la planilla de Ultraschall."
+      "nota": "CUIT NO se usa como clave primaria: 267 duplicados en el padron (sucursales del mismo grupo).",
+      "porQueNoEsCodigoTango": "DECISION 2026-08-27 (Matias). La clave del batch upsert TIENE que ser unique en HubSpot, y `codigo_tango` se creo a mano en el portal sin `hasUniqueValue`. Eso no se puede cambiar con un PATCH: habria que borrar y recrear la propiedad, y en este proyecto NO se borran propiedades de HubSpot. Asi que la clave se muda a una propiedad nueva, creada bien de entrada. `codigo_tango` se sigue escribiendo con el mismo valor: es el nombre que define la planilla de Ultraschall (6.0) y es el que mira la gente."
     },
     "removidos": {
       "domain": "REMOVIDO 2026-08-24 por decision de Matias. `domain` es la SEGUNDA clave de matcheo de HubSpot: la aplica sola, sin que se la pidamos, y dos companies que lo comparten SE FUSIONAN. Mientras se escribia habia que filtrar por unicidad sobre el padron entero para que no fusionara clientes distintos (caso real: arrayamed.com en 'ARCANA SRL' y 'ARCANA SRL (Medinor SRL / Armando Arraya)'). Sacandolo, la identidad del sync queda reducida a una sola llave que controlamos nosotros: codigo_tango. Alcanzaba al 6% de las companies. El dato del sitio web NO se pierde: sigue yendo a `website`, que es inerte. El dominio derivado de los mails sigue en `tango_dominio_sugerido` para que comercial lo promueva a mano. Se pierden la asociacion automatica contacto->empresa por dominio y el enriquecimiento de HubSpot. Ver ARQUITECTURA.md 7.2."
@@ -59,9 +60,21 @@
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
+      "unique": false,
+      "autoritativoTango": true,
+      "notas": "El codigo de Tango como lo ve la gente. Nombre segun la planilla de Ultraschall (6.0). DEJO DE SER LA CLAVE el 2026-08-27: la propiedad existente en el portal no es unique y no se borra para recrearla, asi que la clave del upsert se mudo a `tango_codigo_cliente`. Se sigue escribiendo con el mismo valor. `unique: false` aca es para que `lib/propiedades` no la siga reportando como 'a rehacer': la propiedad esta como esta y asi se queda.",
+      "direccion": "tango->hubspot"
+    },
+    {
+      "tango": "COD_GVA14",
+      "hubspot": "tango_codigo_cliente",
+      "label": "Codigo de cliente (Tango)",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "porcentajeCarga": 100,
       "unique": true,
       "autoritativoTango": true,
-      "notas": "Clave primaria de la integracion.",
+      "notas": "CLAVE DE IDEMPOTENCIA desde el 2026-08-27. Mismo valor que `codigo_tango`, pero creada con `hasUniqueValue` para poder ser el `idProperty` del batch upsert, que HubSpot exige unique. Existe porque la otra se creo a mano sin unique y no se borra (7.2). Si algun dia `codigo_tango` se rehace bien, esta se puede jubilar.",
       "direccion": "tango->hubspot"
     },
     {
@@ -101,12 +114,13 @@
       "tango": "CUIT",
       "hubspot": "cuit",
       "label": "CUIT",
-      "tipo": "string",
-      "hsFieldType": "text",
+      "tipo": "number",
+      "hsFieldType": "number",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "transform": "documentoConGuiones",
-      "notas": "DECISION 2026-08-18: un solo formato, TEXTO con guiones (Tango los exige en el alta). No siempre es un CUIT: segun ID_TIPO_DOCUMENTO_GV puede traer DNI o CUIL. NO sirve como clave: 142 valores se repiten en 267 clientes, y no son sucursales sino placeholders (11111111 lo usan 44 clientes) e instituciones grandes con varias cuentas.",
+      "transform": "documentoSoloDigitos",
+      "notas": "DECISION 2026-08-27 (Matias): se escriben SOLO DIGITOS, sin guiones, porque la propiedad del portal es `number` y no se borra para recrearla como texto (7.2). Revierte la parte de formato de la decision del 2026-08-18; lo que NO cambia es que Tango exige los guiones en el alta, asi que se los vuelve a poner `lib/documento.formatear` en la ida (verificarEmpresa, resolucion 'documento'). Guardar y mandar dejan de tener el mismo formato: es el precio de no borrar la propiedad. No siempre es un CUIT: segun ID_TIPO_DOCUMENTO_GV puede traer DNI o CUIL. NO sirve como clave: 142 valores se repiten en 267 clientes, y no son sucursales sino placeholders (11111111 lo usan 44 clientes) e instituciones grandes con varias cuentas.",
+      "ojo": "Un documento con cero adelante no sobrevive a un campo numerico. El transform NO lo trunca: omite la propiedad y lo reporta. Medido el 2026-08-27 sobre los 300 de la muestra: 0 casos.",
       "direccion": "tango->hubspot"
     },
     {

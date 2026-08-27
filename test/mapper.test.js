@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { crear, transforms, castear } = require('../src/lib/mapper');
+const documento = require('../src/lib/documento');
 const { Lookups } = require('../src/lib/lookups');
 const mapeoClientes = require('../config/mapeo.clientes.json');
 
@@ -39,11 +40,44 @@ test('documentoConGuiones no le pone mascara de CUIT a un DNI', () => {
     assert.strictEqual(transforms.documentoConGuiones('33835690'), '33835690');
 });
 
-test('el CUIT llega a HubSpot con guiones, listo para el alta en Tango', () => {
+test('documentoSoloDigitos: numero, sin guiones', () => {
+    // DECISION 2026-08-27: la propiedad `cuit` del portal es `number` y no se
+    // borra para recrearla como texto (7.2), asi que se adapta el valor.
+    assert.strictEqual(transforms.documentoSoloDigitos('30-70985931-1'), 30709859311);
+    assert.strictEqual(transforms.documentoSoloDigitos('38.901.611'), 38901611);
+    assert.strictEqual(transforms.documentoSoloDigitos(''), null);
+    assert.strictEqual(transforms.documentoSoloDigitos(null), null);
+    assert.strictEqual(transforms.documentoSoloDigitos('sin numeros'), null);
+});
+
+test('un documento con cero adelante se omite y se reporta, no se trunca', () => {
+    // '01234567' guardado como numero es 1234567, que es OTRO documento.
+    const r = transforms.documentoSoloDigitos('01234567');
+    assert.strictEqual(r.omitir, true);
+    assert.match(r.motivo, /cero/);
+});
+
+test('el CUIT llega a HubSpot como numero, sin guiones', () => {
     const c = clientes.find((x) => /^\d{2}-\d{8}-\d$/.test(String(x.CUIT || '')));
     assert.ok(c);
     const { propiedades } = mapper.aHubSpot(c);
-    assert.match(propiedades.cuit, /^\d{2}-\d{8}-\d$/);
+    assert.strictEqual(typeof propiedades.cuit, 'number');
+    assert.strictEqual(propiedades.cuit, Number(String(c.CUIT).replace(/\D/g, '')));
+});
+
+test('los guiones no desaparecen del circuito: vuelven en la ida a Tango', () => {
+    // Guardar y mandar dejan de tener el mismo formato a proposito. Tango sigue
+    // exigiendo los guiones en el alta, y se los repone documento.formatear.
+    const c = clientes.find((x) => /^\d{2}-\d{8}-\d$/.test(String(x.CUIT || '')));
+    const { propiedades } = mapper.aHubSpot(c);
+    assert.match(documento.formatear(propiedades.cuit), /^\d{2}-\d{8}-\d$/);
+});
+
+test('ningun documento de la muestra empieza con cero', () => {
+    // Es lo que hace que la decision de guardar el CUIT como numero no rompa
+    // nada HOY. Si esto se pone en rojo, el campo numerico dejo de alcanzar.
+    const conCero = clientes.filter((c) => String(c.CUIT ?? '').replace(/\D/g, '').startsWith('0'));
+    assert.deepStrictEqual(conCero.map((c) => c.CUIT), []);
 });
 
 test('normalizarTelefono conserva el + internacional', () => {

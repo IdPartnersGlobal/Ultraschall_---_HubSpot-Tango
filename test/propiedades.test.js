@@ -64,30 +64,39 @@ test('contra el portal vacio hay que crear todo y nada que rehacer', () => {
 
 test('la clave de idempotencia se crea unica', () => {
     const plan = planificar(mapeoClientes, []);
-    const clave = plan.aCrear.find((p) => p.name === 'codigo_tango');
+    const clave = plan.aCrear.find((p) => p.name === mapeoClientes._meta.claveIdempotencia.hubspot);
+    assert.strictEqual(clave.name, 'tango_codigo_cliente', 'la clave se mudo el 2026-08-27');
     assert.strictEqual(clave.hasUniqueValue, true);
 
     const claveContactos = planificar(mapeoContactos, []).aCrear.find((p) => p.name === 'tango_id_gva27');
     assert.strictEqual(claveContactos.hasUniqueValue, true);
 });
 
-test('codigo_tango existente sin unicidad hay que rehacerla, no parchearla', () => {
-    // hasUniqueValue es inmutable en HubSpot. Sin unicidad el batch upsert por
-    // idProperty no puede funcionar.
-    const plan = planificar(mapeoClientes, PORTAL_REAL);
-    const p = plan.aRehacer.find((x) => x.name === 'codigo_tango');
-    assert.ok(p, 'tiene que aparecer como REHACER');
-    assert.match(p.motivo, /unica/);
-    assert.strictEqual(p.definicion.hasUniqueValue, true);
-    assert.ok(!plan.aParchear.some((x) => x.name === 'codigo_tango'), 'un PATCH no lo arregla');
+test('la clave se mudo, pero codigo_tango se sigue escribiendo', () => {
+    // El nombre lo define la planilla de Ultraschall (6.0) y es el que mira la
+    // gente. Lo que dejo de ser es el idProperty del upsert.
+    const campos = mapeoClientes.campos.filter((c) => c.tango === 'COD_GVA14');
+    assert.deepStrictEqual(campos.map((c) => c.hubspot).sort(), ['codigo_tango', 'tango_codigo_cliente']);
+    assert.strictEqual(campos.find((c) => c.hubspot === 'codigo_tango').unique, false);
 });
 
-test('cuit esta como number y el mapeo lo quiere texto: rehacer', () => {
+test('ninguna propiedad del portal queda marcada para rehacer', () => {
+    // DECISION 2026-08-27 (Matias): las propiedades mal definidas se dejan
+    // existir; no se borra ninguna. `codigo_tango` sin unicidad y `cuit` como
+    // number se rodean —clave nueva y valor numerico—, no se rehacen.
     const plan = planificar(mapeoClientes, PORTAL_REAL);
-    const p = plan.aRehacer.find((x) => x.name === 'cuit');
-    assert.ok(p);
-    assert.match(p.motivo, /number/);
-    assert.strictEqual(p.definicion.type, 'string');
+    assert.deepStrictEqual(plan.aRehacer.map((p) => p.name), [],
+        'si algo vuelve a aparecer aca, hay que rodearlo, no borrarlo');
+});
+
+test('cuit se queda como number y el mapeo se adapta', () => {
+    const plan = planificar(mapeoClientes, PORTAL_REAL);
+    assert.ok(!plan.aRehacer.some((x) => x.name === 'cuit'));
+    assert.ok(!plan.aCrear.some((x) => x.name === 'cuit'), 'ya existe, no se toca');
+
+    const campo = mapeoClientes.campos.find((c) => c.hubspot === 'cuit');
+    assert.strictEqual(campo.tipo, 'number');
+    assert.strictEqual(campo.transform, 'documentoSoloDigitos');
 });
 
 test('a los desplegables les faltan opciones y eso si se parchea', () => {

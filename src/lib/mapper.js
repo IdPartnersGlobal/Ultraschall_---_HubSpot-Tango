@@ -62,6 +62,36 @@ const transforms = {
         return d; // DNI u otro documento: sin mascara de CUIT
     },
 
+    /**
+     * Documento del cliente como NUMERO, sin guiones.
+     *
+     * DECISION 2026-08-27 (Matias): la propiedad `cuit` del portal se creo como
+     * `number/number` y en este proyecto no se borran propiedades de HubSpot
+     * para recrearlas (7.2). Asi que el que se adapta es el valor.
+     *
+     * ⚠️ Revierte el formato de `documentoConGuiones`, que sigue existiendo
+     * porque los guiones NO desaparecen del circuito: Tango los exige en el
+     * alta y se los vuelve a poner `documento.formatear` en la ida. Guardar y
+     * mandar dejan de tener el mismo formato a proposito.
+     *
+     * Un cero adelante no sobrevive a un campo numerico: `01234567` se
+     * guardaria como 1234567, que es OTRO documento. En ese caso se omite la
+     * propiedad y se reporta, en vez de guardar un numero equivocado. Medido
+     * el 2026-08-27 sobre los 300 de la muestra: 0 casos.
+     */
+    documentoSoloDigitos(v) {
+        if (v === null || v === undefined) return null;
+        const s = String(v).trim();
+        if (s === '') return null;
+
+        const d = s.replace(/\D/g, '');
+        if (d.length === 0) return null;
+        if (d[0] === '0') {
+            return { omitir: true, motivo: `el documento '${s}' empieza con cero y la propiedad es numerica: guardarlo cambiaria el numero` };
+        }
+        return Number(d);
+    },
+
     /** Agrega el esquema si falta; descarta lo que no parezca un dominio. */
     normalizarUrl(v) {
         if (!v) return null;
@@ -232,6 +262,16 @@ function crear(mapeo, lookups = null) {
                     valor = fn(valor);
                 } else {
                     valor = castear(valor, campo.tipo);
+                }
+
+                // Un transform puede decidir que el valor NO se puede guardar
+                // sin cambiarlo (un documento con cero adelante en un campo
+                // numerico). Mismo criterio que los desplegables: se omite la
+                // propiedad y se reporta, nunca se guarda algo distinto de lo
+                // que hay en Tango.
+                if (valor && typeof valor === 'object' && valor.omitir) {
+                    problemas.push(`${campo.hubspot}: ${valor.motivo}`);
+                    continue;
                 }
 
                 // Desplegable: el valor tiene que ser una opcion existente. Si
