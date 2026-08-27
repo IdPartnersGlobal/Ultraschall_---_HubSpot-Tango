@@ -272,3 +272,127 @@ test('un cliente sin ID_GVA14 se reporta como problema', async () => {
     assert.strictEqual(r.idGva14, null);
     assert.ok(r.problemas.some((p) => /no va a poder facturar/.test(p)));
 });
+
+// ------------------------------------- el alta completa y su reintento (7.6)
+//
+// "Le sumamos uno hasta que la respuesta sea que se creo bien" (Matias,
+// 2026-08-27). Lo delicado no es sumar uno: es NO sumar uno cuando el cliente
+// ya quedo creado, porque eso duplica clientes en el ERP.
+
+/** Una company de HubSpot con todo lo que el alta necesita. */
+const COMPANY_OK = {
+    name: 'CLINICA DEMO',
+    razon_social: 'CLINICA DEMO SA',
+    cuit: 30999999995,
+    condicion_iva: 'Responsable Inscripto',
+    domicilio_del_consultorio: 'Av. Corrientes 1234',
+    localidad: 'CABA',
+    zip: '1043',
+    provincia: 'caba',
+    country: 'ARGENTINA',
+};
+
+/**
+ * Tango de mentira para el alta entera.
+ *
+ * @param ocupados  COD_GVA14 -> fila que lo ocupa (una colision), o 'error'
+ *                  para que el create falle sin que el codigo quede tomado.
+ */
+function tangoAlta({ ocupados = {}, padron = [porCodigo('000003')] } = {}) {
+    return {
+        creados: [],
+        consultas: [],
+        async get() { return { registros: padron, total: padron.length }; },
+        async create(process, payload) {
+            const cod = payload.COD_GVA14;
+            this.creados.push(payload);
+            if (ocupados[cod]) throw new Error(`Tango rechazo la consulta: el codigo ${cod} ya existe`);
+            return { NRO: cod };
+        },
+        async getByFilter(process, condicion) {
+            this.consultas.push(condicion);
+            const cod = condicion.match(/'([^']+)'/)?.[1];
+            // Primero: ¿alguien ocupa el codigo? (clasificacion de la colision)
+            const ocupa = ocupados[cod];
+            if (ocupa && ocupa !== 'error') return [ocupa];
+            if (ocupa === 'error') return [];
+            // Si no, es la lectura del cliente recien creado.
+            return this.creados.some((c) => c.COD_GVA14 === cod)
+                ? [{ ...porCodigo('000003'), COD_GVA14: cod, ID_GVA14: 9001 }]
+                : [];
+        },
+    };
+}
+
+const hsAlta = () => {
+    const patches = [];
+    return {
+        patches,
+        async objeto(_o, id) { return { id, properties: COMPANY_OK }; },
+        async actualizarObjeto(_o, id, propiedades) { patches.push({ id, propiedades }); return { id }; },
+    };
+};
+
+const crearAlta = (tango, hs, extra = {}) => alta.crear({
+    tango, hs, lookups: lk, companyId: '555', propiedades: COMPANY_OK,
+    estrategia: 'correlativo', dryRun: false, ahora: AHORA, ...extra,
+});
+
+test('si el codigo esta tomado por otro cliente, suma uno y sigue', async () => {
+    // El primer candidato despues de 000003 es 000004; se lo queda un alta
+    // manual, asi que el cliente tiene que terminar en 000005.
+    const tango = tangoAlta({ ocupados: { '000004': { ...porCodigo('000003'), RAZON_SOCI: 'OTRO CLIENTE SRL', CUIT: '30-11111111-1' } } });
+    const r = await crearAlta(tango, hsAlta());
+
+    assert.strictEqual(r.creado, true);
+    assert.strictEqual(r.codigo, '000005');
+    assert.deepStrictEqual(tango.creados.map((c) => c.COD_GVA14), ['000004', '000005']);
+});
+
+test('un rechazo que NO es colision se propaga sin quemar codigos', async () => {
+    // El ERP caido, o un campo invalido. Sumar uno no lo arregla: probar 25
+    // codigos seria gastar 25 requests para terminar con un error peor.
+    const tango = tangoAlta({ ocupados: { '000004': 'error' } });
+    await assert.rejects(() => crearAlta(tango, hsAlta()), /ya existe/);
+    assert.strictEqual(tango.creados.length, 1, 'un solo intento');
+});
+
+test('si el alta entro pero la respuesta fallo, NO se crea un segundo cliente', async () => {
+    // El caso feo: Tango grabo y la respuesta se perdio. El codigo figura
+    // tomado, pero por NOSOTROS. Reintentar duplicaria el cliente.
+    const nuestro = { ...porCodigo('000003'), COD_GVA14: '000004', ID_GVA14: 9001, RAZON_SOCI: 'CLINICA DEMO SA', CUIT: '30-99999999-5' };
+    const tango = tangoAlta({ ocupados: { '000004': nuestro } });
+    const hs = hsAlta();
+    const r = await crearAlta(tango, hs);
+
+    assert.strictEqual(r.creado, true);
+    assert.strictEqual(r.codigo, '000004', 'se queda con el que ya estaba creado');
+    assert.strictEqual(tango.creados.length, 1, 'no se mando un segundo alta');
+    assert.strictEqual(hs.patches.length, 1, 'y la company igual quedo atada');
+});
+
+test('si la escritura de vuelta falla, el cliente NO se vuelve a crear', async () => {
+    // REGRESION: `escribirDeVuelta` estaba DENTRO del try del reintento, asi
+    // que un fallo al escribir en HubSpot mandaba el alta de nuevo con el
+    // codigo siguiente y dejaba dos clientes en el ERP.
+    const tango = tangoAlta();
+    const hs = hsAlta();
+    hs.actualizarObjeto = async () => { throw new Error('HubSpot rechazo el PATCH'); };
+
+    await assert.rejects(() => crearAlta(tango, hs), /HubSpot rechazo el PATCH/);
+    assert.deepStrictEqual(tango.creados.map((c) => c.COD_GVA14), ['000004'], 'un solo cliente en Tango');
+});
+
+test('se preparan candidatos de sobra para no releer el padron', () => {
+    // Releer el padron cuesta 107 s; los candidatos son strings sobre datos que
+    // ya estan en memoria.
+    assert.ok(alta.CANDIDATOS >= 10, `${alta.CANDIDATOS} candidatos es poco margen`);
+});
+
+test('esElMismoCliente reconoce lo nuestro por CUIT y por razon social', () => {
+    const valores = { CUIT: '30-99999999-5', RAZON_SOCI: 'CLINICA DEMO SA' };
+    assert.strictEqual(alta.esElMismoCliente({ CUIT: '30999999995' }, valores), true, 'el formato no importa');
+    assert.strictEqual(alta.esElMismoCliente({ RAZON_SOCI: 'clinica demo sa' }, valores), true);
+    assert.strictEqual(alta.esElMismoCliente({ CUIT: '30-11111111-1', RAZON_SOCI: 'OTRO SRL' }, valores), false);
+    assert.strictEqual(alta.esElMismoCliente({}, valores), false, 'sin datos NO se asume que es nuestro');
+});

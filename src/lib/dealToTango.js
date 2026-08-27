@@ -7,6 +7,7 @@ const altaCliente = require('./altaCliente');
 const { silencioso } = require('./logger');
 const procesos = require('../../config/tango.processes.json');
 const mapeoPedidos = require('../../config/mapeo.pedidos.json');
+const defaults = require('../../config/defaults.tango.json');
 
 /**
  * Fase 4 — negocio ganado en HubSpot -> pedido en Tango.
@@ -240,7 +241,10 @@ function leerConfig(env = process.env) {
         TANGO_COMPANY: env.TANGO_COMPANY || '1',
         HUBSPOT_TOKEN: env.HUBSPOT_TOKEN,
         HUBSPOT_CLIENT_SECRET: env.HUBSPOT_CLIENT_SECRET,
-        TANGO_NUMERACION: env.TANGO_NUMERACION,
+        // La estrategia ya no es una pregunta abierta: Matias eligio
+        // `correlativo` el 2026-08-27 y la decision vive en el catalogo, que
+        // esta versionado. El entorno la puede pisar sin desplegar (§7.6).
+        TANGO_NUMERACION: env.TANGO_NUMERACION || defaults.clientes.numeracion.estrategia,
         DRY_RUN: String(env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false',
     };
     const faltan = ['TANGO_API_URL', 'TANGO_API_KEY', 'HUBSPOT_TOKEN', 'HUBSPOT_CLIENT_SECRET'].filter((k) => !cfg[k]);

@@ -10,6 +10,13 @@
     "process": 2117,
     "endpoint": "Api/Create",
 
+    "numeracion": {
+      "_nota": "DECISION DE MATIAS 2026-08-27, despues de meses pendiente de administracion (7.6). Tango NO autoasigna el COD_GVA14: lo elige la integracion, del mismo espacio de numeros que usan las personas.",
+      "estrategia": "correlativo",
+      "porQue": "Respeta la convencion de administracion: un cliente creado desde HubSpot queda indistinguible de uno hecho a mano. Se descarto el rango reservado (900001) para no partir la numeracion en dos.",
+      "siColisiona": "Si un operador toma el mismo numero en Tango al mismo tiempo, el alta suma uno y reintenta hasta que entre. El reintento SOLO ocurre cuando se verifico contra el ERP que el codigo esta tomado; cualquier otro rechazo se propaga sin quemar codigos.",
+      "seSobreescribeCon": "TANGO_NUMERACION en las Application Settings, si alguna vez hace falta volver a reservado sin desplegar."
+    },
 
     "alta": {
       "_nota": "Que exige Tango para dar de alta un cliente, y de donde sale cada cosa. Lo lee lib/verificarEmpresa ANTES de intentar el alta, para poder decir que falta en vez de comerse un rechazo del ERP. Es el riesgo 3 del circuito: 'verificar empresa' es mas que mirar si existe el COD_GVA14.",
