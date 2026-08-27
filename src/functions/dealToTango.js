@@ -1,15 +1,20 @@
 'use strict';
 
-const { app } = require('@azure/functions');
+const { app, output } = require('@azure/functions');
 const logger = require('../lib/logger');
 const dealToTango = require('../lib/dealToTango');
 const etapas = require('../lib/etapas');
-const tangoClient = require('../lib/tangoClient');
+const cola = require('../lib/cola');
 const hubspotClient = require('../lib/hubspotClient');
-const lookups = require('../lib/lookups');
 
 /**
- * Fase 4 — negocio ganado en HubSpot -> pedido en Tango.
+ * Fase 4 — negocio ganado en HubSpot -> pedido en Tango. LA PUERTA.
+ *
+ * Esta funcion NO crea el pedido. Valida quien golpea, descarta lo que no
+ * corresponde y encola un mensaje por negocio ganado; el trabajo lo hace
+ * `dealWorker`. Es la respuesta al riesgo 5: antes contestaba recien despues
+ * de hablar con HubSpot y con Tango, y si tardaba de mas HubSpot cortaba y
+ * reintentaba la tanda entera. Ver lib/cola.js y ARQUITECTURA.md 9.5.
  *
  * ANONIMA a proposito: el disparador son webhooks de la app sobre cambio de
  * etapa (decision del 2026-08-21), y HubSpot no puede mandar API keys ni
@@ -20,21 +25,19 @@ const lookups = require('../lib/lookups');
  *
  * ⚠️ El cuerpo se valida CRUDO, antes de parsearlo. Parsear y re-serializar
  * cambia el JSON y la firma deja de coincidir.
- *
- * 🟡 Riesgo 5 sin resolver: hoy contesta despues de hacer el trabajo. Un alta
- * de cliente mas el pedido pueden pasarse del tiempo que HubSpot espera, y
- * entonces reintenta. Por ahora lo cubre la idempotencia —el segundo intento
- * ve `tango_nro_pedido` cargado y no hace nada—, pero la solucion de fondo es
- * contestar 200 y encolar.
  */
 
-const HABILITADO = String(process.env.DEAL_TO_TANGO_ENABLED || 'false').toLowerCase() === 'true';
+const salida = output.storageQueue({
+    queueName: cola.NOMBRE,
+    connection: 'AzureWebJobsStorage',
+});
 
 /** Las etapas ganadas se leen una vez y se guardan: no cambian seguido. */
 let ganadasCache = null;
 
 async function etapasGanadas(hs, log) {
     if (ganadasCache) return ganadasCache;
+    if (!hs) return (ganadasCache = etapas.GANADAS);
     try {
         ganadasCache = etapas.desdePipelines(await hs.pipelines('deals'));
         log.paso('ETAPAS', `etapas ganadas: ${[...ganadasCache].join(', ')}`);
@@ -50,14 +53,17 @@ async function etapasGanadas(hs, log) {
 app.http('dealToTango', {
     methods: ['POST'],
     authLevel: 'anonymous',
+    extraOutputs: [salida],
     handler: async (request, context) => {
         const log = logger.crear(context, 'DEAL');
 
         // El cuerpo crudo, sin parsear. Es lo que se firma.
         const cuerpoCrudo = await request.text();
 
-        const config = dealToTango.leerConfig();
-        const hs = hubspotClient.crear({ token: config.HUBSPOT_TOKEN, log });
+        const config = dealToTango.leerConfigWebhook();
+        const hs = config.HUBSPOT_TOKEN
+            ? hubspotClient.crear({ token: config.HUBSPOT_TOKEN, log })
+            : null;
 
         const admision = dealToTango.admitir({
             metodo: request.method,
@@ -80,51 +86,22 @@ app.http('dealToTango', {
             return { status: 204 };
         }
 
-        if (!HABILITADO) {
+        if (!config.HABILITADO) {
             // Mismo criterio que el timer: desplegar el codigo y activar algo
-            // que escribe en el ERP son dos decisiones distintas.
-            log.aviso('DEAL', `${admision.eventos.length} negocio(s) ganado(s), pero DEAL_TO_TANGO_ENABLED != true. No se hace nada.`);
+            // que escribe en el ERP son dos decisiones distintas. El freno esta
+            // ACA y en un solo lugar; el worker no lo mira, para que apagarlo
+            // nunca se coma mensajes que ya estaban encolados.
+            log.aviso('DEAL', `${admision.eventos.length} negocio(s) ganado(s), pero DEAL_TO_TANGO_ENABLED != true. No se encola nada.`);
             return { status: 204 };
         }
 
-        log.inicio(`${admision.eventos.length} negocio(s) ganado(s)`);
+        const aEncolar = cola.mensajes(admision.eventos);
+        context.extraOutputs.set(salida, aEncolar);
 
-        const tango = tangoClient.crear({
-            baseUrl: config.TANGO_API_URL,
-            apiKey: config.TANGO_API_KEY,
-            company: config.TANGO_COMPANY,
-            log,
-        });
-        const tablas = await lookups.cargar(tango, log);
+        log.paso('DEAL', `encolados ${aEncolar.length} negocio(s) en '${cola.NOMBRE}': ${aEncolar.map((m) => m.dealId).join(', ')}`);
 
-        const resultados = [];
-        for (const evento of admision.eventos) {
-            const dealId = String(evento.objectId);
-            try {
-                resultados.push(await dealToTango.procesarDeal({
-                    dealId, hs, tango, lookups: tablas,
-                    estrategiaNumeracion: config.TANGO_NUMERACION,
-                    log, dryRun: config.DRY_RUN,
-                }));
-            } catch (e) {
-                // Se sigue con los demas eventos: que un negocio falle no puede
-                // llevarse puestos a los otros que vinieron en la misma tanda.
-                log.error('DEAL', `${dealId} fallo: ${e.message}`);
-                resultados.push({ dealId, estado: 'error', motivo: e.message });
-            }
-        }
-
-        const hubo = (e) => resultados.filter((r) => r.estado === e).length;
-        log.datos('RESUMEN', {
-            'creados': hubo('creado'),
-            'ya tenian pedido': hubo('ya-tenia'),
-            'incompletos': hubo('incompleto'),
-            'con error': hubo('error'),
-            'modo': config.DRY_RUN ? 'DRY-RUN' : 'ESCRITURA REAL',
-        });
-
-        // 200 aunque alguno haya fallado: si se devolviera un error, HubSpot
-        // reintentaria la tanda entera, incluidos los que si se crearon.
-        return { status: 200, jsonBody: { procesados: resultados.length, resultados } };
+        // 202: recibido y aceptado, todavia no hecho. Es lo unico honesto que
+        // se puede contestar, y a HubSpot le alcanza con un 2xx.
+        return { status: 202, jsonBody: { encolados: aEncolar.length, dealIds: aEncolar.map((m) => m.dealId) } };
     },
 });

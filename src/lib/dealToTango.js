@@ -19,11 +19,14 @@ const mapeoPedidos = require('../../config/mapeo.pedidos.json');
  * mas caro. Importa: la funcion es anonima y llegan peticiones por TODO cambio
  * de etapa, asi que rechazar lo que no corresponde tiene que costar casi nada.
  *
- *   1. firma v3          -> 401. Un HMAC, sin red.
- *   2. timestamp < 5 min -> 401. Anti-replay, sin red.
- *   3. etapa ganada      -> 204. Filtra el volumen ANTES de gastar lecturas.
- *   4. ya tiene pedido   -> 204. Idempotencia (9.3).
- *   5. recien aca se trabaja.
+ *   1. firma v3          -> 401. Un HMAC, sin red.      ┐ `admitir`, en el
+ *   2. timestamp < 5 min -> 401. Anti-replay, sin red.  │ webhook: contesta
+ *   3. etapa ganada      -> 204. Filtra el volumen.     ┘ y encola (riesgo 5)
+ *   4. ya tiene pedido   -> Idempotencia (9.3).         ┐ `procesarDeal`, en
+ *   5. recien aca se trabaja.                           ┘ el worker de la cola
+ *
+ * El corte entre 3 y 4 no es casual: hasta el 3 no hay una sola llamada de red,
+ * y del 4 en adelante son todas. Ahi entra la cola (`lib/cola`).
  */
 
 const PROP_NRO = mapeoPedidos._meta.claveIdempotencia.hubspot;
@@ -201,6 +204,29 @@ async function marcarProblema(hs, dealId, motivo, log, dryRun) {
     }
 }
 
+/**
+ * Lo que necesita el WEBHOOK, que es mucho menos que lo que necesita el worker.
+ *
+ * Desde que el trabajo se encola (riesgo 5), el hook no habla con Tango: valida
+ * la firma y encola. Pedirle igual las variables de Tango lo haria fallar con
+ * 500 —y HubSpot reintentaria— por una configuracion que no iba a usar.
+ *
+ * `HUBSPOT_TOKEN` es opcional a proposito: solo sirve para leer los pipelines y
+ * descubrir etapas ganadas nuevas. Sin el se usan las conocidas (`etapas.GANADAS`)
+ * y el hook sigue contestando, que es su unica obligacion.
+ */
+function leerConfigWebhook(env = process.env) {
+    if (!env.HUBSPOT_CLIENT_SECRET) throw new Error('Faltan variables de entorno: HUBSPOT_CLIENT_SECRET');
+    return {
+        HUBSPOT_CLIENT_SECRET: env.HUBSPOT_CLIENT_SECRET,
+        HUBSPOT_TOKEN: env.HUBSPOT_TOKEN || null,
+        // El interruptor esta en la puerta y en un solo lugar: si esta apagado
+        // no se encola nada. El worker NO lo mira — apagarlo con mensajes ya en
+        // la cola los borraria en silencio.
+        HABILITADO: String(env.DEAL_TO_TANGO_ENABLED || 'false').toLowerCase() === 'true',
+    };
+}
+
 function leerConfig(env = process.env) {
     const cfg = {
         TANGO_API_URL: env.TANGO_API_URL,
@@ -217,7 +243,7 @@ function leerConfig(env = process.env) {
 }
 
 module.exports = {
-    admitir, procesarDeal, eventosGanados, numeroDePedido, leerConfig,
+    admitir, procesarDeal, eventosGanados, numeroDePedido, leerConfig, leerConfigWebhook,
     PROP_NRO, PROP_CREADO, PROP_PROBLEMA, PROP_CLIENTE,
     PROPS_DEAL, PROPS_COMPANY, PROPS_LINEA, PROPS_PRODUCTO,
 };
