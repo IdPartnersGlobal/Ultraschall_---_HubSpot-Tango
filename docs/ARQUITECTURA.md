@@ -78,6 +78,8 @@ flowchart LR
         SYNCP["syncProductos\n(timer)"]
         SYNCC["syncClientes\n(timer)"]
         DEALS["dealToTango\n(HTTP · webhook)"]
+        COLA[("cola\ndeals-ganados")]
+        WORK["dealWorker\n(cola)"]
         DIAG["testTangoConnection\n(diagnóstico)"]
         LIB["lib/\ntangoClient · hubspotClient\nmapper · logger"]
     end
@@ -91,9 +93,12 @@ flowchart LR
     TAPI -->|"GET paginado"| SYNCP & SYNCC
     SYNCP -->|"batch upsert"| PROD
     SYNCC -->|"batch upsert"| COMP
-    DEAL -->|"workflow / webhook"| DEALS
-    DEALS -->|"POST Api/Create"| TAPI
-    SYNCP & SYNCC & DEALS -.-> LIB
+    DEAL -->|"webhook: cambio de etapa"| DEALS
+    DEALS -->|"encola y contesta 202"| COLA
+    COLA --> WORK
+    WORK -->|"POST Api/Create"| TAPI
+    WORK -->|"tango_nro_pedido"| DEAL
+    SYNCP & SYNCC & DEALS & WORK -.-> LIB
     DIAG -.-> TAPI
 ```
 
@@ -116,13 +121,15 @@ flowchart LR
 | `lib/etapas.js` | módulo | Qué etapa cuenta como negocio ganado. Los dos embudos, sin red. | ✅ 2026-08-25 |
 | `lib/verificarPedido.js` | módulo | Verificación del pedido y armado del payload, cabecera y renglones. | ✅ 2026-08-25 |
 | `lib/dealToTango.js` | módulo | El circuito de la Fase 4, testeable con dobles. | ✅ 2026-08-25 |
+| `lib/cola.js` | módulo | El nombre de la cola y la forma del mensaje. Desacopla el webhook del trabajo (§9.5). | ✅ 2026-08-26 |
 
-**Tests:** `npm test` (runner nativo de Node, sin dependencias). 232 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
+**Tests:** `npm test` (runner nativo de Node, sin dependencias). 265 tests sobre **datos reales del ERP** guardados en `test/fixtures/`. Corren sin red — importante, porque Tango no es accesible desde local (§5.6).
 
 Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms, con 5.670 hashes distintos y 0 problemas de resolución.
 | `functions/syncProductos.js` | Timer | Fase 1. Tango `process=87` → HubSpot Products, dos veces por día. ✅ 2026-08-25, apagado por defecto. |
 | `functions/syncClientes.js` | Timer | Fase 2. Tango `process=2117` → HubSpot Companies. |
-| `functions/dealToTango.js` | HTTP | Fase 4. Recibe el Deal desde HubSpot y crea el pedido en Tango. ✅ 2026-08-25, apagada por defecto (`DEAL_TO_TANGO_ENABLED`). |
+| `functions/dealToTango.js` | HTTP | Fase 4, **la puerta**. Valida la firma, descarta lo que no es un negocio ganado y encola. No habla con Tango. ✅ 2026-08-26, apagada por defecto (`DEAL_TO_TANGO_ENABLED`). |
+| `functions/dealWorker.js` | Cola | Fase 4, **el trabajo**. Un mensaje = un negocio = un pedido en Tango. Incluye `dealVeneno`, la cola de veneno (§9.5). ✅ 2026-08-26. |
 | `functions/testTangoConnection.js` | HTTP | Ya existe. Queda como diagnóstico, anónimo pero contenido por `lib/politicaProxy` (§10.0). |
 
 **Criterio:** ninguna función habla directo con `fetch`. Todo pasa por `lib/`, así el mapeo y los reintentos se testean y se cambian en un solo lugar.
@@ -479,7 +486,7 @@ Ante un conflicto de nombres, gana la planilla.
 
 ### 7.2 Clientes → Companies (Fase 2)
 
-- **Clave de idempotencia:** `COD_GVA14` → propiedad `codigo_tango`, marcada como *unique*. (El nombre lo define la planilla de Ultraschall, §6.0; versiones viejas de este doc decían `tango_cod_cliente`.)
+- **Clave de idempotencia:** `COD_GVA14` → propiedad **`tango_codigo_cliente`**, *unique* (mudada el 2026-08-27, ver abajo). El mismo valor se sigue escribiendo en `codigo_tango`, que es el nombre que define la planilla de Ultraschall (§6.0).
 - Mapeo detallado: **`config/mapeo.clientes.json`**.
 
 #### ⚠️ Los desplegables rechazan los códigos de Tango (detectado 2026-08-20)
@@ -518,6 +525,45 @@ Dos propiedades preexistentes no se pueden corregir con un PATCH — `type` y `h
 | `cuit` | `number/number` | El formato acordado es texto con guiones. 3 valores cargados. |
 
 Lo hace `scripts/repararPropiedades.js`, que **guarda los valores en un archivo antes de borrar** y después los reescribe pasándolos por el transform del mapeo. El backup está gitignoreado: trae CUITs reales.
+
+#### Estado del portal, medido y corregido el 2026-08-27
+
+Contra el portal 51311915:
+
+| | companies (antes) | companies (después) | products | deals |
+|---|---|---|---|---|
+| ya existentes | 10 | **32** | **14** ✅ | **4** ✅ |
+| a crear | 21 | **0** ✅ | 0 | 0 |
+| a parchear | 3 | **0** ✅ | 0 | 0 |
+| a rehacer | 2 | **0** ✅ | 0 | 0 |
+
+Se aplicó `node scripts/crearPropiedades.js clientes --aplicar`: 24 de 24 (21 creadas, 3 parcheadas), y después 1 más (`tango_codigo_cliente`). Ese script **crea y parchea, nunca borra** — la única llamada a `borrarPropiedad` está en `repararPropiedades.js`.
+
+**No quedó nada "a rehacer", y sin borrar una sola propiedad.** Las dos que estaban mal se rodearon (abajo).
+
+#### ⛔ REGLA: no se borra ninguna propiedad de HubSpot (decidido 2026-08-27)
+
+**Decisión de Matías: las propiedades mal definidas se dejan existir.** Crear y parchear, sí; borrar, sólo si él lo pide explícitamente, esa vez. Borrar una propiedad se lleva puesto su valor en todos los registros, y el backup del script cubre los valores pero no lo que dependa de ella (vistas, workflows, listas, informes).
+
+**`scripts/repararPropiedades.js` queda sin correr con `--aplicar`.** En dry-run sirve para ver qué reportaría.
+
+Las dos que quedan mal, medidas el 2026-08-27:
+
+| Propiedad | Cómo está | Qué rompe |
+|---|---|---|
+| `codigo_tango` | `string/text`, **`hasUniqueValue: false`**, cargada en **0 de 66** companies | Es el `idProperty` del batch upsert, y HubSpot exige que sea unique. El sync de empresas **no puede correr como está** |
+| `cuit` | `number/number`, cargada en **4 de 66** | El mapeo escribe texto con guiones (decisión 2026-08-18, Tango los exige). HubSpot rechaza el valor, y en `/batch/upsert` el rechazo voltea **la tanda de 100 entera** |
+
+**Cómo se rodeó cada una** (decidido y aplicado el 2026-08-27):
+
+| Propiedad | Se rodea así | Qué se paga |
+|---|---|---|
+| `codigo_tango` | La clave del upsert se muda a **`tango_codigo_cliente`**, creada de entrada con `hasUniqueValue`. `codigo_tango` se sigue escribiendo con el mismo valor: es el nombre de la planilla (§6.0) y el que mira la gente | Dos propiedades con el mismo dato. Si algún día `codigo_tango` se rehace bien, la nueva se jubila |
+| `cuit` | Se escriben **sólo dígitos**, como número. Los guiones que Tango exige los repone `documento.formatear` en la ida (`verificarEmpresa`, resolución `documento`) | Guardar y mandar dejan de tener el mismo formato. Y un documento con **cero adelante** no entra en un campo numérico: el transform lo **omite y lo reporta** en vez de truncarlo — medido sobre los 300 de la muestra, 0 casos |
+
+En el mapeo, `codigo_tango` pasó a `unique: false` y `cuit` a `number`: es lo que hace que `lib/propiedades` deje de reportarlas como "a rehacer". La propiedad está como está y así se queda.
+
+⚠️ Esto también toca la **Fase 4**: ninguna company tiene código de Tango, así que **todo negocio ganado pasa por el alta al vuelo** (§7.12). Eso ahora funciona —`tango_id_gva14` y `codigo_tango` ya existen y son escribibles—, pero significa que el primer pedido de cada cliente crea el cliente.
 
 #### 🔑 Una sola llave de identidad (decidido 2026-08-24)
 
@@ -722,7 +768,25 @@ O sea: **el número lo elige la integración.** La respuesta de Tango confirma l
 1. **Correlativo** — siguiente libre después de `007610`. Respeta la convención que usa administración. Riesgo: si un operador da de alta un cliente en Tango en el mismo momento, los dos van por el mismo número. La colisión **falla**, no corrompe, así que el manejo es reintentar con el siguiente.
 2. **Rango reservado** — por ejemplo desde `900001`. No colisiona nunca y deja a la vista en el ERP qué vino del CRM. Ya hay precedente informal: los `999998`/`999999`.
 
-🟡 **Es una decisión de administración de Ultraschall**, no técnica. Las dos se implementan igual de fácil.
+✅ **RESUELTO el 2026-08-27 — decisión de Matías: `correlativo`.**
+
+Vive en `config/defaults.tango.json → clientes.numeracion`, que está versionado; `TANGO_NUMERACION` en las Application Settings lo pisa sin desplegar si alguna vez hay que volver a `reservado`. Se eligió correlativo para no partir la numeración en dos: un cliente creado desde HubSpot queda indistinguible de uno hecho a mano.
+
+#### El reintento: "le sumamos uno hasta que entre"
+
+Lo delicado no es sumar uno. Es **no** sumar uno cuando el cliente ya quedó creado — eso duplica clientes en el ERP, y un duplicado en GVA14 no se deshace con un PATCH.
+
+Por eso, cuando `Api/Create` falla, se le pregunta a Tango quién ocupa ese código (`GetByFilter`, 1,6 s, y sólo se paga cuando ya falló). Tres respuestas posibles:
+
+| Lo que contesta el ERP | Qué se hace | Por qué |
+|---|---|---|
+| **Nadie ocupa el código** | Se propaga el error tal cual | No fue una colisión: fue un campo inválido o el ERP caído. Sumar uno no lo arregla y quemaría 25 códigos para terminar en un error peor |
+| **Lo ocupa otro cliente** | Se le suma uno y se reintenta | Es la colisión real: un operador tomó el número entre nuestra lectura del padrón y nuestra escritura |
+| **Lo ocupa el cliente que acabamos de mandar** | Se sigue como éxito, sin recrear | El alta entró y se perdió la respuesta. Reintentar dejaría dos clientes idénticos. Se compara por CUIT y, si no, por razón social |
+
+Se preparan **25 candidatos** por adelantado: son strings sobre un padrón que ya está en memoria, y volver a pedirlos cuesta releer el padrón entero (107 s).
+
+🔴 **La escritura de vuelta quedó FUERA del reintento.** Estaba adentro, y era un bug real: si HubSpot rechazaba el PATCH, el `catch` mandaba el alta de nuevo con el código siguiente y dejaba **dos clientes en Tango** para la misma company. Ahora, si falla la escritura de vuelta, el error sale a la superficie — el cliente ya existe y hay que atarlo a mano, no crear otro. Hay un test de regresión.
 
 **Costo de la escritura de vuelta:** una lectura puntual por código (`Api/GetByFilter` con `WHERE COD_GVA14 = '...'`) tarda **1,6 s** y devuelve el `ID_GVA14`. Así que aunque el alta no devuelva el ID interno, recuperarlo es barato y determinístico.
 
@@ -943,6 +1007,27 @@ De las 116 columnas que devuelve la lectura, el mapeo usa 34.
 
 ---
 
+### 7.13 La company de prueba (2026-08-27)
+
+Corrida de `verificarEmpresa` sobre las **66 companies reales** del portal: **una sola** se puede dar de alta en Tango hoy.
+
+| Falta | En cuántas |
+|---|---|
+| `razon_social` | 64 |
+| `condicion_iva` | 64 |
+| `domicilio_del_consultorio` | 64 |
+| `cuit` | 62 |
+
+Son todos `problemas`, no `pendientes`: los arregla comercial cargando datos en HubSpot (§7.12). Pero esperar esa carga dejaba el circuito de la Fase 4 sin poder probarse, así que se creó **una** company de prueba que sí pasa: `scripts/crearEmpresaDemo.js` (dry-run por defecto, idempotente — no duplica si ya existe).
+
+⚠️ **No lleva `tango_codigo_cliente` ni `tango_id_gva14`, a propósito.** Sin código de Tango, el negocio ganado tiene que pasar por el alta al vuelo, que es justo la mitad del circuito que hay que probar. Ponerle el código la saltearía.
+
+El CUIT es sintético con dígito verificador válido (`30-99999999-5`): no queda marcado `revisar` y no puede pisarle el CUIT a nadie.
+
+La otra salida —y la definitiva— es el **sync de empresas**: los 5.670 clientes de Tango entran con su `tango_id_gva14` ya cargado, y esos no pasan por el alta.
+
+---
+
 ### 7.12 Verificación previa del alta (construido 2026-08-25)
 
 **Es el riesgo 3 del circuito.** "Verificar empresa" no es preguntar si existe el `COD_GVA14`: es contestar si esta company **se puede** dar de alta y, si no, **qué falta**. La alternativa es mandar el alta y comerse el rechazo del ERP, que llega como un mensaje suelto sin decir cuál de los 18 campos falló — y para entonces el número de la numeración ya se gastó.
@@ -1097,21 +1182,24 @@ Payload de referencia validado: **`docs/payloads/pedido-create.json`**.
 
 ### 9.1 Flujo (construido 2026-08-25)
 
-El circuito entero está en `lib/dealToTango.js`, y `functions/dealToTango.js` sólo lo cablea a Azure. La lógica vive en `lib/` para poder testear el recorrido completo con dobles, sin levantar la Function App ni tocar el ERP.
+El circuito entero está en `lib/dealToTango.js`, y las funciones sólo lo cablean a Azure. La lógica vive en `lib/` para poder testear el recorrido completo con dobles, sin levantar la Function App ni tocar el ERP.
 
-| # | Paso | Si falla |
-|---|---|---|
-| 1 | Firma v3 válida (`lib/firmaHubSpot`) | `401` seco, sin detalle |
-| 2 | Timestamp dentro de los 5 minutos | `401`. Anti-replay |
-| 3 | La etapa es *ganada* (`lib/etapas`) | `204`. Es el caso mayoritario |
-| 4 | El negocio no tiene ya `tango_nro_pedido` | `204`. Idempotencia (§9.3) |
-| 5 | Leer company + line items + productos | — |
-| 6 | Si la empresa no está en Tango, **darla de alta** (§7.12) | Se anota en el Deal |
-| 7 | Verificar el pedido (`lib/verificarPedido`) | Se anota en el Deal |
-| 8 | `POST Api/Create` con `process=19845` | Se propaga: conviene que HubSpot reintente |
-| 9 | Escribir `tango_nro_pedido` en el Deal | — |
+Desde el 2026-08-26 el recorrido está partido en dos: el webhook contesta y encola, y el trabajo lo hace `dealWorker` (§9.5).
 
-Los pasos 1 a 4 no hacen **ninguna** llamada de red: rechazar una petición que no corresponde cuesta un HMAC. El paso 3 filtra el volumen antes de gastar en lecturas — llegan peticiones por *todo* cambio de etapa.
+| # | Paso | Dónde | Si falla |
+|---|---|---|---|
+| 1 | Firma v3 válida (`lib/firmaHubSpot`) | webhook | `401` seco, sin detalle |
+| 2 | Timestamp dentro de los 5 minutos | webhook | `401`. Anti-replay |
+| 3 | La etapa es *ganada* (`lib/etapas`) | webhook | `204`. Es el caso mayoritario |
+| — | **Encolar y contestar `202`** | webhook | — |
+| 4 | El negocio no tiene ya `tango_nro_pedido` | worker | El mensaje se borra. Idempotencia (§9.3) |
+| 5 | Leer company + line items + productos | worker | — |
+| 6 | Si la empresa no está en Tango, **darla de alta** (§7.12) | worker | Se anota en el Deal |
+| 7 | Verificar el pedido (`lib/verificarPedido`) | worker | Se anota en el Deal |
+| 8 | `POST Api/Create` con `process=19845` | worker | Se propaga: el mensaje vuelve a la cola |
+| 9 | Escribir `tango_nro_pedido` en el Deal | worker | — |
+
+Los pasos 1 a 3 no hacen **ninguna** llamada de red: rechazar una petición que no corresponde cuesta un HMAC. El paso 3 filtra el volumen antes de gastar en lecturas — llegan peticiones por *todo* cambio de etapa. Del 4 en adelante son todas de red, y por eso la cola corta justo ahí.
 
 #### ⚠️ Hay dos embudos, y cada uno tiene su propio "Cierre ganado"
 
@@ -1158,7 +1246,7 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 
 | Campo Tango | Origen |
 |---|---|
-| `ID_STA11` | Line item → Product → `tango_id_sta11` |
+| `ID_STA11` | Line item → Product → `tango_id_sta11`. Si el product no lo tiene, va el **artículo de prueba** (§9.6) |
 | `CANTIDAD_PEDIDA` | `quantity` |
 | `PRECIO` | `price` |
 | `PORCENTAJE_BONIFICACION` | `discount` |
@@ -1169,7 +1257,7 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 | Caso | Qué hace |
 |---|---|
 | Company sin `tango_id_gva14` | **Se da de alta el cliente en Tango** y se le escribe el código a la company (§7.12 + §7.8). No es un error: es un cliente que todavía no existe. Y como la company queda con su `codigo_tango`, la próxima vez ya no se crea nada |
-| Line item sin `tango_id_sta11` | Se anota el problema en el Deal y **no se manda el pedido**. Es el bloqueo esperado hasta que corra el sync de productos |
+| Line item sin `tango_id_sta11` | Desde el 2026-08-27 **el renglón sale igual**, con el artículo de prueba y marcado (§9.6). Con el artículo de prueba apagado vuelve a frenarse y se anota en el Deal |
 | Línea escrita a mano, sin producto del catálogo | Igual: se anota y no se manda. Sin producto no hay `ID_STA11` que resolver |
 | Cliente sin lista de precios | Va el default del catálogo (§7.12). No frena nada |
 | Reintento de un Deal ya enviado | `tango_nro_pedido` con valor ⇒ `204` y no se toca el ERP. Es lo primero que se mira |
@@ -1182,12 +1270,104 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 
 | Qué | Quién |
 |---|---|
-| ⛔ **El catálogo de productos.** Ningún product de HubSpot tiene `tango_id_sta11` (verificado 2026-08-25: cero propiedades `tango_*` en products). Sin eso los renglones no se pueden armar, y el sync de productos sigue bloqueado porque falta el `process` de precios | Ultraschall |
+| 🟡 **El catálogo de productos.** Las 14 propiedades existen (verificado 2026-08-27) pero **ningún product tiene `tango_id_sta11` cargado**, y el sync que los cargaría sigue bloqueado porque falta el `process` de precios. Ya no frena el circuito: hasta entonces los renglones van con el artículo de prueba (§9.6) | Ultraschall |
 | 🟡 Talonario `GVA43` y depósito `STA22`: hoy van en `1`, un valor **provisorio**. No se pueden elegir bien porque ni siquiera se consiguieron sus `process` | Ultraschall |
 | 🟡 `FECHA_ENTREGA` y `NRO_ORDEN_COMPRA`: no hay propiedad de Deal que las lleve. El pedido va sin ellas | Definir |
-| 🟡 **Riesgo 5 — el hook tiene que responder rápido.** Hoy contesta después de trabajar; un alta de cliente más el pedido pueden pasarse del tiempo que HubSpot espera. Lo cubre la idempotencia (el reintento ve `tango_nro_pedido` y no hace nada), pero la solución de fondo es contestar `200` y encolar | Sin discutir |
-| 🟡 `hs project upload` para que el webhook apunte de verdad a la Function App | Matías |
+| ✅ ~~Riesgo 5 — el hook tiene que responder rápido~~ **Resuelto el 2026-08-26**: contesta `202` y encola (§9.5) | — |
+| 🔴 **De las 66 companies del portal, 65 no se pueden dar de alta en Tango** (medido 2026-08-27 con `verificarEmpresa`): falta `razon_social` en 64, `condicion_iva` en 64, `domicilio_del_consultorio` en 64 y `cuit` en 62. Es carga de datos, no código. Rodeado con una company de prueba (§7.13) para no quedar bloqueados | Comercial |
+| 🟡 `hs project upload` para que el webhook apunte de verdad a la Function App. El `targetUrl` ya es el correcto (verificado 2026-08-27) | Matías |
 | 🟡 `DEAL_TO_TANGO_ENABLED=true` y `SYNC_DRY_RUN=false` en Azure. Ambos apagados por defecto | Matías |
+
+### 9.5 Riesgo 5 — contestar rápido: la cola (construido 2026-08-26)
+
+**El problema.** El webhook hacía todo el trabajo y recién después contestaba: leer el Deal, la company, los renglones, dar de alta el cliente en Tango y crear el pedido. Son varios segundos contra dos sistemas ajenos, y el alta de un cliente nuevo es el caso lento. HubSpot no espera tanto: corta y **reintenta la tanda entera**.
+
+La idempotencia lo tapaba, pero tapar no es resolver: el reintento sólo ve `tango_nro_pedido` si el primer intento **ya terminó**. Si todavía está a mitad de camino, el segundo no ve nada escrito y arranca en paralelo. Y dos altas de cliente simultáneas son dos `COD_GVA14` peleándose por el mismo número (§7.6).
+
+**La solución.** El hook valida, encola y contesta `202`. El trabajo lo hace una función aparte, disparada por la cola, que puede tardar lo que tenga que tardar.
+
+| | Antes | Ahora |
+|---|---|---|
+| Cuándo contesta | después de escribir en el ERP | después de un HMAC y un `put` en la cola |
+| Si tarda | HubSpot reintenta la tanda entera | no hay tanda: cada negocio es un mensaje |
+| Reintento de un error real | lo decide HubSpot, sin control nuestro | la cola, 5 veces, y después queda constancia |
+
+**Por qué Storage Queue.** La Function App ya tiene `AzureWebJobsStorage` —es obligatorio en Consumption— y el extension bundle v4 ya trae el binding: cero dependencias nuevas, cero infraestructura que aprovisionar. Durable Functions sería mucha maquinaria para un fan-out de un mensaje. Contestar y seguir trabajando en la misma invocación no sirve: en Consumption el host puede congelar la instancia apenas se devuelve la respuesta.
+
+**Dónde corta.** Justo donde el código ya estaba partido: `admitir()` (firma, timestamp, etapa — ni una llamada de red) queda en el webhook, y `procesarDeal()` (de la idempotencia en adelante — todas de red) se va al worker. No hubo que reacomodar la lógica de negocio.
+
+| Pieza | Qué hace |
+|---|---|
+| `lib/cola.js` | Lo único que comparten los dos lados: el nombre de la cola y la forma del mensaje. Se testea sin Azure |
+| `functions/dealToTango.js` | La puerta. Valida, encola, `202`. No habla con Tango ni necesita su configuración |
+| `functions/dealWorker.js` | El trabajo. Un mensaje = un negocio = un pedido |
+| `dealWorker.js` → `dealVeneno` | La cola de veneno: deja constancia en el Deal de lo que no se pudo |
+
+**Un mensaje por negocio, no por tanda.** HubSpot puede mandar varios eventos juntos, incluso dos del mismo Deal (dos cambios de etapa seguidos). Se encola **uno por Deal distinto**, el evento más reciente. Así un negocio que falla ya no arrastra a los otros: cada uno tiene su propio reintento, en vez de compartir el destino de la tanda.
+
+**⚠️ La cola es *at-least-once*.** El mismo mensaje puede llegar dos veces: una entrega que tarda más que el `visibilityTimeout` reaparece en la cola. Por eso el control de `tango_nro_pedido` **sigue siendo obligatorio** — no es un resto de la versión anterior.
+
+**Qué se reintenta y qué no:**
+
+| Caso | Qué pasa |
+|---|---|
+| Problema de datos (falta `tango_id_sta11`, el cliente no se pudo crear) | Se escribe en el Deal y el mensaje se borra. Reintentar no lo arregla |
+| Falla real (el ERP caído, HubSpot rechazando) | Se propaga: el mensaje vuelve a la cola. Hasta 5 intentos (`maxDequeueCount`) |
+| Agotados los 5 intentos | Cae en `deals-ganados-poison` y `dealVeneno` lo anota en `tango_pedido_problema` |
+| Mensaje ilegible, o de otra versión | Se descarta con el motivo en el log. No se reintenta: no se va a entender mejor al quinto intento |
+
+**El interruptor está en la puerta y en un solo lugar.** Con `DEAL_TO_TANGO_ENABLED` apagado no se encola nada. El worker **no** lo mira, a propósito: apagarlo con mensajes ya encolados los borraría en silencio.
+
+**`batchSize: 1` en `host.json`.** Un pedido por vez dentro de una instancia. No es prolijidad: dos altas de cliente en paralelo se pelean por el mismo `COD_GVA14`.
+
+> 🟡 **Lo que esto NO resuelve.** En Consumption el scale controller puede levantar varias instancias si la cola crece, y `batchSize: 1` es *por instancia*. Con el volumen de Ultraschall (unidades de negocios ganados por día) no se llega ahí; si algún día se llegara, la contención es `WEBSITE_MAX_DYNAMIC_APPLICATION_SCALE_OUT=1` en las Application Settings.
+
+**Para probarlo en local hace falta storage**: Azurite (`AzureWebJobsStorage=UseDevelopmentStorage=true`) o una cuenta real. Sin eso el trigger de la cola no arranca. Los tests no lo necesitan: `lib/cola.js` no toca Azure.
+
+### 9.6 El artículo de prueba (decidido 2026-08-27)
+
+**Por qué existe.** El circuito de la Fase 4 estaba completo pero no se podía probar punta a punta: ningún product del portal tiene `tango_id_sta11`, así que **todos** los renglones se marcaban incompletos y el pedido no salía nunca. El sync que cargaría esos IDs sigue bloqueado por el `process` de precios (§7.1), que no depende de nosotros.
+
+**Decisión de Matías:** hasta que esa integración exista, un renglón cuyo producto no está atado a Tango sale igual, apuntando a un artículo fijo.
+
+| | |
+|---|---|
+| Artículo | `BAT250` — Batería detector fetal BT250, `ID_STA11 = 187` |
+| Qué se conserva de la línea real | cantidad, precio y bonificación |
+| Qué se reemplaza | sólo el `ID_STA11` |
+| Dónde se configura | `config/defaults.tango.json → pedidos.productoDePrueba` |
+
+**Cuándo actúa, y cuándo no:**
+
+| Caso | Qué pasa |
+|---|---|
+| El product no tiene `tango_id_sta11` | Va el artículo de prueba, con aviso |
+| El product **sí** lo tiene | Va el artículo real. **Esto se apaga solo** el día que corra el sync de productos: no hay que acordarse de nada |
+| Línea escrita a mano, sin producto del catálogo | **Sigue frenando el pedido.** No es la integración que falta, es una línea mal cargada, y taparla con el artículo de prueba escondería el error |
+| Cantidad o precio sin sentido | Siguen frenando |
+
+**No pasa en silencio.** Un pedido de prueba tiene que ser reconocible **desde Tango**, sin entrar a HubSpot ni a los logs de Azure — si no, el día que se apague este modo no hay forma de saber cuáles dar de baja:
+
+| Dónde | Qué queda escrito |
+|---|---|
+| Cabecera del pedido | `LEYENDA_3 = ARTICULO DE PRUEBA - integracion de productos pendiente` |
+| Cada renglón reemplazado | `OBSERVACIONES = PRUEBA - en el negocio: <nombre del producto real>` |
+| Application Insights | un `⚠️` por renglón reemplazado |
+| Resultado de `procesarDeal` | `avisos[]`, separado de `problemas[]` |
+
+La distinción **aviso ≠ problema** es deliberada: un problema es algo que falta y frena el pedido; un aviso es algo que el pedido **lleva** y hay que saber. Mezclarlos en `tango_pedido_problema` haría que un pedido creado con éxito apareciera como fallido.
+
+**Cómo se apaga o se cambia**, sin desplegar:
+
+| | |
+|---|---|
+| `TANGO_PRODUCTO_PRUEBA=off` | Lo apaga. También `false`, `no`, `0` |
+| `TANGO_PRODUCTO_PRUEBA=512` | Usa ese `ID_STA11` en lugar de BAT250 |
+| `"activo": false` en el catálogo | Lo apaga en el repo, para todos los entornos |
+
+> 🟡 **Ojo con `VALIDA_STOCK`.** Está en `true` desde el 2026-08-25. Si BAT250 no tiene stock en Tango, el ERP puede rechazar el pedido — y el síntoma va a parecer un problema del circuito cuando no lo es. Si aparece, es candidato a `false` mientras dure la prueba.
+
+> 🟡 **Lo que este modo NO hace visible:** el Deal en HubSpot no dice que el pedido salió con un artículo de prueba. `tango_pedido_problema` se limpia al crear el pedido, y no hay una propiedad de aviso. Si hace falta que comercial lo vea desde HubSpot, es una quinta propiedad de deals (`tango_pedido_aviso`) más una línea en `procesarDeal`.
 
 ---
 
@@ -1302,11 +1482,14 @@ Deploy: push a `main` → GitHub Actions → Azure.
 | `TANGO_COMPANY` | Código de empresa, default `1` |
 | `HUBSPOT_TOKEN` | Private app token 🟡 a crear |
 | `SYNC_DRY_RUN` | `true` = calcula y loguea pero no escribe en HubSpot |
-| `TANGO_NUMERACION` | `correlativo` \| `reservado` (§7.6, §7.8). 🟡 Sin default: lo define administración. |
+| `TANGO_NUMERACION` | `correlativo` \| `reservado` (§7.6, §7.8). ✅ Decidido el 2026-08-27: **`correlativo`**, y la decisión vive en `config/defaults.tango.json`. La variable sólo hace falta para pisarla sin desplegar. |
 | `HUBSPOT_CLIENT_SECRET` | Client secret de la app, para la firma v3 del webhook (§10.2). **No** es `HUBSPOT_TOKEN`. 🟡 Falta cargarlo. |
 | `TANGO_PROXY_MODO` | `cerrado` (default) \| `relevamiento`. Abre `process` fuera del catálogo y `filtroSql` en el proxy (§10.0). |
 | `TANGO_PROXY_ESCRITURA` | `true` habilita `Api/Create`/`Update`/`Delete` en el proxy. Default apagado (§10.0). |
-| `DEAL_TO_TANGO_ENABLED` | `true` activa el webhook de negocios ganados (§9). Apagado por defecto: desplegar y activar son dos decisiones distintas. |
+| `DEAL_TO_TANGO_ENABLED` | `true` activa el webhook de negocios ganados (§9). Apagado por defecto: desplegar y activar son dos decisiones distintas. El freno está en la puerta — apagado, no se encola nada (§9.5). |
+| `DEAL_COLA_NOMBRE` | Nombre de la cola de negocios ganados. Default `deals-ganados` (§9.5). El webhook y el worker leen el mismo: si se cambia, se cambia para los dos, o el hook encola en una cola que nadie escucha. |
+| `AzureWebJobsStorage` | Storage de la Function App. Obligatorio en Consumption, y desde el 2026-08-26 también es donde vive la cola (§9.5). |
+| `TANGO_PRODUCTO_PRUEBA` | `off` apaga el artículo de prueba (§9.6); un número usa ese `ID_STA11`. Sin la variable, manda `config/defaults.tango.json`. |
 | `SYNC_PRODUCTOS_ENABLED` | `true` activa el timer de artículos. Apagado por defecto. |
 | `SYNC_PRODUCTOS_CRON` | Default `0 0 6,18 * * *` — dos veces por día, 06:00 y 18:00. |
 | `SYNC_PRODUCTOS_SOLO` | Lista de `COD_STA11` separados por coma. Vacío = todos. **Hoy: `BAT250`** — la prueba punta a punta va con un solo artículo (decisión de Matías 2026-08-25). |
@@ -1352,9 +1535,12 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 | `scripts/crearPropiedades.js` | Crea el grupo y las propiedades que faltan; parchea las opciones de los desplegables. Dry-run por defecto. |
 | `scripts/repararPropiedades.js` | ⚠️ Destructivo. Borra y recrea las propiedades mal definidas, con backup previo. Dry-run por defecto. |
 | `src/lib/verificarEmpresa.js` | Verificación previa del alta (§7.12): qué falta, quién lo resuelve, y el payload ya resuelto. |
+| `scripts/crearEmpresaDemo.js` | Crea UNA company de prueba completa, sin código de Tango, para ejercitar el alta al vuelo (§7.13). Dry-run por defecto. |
 | `scripts/defaultsPorModa.js` | Recalcula los defaults de parametría con la moda del padrón real. Dry-run por defecto. Necesita Azure. |
 | `config/mapeo.pedidos.json` | Propiedades de Deal donde se guarda el resultado de mandar el negocio al ERP (§9). |
 | `src/lib/dealToTango.js` | El circuito de la Fase 4. |
+| `src/lib/cola.js` | La cola entre el webhook y el trabajo (§9.5): nombre y forma del mensaje. |
+| `src/lib/verificarPedido.js` | Verificación del pedido, armado del payload y el artículo de prueba (§9.6). |
 | `docs/payloads/cliente-create.json` | Payload de alta de cliente (`process=2117`). |
 | `docs/payloads/producto-create.json` | Payload de alta de artículo (`process=87`). |
 | `docs/payloads/pedido-create.json` | Payload de alta de pedido (`process=19845`). |
