@@ -10,6 +10,7 @@
     "process": 2117,
     "endpoint": "Api/Create",
 
+
     "alta": {
       "_nota": "Que exige Tango para dar de alta un cliente, y de donde sale cada cosa. Lo lee lib/verificarEmpresa ANTES de intentar el alta, para poder decir que falta en vez de comerse un rechazo del ERP. Es el riesgo 3 del circuito: 'verificar empresa' es mas que mirar si existe el COD_GVA14.",
       "_verificadoContraElERP": false,
@@ -100,6 +101,20 @@
       "VALIDA_STOCK = true desde el 2026-08-25 (decision de Matias). El ejemplo de Postman iba en false.",
       "ID_MONEDA = 1: PROVISORIO, se asume ARS."
     ],
+
+    "productoDePrueba": {
+      "_nota": "DECISION DE MATIAS 2026-08-27. Hasta que exista la integracion de productos, ningun product de HubSpot tiene tango_id_sta11: TODOS los renglones se marcaban incompletos y el pedido no salia nunca. Con esto el renglon sale igual, con la cantidad y el precio de la linea real, pero apuntando a este articulo.",
+      "activo": true,
+      "codigo": "BAT250",
+      "idSta11": 187,
+      "descripcion": "Bateria detector fetal BT250",
+      "cuandoActua": "SOLO cuando el producto de la linea no tiene tango_id_sta11. El dia que el sync de productos ate los IDs, esto deja de actuar solo, sin tocar nada.",
+      "cuandoNoActua": "Una linea escrita a mano, sin producto del catalogo, se sigue frenando. Eso no es la integracion que falta: es una linea mal cargada, y el producto de prueba taparia el error.",
+      "comoSeApaga": "activo: false aca, o TANGO_PRODUCTO_PRUEBA=off en las Application Settings. TANGO_PRODUCTO_PRUEBA=<numero> cambia el articulo sin desplegar.",
+      "noSeTapaSolo": "El pedido queda MARCADO en el ERP: LEYENDA_3 en la cabecera y el articulo que correspondia en OBSERVACIONES de cada renglon. Sin eso un pedido de prueba seria indistinguible de uno real.",
+      "ojo": "VALIDA_STOCK esta en true. Si BAT250 no tiene stock en Tango el ERP puede rechazar el pedido, y no va a ser culpa del circuito."
+    },
+
     "defaults": {
       "ID_MONEDA": 1,
       "ID_GVA43_TALON_PED": 1,

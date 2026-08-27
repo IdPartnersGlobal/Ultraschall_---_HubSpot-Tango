@@ -34,6 +34,35 @@ const CAMPOS_CLIENTE = defaults.clientes.alta.campos;
 /** Parametria que el pedido hereda del cliente. Ver 9.2. */
 const DEL_CLIENTE = ['ID_GVA01', 'ID_GVA10', 'ID_GVA23', 'ID_GVA24'];
 
+/** Lo que queda escrito en el pedido cuando se usa el articulo de prueba. */
+const LEYENDA_PRUEBA = 'ARTICULO DE PRUEBA - integracion de productos pendiente';
+
+/**
+ * El articulo de prueba, o null si no corresponde usarlo (§9.6).
+ *
+ * Existe porque hoy NINGUN product de HubSpot tiene `tango_id_sta11`: sin esto
+ * todos los renglones se marcan incompletos y el pedido no sale nunca, asi que
+ * el circuito entero queda sin poder probarse punta a punta.
+ *
+ * Se apaga solo el dia que el sync de productos ate los IDs: solo actua sobre
+ * un producto que NO tiene el suyo.
+ *
+ * @param {object} env  para poder apagarlo o cambiar el articulo sin desplegar
+ */
+function resolverProductoDePrueba(env = process.env) {
+    const cfg = PEDIDOS.productoDePrueba;
+    if (!cfg || cfg.activo !== true) return null;
+
+    const override = String(env.TANGO_PRODUCTO_PRUEBA ?? '').trim();
+    if (['off', 'false', 'no', '0'].includes(override.toLowerCase())) return null;
+
+    const forzado = override === '' ? null : Number(override);
+    if (forzado !== null && Number.isFinite(forzado) && forzado > 0) {
+        return { ...cfg, idSta11: forzado, codigo: `ID_STA11=${forzado}` };
+    }
+    return cfg;
+}
+
 const vacio = (v) => v === null || v === undefined || String(v).trim() === '';
 
 function problema(campo, motivo, comoSeArregla) {
@@ -81,12 +110,16 @@ function fechaTango(valor) {
  * @param {Array}  p.lineItems   line items del Deal, con properties
  * @param {Map}    p.productos   id de product de HubSpot -> properties
  * @param {object} p.lookups     tablas auxiliares
- * @returns {{ok, problemas, payload, cliente, renglones}}
+ * @param {object} p.productoDePrueba  articulo de reemplazo, o null (§9.6)
+ * @returns {{ok, problemas, avisos, payload, cliente, renglones}}
  *
  * Nunca lanza: un Deal incompleto es un informe, no una excepcion.
  */
-function verificar({ deal = {}, company = null, lineItems = [], productos = new Map(), lookups } = {}) {
+function verificar({ deal = {}, company = null, lineItems = [], productos = new Map(), lookups, productoDePrueba = resolverProductoDePrueba() } = {}) {
     const problemas = [];
+    // Los avisos NO frenan el pedido: son cosas que el pedido lleva y hay que
+    // saber, no cosas que falten.
+    const avisos = [];
 
     // ---------------------------------------------------------- el cliente
     if (!company) {
@@ -105,6 +138,7 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
 
     // -------------------------------------------------------- los renglones
     const renglones = [];
+    let huboPrueba = false;
     if (!lineItems.length) {
         problemas.push(problema('RENGLON_DTO', 'el negocio no tiene ningun producto cargado',
             'agregar al menos una linea de producto al negocio'));
@@ -116,19 +150,36 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         const idProducto = p.hs_product_id;
 
         const producto = idProducto ? productos.get(String(idProducto)) : null;
-        const idSta11 = producto ? numero(producto.tango_id_sta11) : null;
+        let idSta11 = producto ? numero(producto.tango_id_sta11) : null;
+        let dePrueba = false;
 
         if (!idProducto) {
+            // Esto NO lo cubre el articulo de prueba, a proposito: no es la
+            // integracion que falta, es una linea mal cargada, y reemplazarla
+            // por el articulo de prueba taparia el error.
             problemas.push(problema('RENGLON_DTO', `'${nombre}' no sale del catalogo de productos`,
                 'cargar la linea eligiendo un producto de la biblioteca, no escribiendola a mano'));
             continue;
         }
-        if (idSta11 === null) {
+        if (idSta11 === null && !productoDePrueba) {
             // Es el bloqueo esperado hasta que corra el sync de productos: sin
             // el ID del articulo en Tango el renglon no se puede armar.
             problemas.push(problema('RENGLON_DTO', `'${nombre}' no esta atado a ningun articulo de Tango (falta tango_id_sta11)`,
                 'esperar a que corra el sync de productos, o revisar ese producto'));
             continue;
+        }
+        if (idSta11 === null) {
+            // El renglon sale igual, con el articulo de prueba (§9.6). Queda
+            // dicho aca Y en el pedido: el ERP recibe el nombre real en
+            // OBSERVACIONES y la cabecera va marcada con LEYENDA_3.
+            idSta11 = productoDePrueba.idSta11;
+            dePrueba = true;
+            huboPrueba = true;
+            avisos.push({
+                campo: 'RENGLON_DTO',
+                motivo: `'${nombre}' va con el articulo de prueba ${productoDePrueba.codigo} (ID_STA11=${idSta11})`,
+                porQue: 'ese producto todavia no esta atado a Tango y la integracion de productos esta pendiente',
+            });
         }
 
         const cantidad = numero(p.quantity);
@@ -151,7 +202,10 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
             PRECIO: precio,
             PORCENTAJE_BONIFICACION: numero(p.hs_discount_percentage) ?? 0,
             ID_STA22: PEDIDOS.defaults.ID_STA22,
-            OBSERVACIONES: '',
+            // El articulo que correspondia, para que del lado del ERP se pueda
+            // leer que se pidio de verdad. Es lo unico que queda del producto
+            // original cuando va el de prueba.
+            OBSERVACIONES: dePrueba ? `PRUEBA - en el negocio: ${nombre}`.slice(0, 250) : '',
         });
     }
 
@@ -167,6 +221,11 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
 
     if (idGva14 !== null) cabecera.ID_GVA14 = idGva14;
 
+    // Un pedido armado con el articulo de prueba tiene que ser reconocible
+    // DESDE EL ERP, sin entrar a HubSpot ni a los logs. Si no, el dia que se
+    // apague este modo no hay forma de saber cuales hay que dar de baja.
+    if (huboPrueba) cabecera.LEYENDA_3 = LEYENDA_PRUEBA;
+
     const heredado = {};
     for (const campo of DEL_CLIENTE) {
         const r = parametria(campo, props, lookups);
@@ -178,6 +237,7 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
     return {
         ok: problemas.length === 0,
         problemas,
+        avisos,
         payload,
         cliente,
         renglones,
@@ -185,4 +245,4 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
     };
 }
 
-module.exports = { verificar, fechaTango, DEL_CLIENTE };
+module.exports = { verificar, fechaTango, resolverProductoDePrueba, DEL_CLIENTE, LEYENDA_PRUEBA };

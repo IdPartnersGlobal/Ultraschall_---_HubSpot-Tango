@@ -84,6 +84,7 @@ function admitir({ metodo, uri, cuerpoCrudo, headers, secreto, ahora = Date.now(
  *
  * @returns {Promise<{dealId, estado, nroPedido?, motivo?, problemas?}>}
  *   estado: 'creado' | 'ya-tenia' | 'incompleto' | 'dry-run'
+ *   avisos: cosas que el pedido lleva y hay que saber, no cosas que falten
  */
 async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, log = silencioso, dryRun = true, ahora = new Date() }) {
     // 4. Idempotencia. Es lo primero que se lee: un Deal que ya tiene pedido no
@@ -123,6 +124,11 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         productos,
         lookups,
     });
+
+    // Los avisos no frenan nada, pero tienen que verse: hoy el unico es que el
+    // renglon va con el articulo de prueba (§9.6), y un pedido que sale con un
+    // articulo que no es el que se vendio no puede pasar en silencio.
+    for (const a of v.avisos || []) log.aviso('PEDIDO', `${dealId}: ${a.motivo}`);
 
     // El cliente todavia no existe en el ERP: se crea antes del pedido y la
     // company queda con su COD_GVA14, asi que la proxima vez ya no hace falta.
@@ -175,7 +181,7 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     });
 
     log.paso('DEAL-OK', `${dealId} -> pedido ${nroPedido} en Tango (cliente ${cliente.codigo})`);
-    return { dealId, estado: 'creado', nroPedido, cliente: cliente.codigo };
+    return { dealId, estado: 'creado', nroPedido, cliente: cliente.codigo, avisos: v.avisos };
 }
 
 /**

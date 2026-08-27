@@ -137,6 +137,11 @@ const linea = (over = {}) => ({
 
 const PRODUCTOS = new Map([['77', { name: 'Ecografo', tango_id_sta11: '394' }]]);
 
+/** El estado REAL del portal hoy: el producto existe pero no esta atado a Tango. */
+const SIN_ATAR = new Map([['77', { name: 'Ecografo' }]]);
+
+const PRUEBA = require('../config/defaults.tango.json').pedidos.productoDePrueba;
+
 const verificar = (over = {}) => verificarPedido.verificar({
     deal: { hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z' },
     company: COMPANY,
@@ -198,11 +203,66 @@ test('un negocio sin renglones es un problema', () => {
     assert.ok(r.problemas.some((p) => p.campo === 'RENGLON_DTO'));
 });
 
-test('un producto que no esta atado a Tango frena el renglon y lo dice', () => {
-    // Es el bloqueo esperado hasta que corra el sync de productos.
-    const r = verificar({ productos: new Map([['77', { name: 'Ecografo' }]]) });
+test('un producto que no esta atado a Tango frena el renglon, si no hay articulo de prueba', () => {
+    // Era el bloqueo esperado hasta que corriera el sync de productos. Desde el
+    // 2026-08-27 lo tapa el articulo de prueba (§9.6); apagado, vuelve a frenar.
+    const r = verificar({ productos: SIN_ATAR, productoDePrueba: null });
     assert.strictEqual(r.ok, false);
     assert.match(r.problemas[0].motivo, /tango_id_sta11/);
+});
+
+// ── El articulo de prueba (§9.6) ─────────────────────────────────────────
+
+test('un producto sin ID de Tango sale igual, con el articulo de prueba', () => {
+    // Sin esto el circuito no se puede probar punta a punta: HOY ningun product
+    // del portal tiene tango_id_sta11, asi que TODOS los pedidos se frenaban.
+    const r = verificar({ productos: SIN_ATAR });
+
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.problemas.length, 0);
+    assert.strictEqual(r.payload.RENGLON_DTO[0].ID_STA11, PRUEBA.idSta11);
+    assert.strictEqual(r.payload.RENGLON_DTO[0].CANTIDAD_PEDIDA, 2, 'la cantidad es la de la linea real');
+    assert.strictEqual(r.payload.RENGLON_DTO[0].PRECIO, 48999, 'y el precio tambien');
+});
+
+test('el reemplazo no pasa en silencio: queda avisado y marcado en el ERP', () => {
+    // Un pedido de prueba tiene que ser reconocible DESDE Tango: si no, el dia
+    // que se apague este modo no hay forma de saber cuales dar de baja.
+    const r = verificar({ productos: SIN_ATAR });
+
+    assert.strictEqual(r.avisos.length, 1);
+    assert.match(r.avisos[0].motivo, /BAT250/);
+    assert.strictEqual(r.payload.LEYENDA_3, verificarPedido.LEYENDA_PRUEBA);
+    assert.match(r.payload.RENGLON_DTO[0].OBSERVACIONES, /Ecografo/, 'el articulo que correspondia viaja al ERP');
+});
+
+test('un producto que SI esta atado no usa el de prueba', () => {
+    // El dia que corra el sync de productos esto se apaga solo, sin tocar nada.
+    const r = verificar();
+    assert.strictEqual(r.payload.RENGLON_DTO[0].ID_STA11, 394);
+    assert.deepStrictEqual(r.avisos, []);
+    assert.strictEqual(r.payload.LEYENDA_3, undefined, 'un pedido real no se marca como prueba');
+});
+
+test('una linea escrita a mano NO la cubre el articulo de prueba', () => {
+    // No es la integracion que falta: es una linea mal cargada, y reemplazarla
+    // por el articulo de prueba taparia el error.
+    const r = verificar({ lineItems: [linea({ hs_product_id: undefined })], productos: SIN_ATAR });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.problemas[0].motivo, /catalogo/);
+});
+
+test('el articulo de prueba se puede apagar y cambiar por entorno', () => {
+    const resolver = verificarPedido.resolverProductoDePrueba;
+    assert.strictEqual(resolver({}).idSta11, PRUEBA.idSta11, 'sin variable, manda el catalogo');
+
+    for (const off of ['off', 'false', 'no', '0', 'OFF']) {
+        assert.strictEqual(resolver({ TANGO_PRODUCTO_PRUEBA: off }), null, `${off} lo apaga`);
+    }
+
+    // Cambiar el articulo de prueba no puede exigir un despliegue.
+    assert.strictEqual(resolver({ TANGO_PRODUCTO_PRUEBA: '512' }).idSta11, 512);
+    assert.strictEqual(resolver({ TANGO_PRODUCTO_PRUEBA: 'cualquier cosa' }).idSta11, PRUEBA.idSta11, 'un valor sin sentido no apaga nada ni inventa un ID');
 });
 
 test('una linea escrita a mano, sin producto del catalogo, se rechaza', () => {
@@ -292,13 +352,31 @@ test('un Deal que ya tiene pedido no se manda de nuevo, y no lee nada mas', asyn
 
 test('si falta algo, el problema queda escrito en el Deal y no se crea el pedido', async () => {
     // Sin esto el unico rastro queda en los logs de Azure, donde comercial no entra.
-    const hs = hsFalso({ productos: [{ id: '77', properties: {} }] });
+    // La linea escrita a mano es lo que sigue frenando el pedido desde que existe
+    // el articulo de prueba (§9.6).
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
     const tango = tangoFalso();
     const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
 
     assert.strictEqual(r.estado, 'incompleto');
     assert.strictEqual(tango.creados.length, 0);
-    assert.match(hs.escrituras.at(-1).props.tango_pedido_problema, /tango_id_sta11/);
+    assert.match(hs.escrituras.at(-1).props.tango_pedido_problema, /catalogo/);
+});
+
+test('el circuito entero sale con el articulo de prueba y crea el pedido', async () => {
+    // Es el estado de HOY: el producto existe en el portal pero no esta atado.
+    // Antes esto no llegaba nunca al ERP.
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Ecografo' } }] });
+    const tango = tangoFalso();
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(r.avisos.length, 1, 'el reemplazo se informa');
+
+    const payload = tango.creados[0].payload;
+    assert.strictEqual(payload.RENGLON_DTO[0].ID_STA11, PRUEBA.idSta11);
+    assert.strictEqual(payload.LEYENDA_3, verificarPedido.LEYENDA_PRUEBA);
+    assert.strictEqual(payload.LEYENDA_4, 'HubSpot deal 111', 'sigue viajando el ID del negocio');
 });
 
 test('en dry-run no se crea nada ni se escribe nada', async () => {
