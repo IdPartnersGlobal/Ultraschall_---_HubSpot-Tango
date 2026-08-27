@@ -188,6 +188,19 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
             }
         },
 
+        /**
+         * Crea un registro suelto.
+         *
+         * No lo usa el sync —que va por `batchUpsert`, con su clave de
+         * idempotencia— ni el alta de clientes, que actualiza una company que
+         * comercial ya creo. Existe para las companies de prueba
+         * (`scripts/crearEmpresaDemo.js`): un registro que a proposito NO tiene
+         * codigo de Tango, para poder ejercitar el alta al vuelo.
+         */
+        crearObjeto(objeto, propiedades) {
+            return pedir(`/crm/v3/objects/${objeto}`, { metodo: 'POST', body: { properties: propiedades } });
+        },
+
         /** PATCH de un registro puntual, por su ID de HubSpot. */
         actualizarObjeto(objeto, id, propiedades) {
             return pedir(`/crm/v3/objects/${objeto}/${id}`, { metodo: 'PATCH', body: { properties: propiedades } });
