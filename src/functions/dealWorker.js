@@ -101,7 +101,16 @@ app.storageQueue('dealWorker', {
  * "ganado" sin pedido y sin que nadie se entere. Es el mismo criterio que el
  * resto de la Fase 4 — los problemas se escriben en el Deal (9.3).
  *
- * Esta funcion NO reintenta nada: solo deja constancia.
+ * Esta funcion NO reintenta nada: solo deja constancia. Pero desde el
+ * 2026-08-28 deja la MISMA constancia que un negocio incompleto (§9.9):
+ * propiedad, nota y una etapa atras.
+ *
+ * Decision de Matias: que el negocio retroceda tambien cuando el ERP se cayo
+ * **es en si mismo la senal**. Varios negocios volviendo solos es lo que hace
+ * visible una caida; si se quedaran en "Cierre ganado" no se enteraria nadie.
+ *
+ * Lo que SI cambia es el texto: aca no falta ningun dato, y decirle a comercial
+ * que cargue algo lo manda a buscar lo que no existe. Por eso `tipo: 'tecnico'`.
  */
 app.storageQueue('dealVeneno', {
     queueName: cola.NOMBRE_VENENO,
@@ -115,13 +124,36 @@ app.storageQueue('dealVeneno', {
             return;
         }
 
-        const motivo = 'El pedido no se pudo crear despues de varios intentos. Revisar los logs de Azure (Application Insights) y volver a guardar el negocio para reintentar.';
+        // ⚠️ El texto viejo decia "volver a guardar el negocio para
+        // reintentar". Es FALSO: el webhook escucha el cambio de ETAPA y nada
+        // mas (webhooks-hsmeta.json), asi que guardar el negocio no dispara
+        // nada. Y mandaba a comercial a Application Insights, donde no entra.
+        const problemas = [{
+            campo: 'Tango',
+            motivo: 'el pedido no se pudo crear despues de varios intentos: el ERP no respondio, o rechazo la operacion',
+            comoSeArregla: 'no hay nada que cargar en el negocio. Avisar a sistemas y, cuando Tango vuelva, mover el negocio a la etapa de ganado otra vez',
+        }];
         log.error('VENENO', `negocio ${m.dealId}: agotados los reintentos`);
 
         try {
             const config = dealToTango.leerConfig();
             const hs = hubspotClient.crear({ token: config.HUBSPOT_TOKEN, log });
-            await hs.actualizarObjeto('deals', m.dealId, { [dealToTango.PROP_PROBLEMA]: motivo });
+
+            // Hace falta la etapa actual: es lo que evita retroceder dos veces
+            // si el mismo negocio cae en veneno mas de una vez.
+            const deal = await hs.objeto('deals', m.dealId, ['dealstage']);
+
+            await dealToTango.reportarIncompleto({
+                hs,
+                dealId: m.dealId,
+                etapaActual: deal?.properties?.dealstage,
+                problemas,
+                tipo: 'tecnico',
+                log,
+                // Se respeta el dry-run: en ese modo no se mando nada a Tango,
+                // asi que tampoco se toca el negocio. La senal queda en el log.
+                dryRun: config.DRY_RUN,
+            });
         } catch (e) {
             // Si tampoco se puede anotar, no hay a donde escalar: que quede en
             // el log y no se propague, o el mensaje rebota para siempre.

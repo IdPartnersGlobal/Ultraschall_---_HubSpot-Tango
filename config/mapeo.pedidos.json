@@ -2,7 +2,7 @@
   "_meta": {
     "entidad": "pedidos",
     "estado": "PROPUESTA 2026-08-25. Son las propiedades de Deal que necesita el webhook de negocios ganados (Fase 4, ARQUITECTURA.md 9). Ninguna existe todavia en el portal: se verificaron las 249 propiedades de deals el 2026-08-25 y no hay ninguna tango_*.",
-    "direccion": "Este mapeo va al reves que los otros: no trae datos de Tango a HubSpot, sino que guarda en el Deal el RESULTADO de haberlo mandado al ERP.",
+    "direccion": "Este mapeo va en los DOS sentidos. La mayoria de los campos guardan en el Deal el RESULTADO de haberlo mandado al ERP (tango->hubspot). Los dos desplegables van al reves (hubspot->tango): son parametria del pedido que elige comercial y que HubSpot no tenia como expresar. Ver 9.8.",
     "origen": {
       "sistema": "Tango",
       "process": 19845,
@@ -25,8 +25,156 @@
       "ojo": "`tango_nro_pedido` guarda lo que devuelve TANGO, que es otra cosa: el numero de su talonario. Son dos numeros distintos y conviene no mezclarlos."
     }
   },
-
   "campos": [
+    {
+      "tango": "ID_STA22",
+      "hubspot": "tango_deposito",
+      "label": "Deposito (Tango)",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "direccion": "hubspot->tango",
+      "notas": "De que deposito sale el pedido. Lo elige comercial en el Deal. Si queda vacio va el default de defaults.tango.json (PRODUCTO TERMINADO, el 66% de los pedidos reales). Guarda el CODIGO de Tango y la etiqueta es el nombre del deposito: el ID interno lo resuelve lookups contra la tabla del catalogo, porque el codigo NO es el ID (5.4) y aca divergen 11 de 16.",
+      "opciones": {
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "14": "14",
+        "15": "15",
+        "30": "30",
+        "32": "32",
+        "34": "34",
+        "35": "35",
+        "36": "36",
+        "40": "40",
+        "41": "41",
+        "43": "43",
+        "44": "44",
+        "45": "45",
+        "46": "46",
+        "47": "47",
+        "48": "48",
+        "49": "49",
+        "50": "50",
+        "01": "01",
+        "06": "06",
+        "04": "04",
+        "03": "03",
+        "02": "02",
+        "05": "05",
+        "07": "07"
+      },
+      "opcionesOrden": [
+        "01",
+        "36",
+        "12",
+        "40",
+        "30",
+        "11",
+        "06",
+        "34",
+        "04",
+        "43",
+        "15",
+        "03",
+        "48",
+        "02",
+        "05",
+        "07",
+        "10",
+        "14",
+        "32",
+        "35",
+        "41",
+        "44",
+        "45",
+        "46",
+        "47",
+        "49",
+        "50"
+      ],
+      "ordenNota": "Orden del desplegable: por cantidad de pedidos reales, no alfabetico. Comercial abre la lista y encuentra PRODUCTO TERMINADO arriba. Va aparte de 'opciones' porque el orden de las claves de un objeto JSON no sobrevive a JavaScript cuando parecen numeros.",
+      "opcionesEtiquetas": {
+        "10": "COMPONENTES OBSOLETOS",
+        "11": "OFICINA EXHIBICION",
+        "12": "EQUIPOS VETERINARIA",
+        "14": "Busqueda",
+        "15": "Depósito Web",
+        "30": "DEPOSITO PRODUCCION MATCO",
+        "32": "FALTANTES",
+        "34": "ABREGU CBA",
+        "35": "PROCESOS",
+        "36": "SERVICIO TECNICO",
+        "40": "CONGRESOS - EXPOS",
+        "41": "SOBRANTES - A ANALIZAR",
+        "43": "JULIO PROCESOS",
+        "44": "NO CONFORME",
+        "45": "CUARENTENA SERVICE",
+        "46": "DESARROLLO CA",
+        "47": "DESARROLLO US",
+        "48": "EQUIPOS REACONDICIONADOS",
+        "49": "FALTANTES DE ORIGEN",
+        "50": "ABREGU ROTURAS",
+        "01": "PRODUCTO TERMINADO",
+        "06": "DEMO",
+        "04": "CONSIGNADOS",
+        "03": "CUARENTENA",
+        "02": "SERVICE US",
+        "05": "SCRAP",
+        "07": "PRUEBA SERVICE"
+      },
+      "opcionesNota": "Codigo COD_STA22 -> valor de la opcion, y valor -> etiqueta que ve comercial. Las 27 filas salen de la tabla STA22 completa (process 2941), leida el 2026-08-31, sin los depositos de baja. Ordenadas por cantidad de pedidos reales; las que nunca se usaron van al final. Rederivable con scripts/tablaDepositos.js.",
+      "opcionesInversas": {
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "14": "14",
+        "15": "15",
+        "30": "30",
+        "32": "32",
+        "34": "34",
+        "35": "35",
+        "36": "36",
+        "40": "40",
+        "41": "41",
+        "43": "43",
+        "44": "44",
+        "45": "45",
+        "46": "46",
+        "47": "47",
+        "48": "48",
+        "49": "49",
+        "50": "50",
+        "01": "01",
+        "06": "06",
+        "04": "04",
+        "03": "03",
+        "02": "02",
+        "05": "05",
+        "07": "07"
+      },
+      "notasInversa": "Valor de la opcion -> COD_STA22. Es la identidad porque el valor de la opcion YA es el codigo: la traduccion legible vive en las etiquetas, no en el valor. Asi un export de HubSpot sigue siendo cruzable contra el ERP.",
+      "lookupInverso": "depositos"
+    },
+    {
+      "tango": "ID_GVA43_TALON_PED",
+      "hubspot": "tango_talonario",
+      "label": "Talonario del pedido (Tango)",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "direccion": "hubspot->tango",
+      "notas": "Con que talonario se numera el pedido en el ERP. HOY TIENE UNA SOLA OPCION: 'PEDIDOS' es el unico talonario de pedidos en uso (3.234 de 3.234 pedidos de 2025-2026, 9.7). Se crea igual para que el dia que Ultraschall abra un segundo talonario sea un PATCH de opciones y no un cambio de codigo. Vacio = el default, que es esa misma unica opcion: comercial no tiene por que tocarlo.",
+      "opciones": {
+        "2": "2"
+      },
+      "opcionesEtiquetas": {
+        "2": "PEDIDOS"
+      },
+      "opcionesNota": "Codigo TALONARIO_PEDIDO -> valor de la opcion. OJO: el codigo es 2 y el ID interno es 1. Guardar el codigo y dejar que lookups resuelva el ID es lo que evita que alguien 'confirme' el talonario mirando la pantalla del ERP y rompa el pedido.",
+      "opcionesInversas": {
+        "2": "2"
+      },
+      "lookupInverso": "talonariosPedido"
+    },
     {
       "tango": "NRO_PEDIDO",
       "hubspot": "tango_nro_pedido",
@@ -52,7 +200,7 @@
       "tipo": "string",
       "hsFieldType": "text",
       "direccion": "tango->hubspot",
-      "notas": "Por que NO se pudo crear: que campo falta, que producto no esta atado a Tango. Sin esto el unico rastro de una falla queda en los logs de Azure, donde comercial no entra. Se limpia cuando el pedido finalmente se crea."
+      "notas": "Por que NO se pudo crear: que campo falta, que producto no esta atado a Tango. Se limpia cuando el pedido finalmente se crea. Desde el 2026-08-28 NO es el unico canal: el mismo problema deja una NOTA en el negocio y lo devuelve una etapa atras (9.9). Esta propiedad queda como la marca para la maquina —se pisa en cada intento, a proposito—; la nota es la que ve comercial y se acumula."
     },
     {
       "tango": "__idCliente__",
@@ -64,7 +212,6 @@
       "notas": "El COD_GVA14 contra el que se cargo el pedido. Queda en el Deal porque la company puede cambiar de dueno o reasignarse despues, y entonces ya no se sabria a que cliente del ERP fue a parar."
     }
   ],
-
   "sinMapear": {
     "_nota": "Campos del pedido que HOY no se guardan en el Deal y podrian hacer falta.",
     "FECHA_ENTREGA": "🟡 No hay propiedad de Deal que la lleve. Hasta que se defina, el pedido va sin fecha de entrega.",

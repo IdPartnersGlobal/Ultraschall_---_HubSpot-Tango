@@ -295,7 +295,7 @@ async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, o
     const v = verificarEmpresa.verificar({ propiedades, mapper: mapper.crear(mapeoClientes, lookups), lookups, owners });
     if (!v.ok) {
         log.aviso('ALTA', `la company ${companyId} no se puede dar de alta todavia: ${v.problemas.map((p) => p.campo).join(', ')}`);
-        return { creado: false, codigo: null, idGva14: null, companyId, problemas: v.problemas, pendientes: v.pendientes, dryRun };
+        return { creado: false, codigo: null, idGva14: null, companyId, problemas: v.problemas, pendientes: v.pendientes, avisos: v.avisos || [], dryRun };
     }
 
     // 2. El codigo.
@@ -358,7 +358,9 @@ async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, o
     //    existe en el ERP, asi que si esto falla el error tiene que salir a la
     //    superficie. Reintentar el alta duplicaria el cliente.
     const vuelta = await escribirDeVuelta({ tango, hs, lookups, companyId, codigo: codigoCreado, log, dryRun: false, ahora });
-    return { creado: true, codigo: codigoCreado, idGva14: vuelta.idGva14, companyId, problemas: vuelta.problemas, pendientes: [], dryRun: false };
+    // Los avisos viajan aunque el alta haya salido bien: son justamente lo que
+    // se creo con un default y alguien tiene que completar (9.10).
+    return { creado: true, codigo: codigoCreado, idGva14: vuelta.idGva14, companyId, problemas: vuelta.problemas, pendientes: [], avisos: v.avisos || [], dryRun: false };
 }
 
 module.exports = {

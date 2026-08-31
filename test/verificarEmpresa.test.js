@@ -111,11 +111,15 @@ test('sin tipo de documento se infiere del numero, como en la lectura', () => {
     assert.strictEqual(r.resueltos.tipoDocumento.inferido, true, 'queda constancia de que fue inferido');
 });
 
-test('sin documento el tipo va SIN_IDENTIFICAR, pero el CUIT sigue haciendo falta', () => {
+test('sin documento el alta SALE, con el tipo en SIN_IDENTIFICAR y un aviso', () => {
+    // CAMBIO 2026-08-28: el CUIT frenaba el alta por suposicion. El sondeo
+    // contra el ERP mostro que Tango NO lo exige (alta._sondeo), y la politica
+    // es crear con lo minimo. Sigue avisandose: sin CUIT no se puede facturar.
     const r = verificar({ ...COMPANY, cuit: '', tipo_de_documento: '' });
     assert.strictEqual(r.valores.ID_TIPO_DOCUMENTO_GV, 41, 'SIN_IDENTIFICAR es una fila real de TIPO_DOCUMENTO_GV');
-    assert.strictEqual(r.ok, false);
-    assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['CUIT'], 'lo unico que falta es el documento');
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.deepStrictEqual(r.avisos.map((a) => a.campo), ['CUIT'], 'no frena, pero no pasa en silencio');
+    assert.match(r.avisos[0].comoSeArregla, /cuit/i);
 });
 
 test('telefono y mail no frenan el alta', () => {
@@ -210,20 +214,75 @@ test('literalSeguro acepta lo valido y rechaza lo que no tiene esa forma', () =>
 // ── El catalogo ──────────────────────────────────────────────────────────
 
 test('el catalogo de campos del alta vive en config, no en el codigo', () => {
-    // Cuando se sondee contra el ERP hay que poder corregirlo editando un JSON.
     assert.ok(verificarEmpresa.ALTA.campos.length >= 18);
-    assert.strictEqual(verificarEmpresa.ALTA._verificadoContraElERP, false,
-        'sigue sin sondearse: si esto cambia a true, revisar que los obligatorios sean los reales');
+    assert.strictEqual(verificarEmpresa.ALTA._verificadoContraElERP, '2026-08-28', 'sondeado contra el ERP');
+});
+
+test('lo que frena el alta es lo que Tango exige, y nada mas', () => {
+    // Sondeado contra el ERP el 2026-08-28 (alta._sondeo): de los 28 campos que
+    // Tango pide, uno solo es un dato del negocio. Este test es la traduccion
+    // de ese sondeo: si alguien vuelve a marcar el CUIT como obligatorio "por
+    // las dudas", el circuito se frena entero otra vez.
+    const sondeo = verificarEmpresa.ALTA._sondeo;
+    const frenan = verificarEmpresa.ALTA.campos.filter((c) => c.obligatorio).map((c) => c.tango).sort();
+    assert.deepStrictEqual(frenan, ['COD_GVA14', 'ID_CATEGORIA_IVA', 'RAZON_SOCI']);
+
+    for (const campo of sondeo.NO_exigidos) {
+        const def = verificarEmpresa.ALTA.campos.find((c) => c.tango === campo);
+        if (def) assert.ok(!def.obligatorio, `${campo} no lo exige Tango y esta marcado obligatorio`);
+    }
+    for (const campo of frenan) {
+        assert.ok(sondeo.exigidos.includes(campo), `${campo} frena el alta y el ERP no lo pide`);
+    }
 });
 
 test('verificar no explota con una company vacia: informa', () => {
+    // Una company COMPLETAMENTE vacia ya no frena por cinco campos: frena por
+    // el unico que Tango exige de verdad y no se puede inventar.
     const r = verificarEmpresa.verificar({ propiedades: {}, mapper: m, lookups: lk });
     assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(), ['ID_CATEGORIA_IVA', 'RAZON_SOCI'],
+        'los dos unicos que una persona tiene que decidir');
     assert.deepStrictEqual(
-        r.problemas.map((p) => p.campo).sort(),
-        ['CUIT', 'DOMICILIO', 'ID_CATEGORIA_IVA', 'NOM_COM', 'RAZON_SOCI'],
-        'solo lo que una persona tiene que cargar'
+        r.avisos.map((a) => a.campo).sort(),
+        ['CUIT', 'DOMICILIO'],
+        'lo demas se crea con default y queda para completar'
     );
+});
+
+test('sin condicion de IVA el alta NO sale: la categoria fiscal se elige', () => {
+    // DECISION DE MATIAS 2026-08-28, y es la unica excepcion a la politica del
+    // alta minima: todo lo demas se completa con default, pero esto determina
+    // COMO SE FACTURA. Un default equivocado no se nota hasta que sale mal una
+    // factura. Llego a estar con RI por defecto y se saco.
+    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA' }, mapper: m, lookups: lk });
+    assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['ID_CATEGORIA_IVA']);
+    assert.ok(!r.avisos.some((a) => a.campo === 'ID_CATEGORIA_IVA'), 'frena: no es un aviso');
+});
+
+test('el catalogo NO declara un default para la categoria de IVA', () => {
+    // Si alguien le vuelve a poner codigoSiFalta, el alta empieza a inventar la
+    // categoria fiscal en silencio. Esto es lo que lo impide.
+    const campo = verificarEmpresa.ALTA.campos.find((c) => c.tango === 'ID_CATEGORIA_IVA');
+    assert.strictEqual(campo.codigoSiFalta, undefined);
+    assert.strictEqual(campo.obligatorio, true);
+});
+
+test('con la razon social y la condicion de IVA ya se puede dar de alta', () => {
+    // Es la politica del 2026-08-28: si la empresa no tiene ID de Tango se crea
+    // con lo minimo, y comercial completa despues.
+    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' }, mapper: m, lookups: lk });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.valores.RAZON_SOCI, 'ACME SA');
+    assert.strictEqual(r.valores.NOM_COM, 'ACME SA', 'el nombre de fantasia se cae a la razon social');
+    assert.deepStrictEqual(r.avisos.map((a) => a.campo).sort(), ['CUIT', 'DOMICILIO'], 'lo que falta y no frena');
+    for (const campo of verificarEmpresa.ALTA._sondeo.exigidos) {
+        if (campo === 'COD_GVA14') continue; // lo pone lib/numeracion
+        const esParametria = !verificarEmpresa.ALTA.campos.some((c) => c.tango === campo);
+        if (esParametria) continue;          // sale de clientes.defaults
+        assert.notStrictEqual(r.valores[campo], undefined, `${campo} lo exige Tango y quedo sin valor`);
+    }
 });
 
 // ── Neutros: lo que no frena el alta pero igual viaja ────────────────────

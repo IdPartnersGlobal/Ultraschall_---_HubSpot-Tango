@@ -36,7 +36,9 @@
     "pedidos": {
       "process": 19845,
       "tabla": "GVA21",
-      "uso": "alta"
+      "uso": "alta y lectura",
+      "descubierto": "2026-08-28: tambien SE LEE. Estaba anotado como 'alta' nomas y por eso nunca se probo. La vista trae TALONARIO_PEDIDO, COD_STA22, COD_MONEDA, NRO_DE_LIS, COD_GVA23, COD_GVA24, COND_VTA y los datos del cliente, y las columnas ID_ de la tabla base sirven en filtroSql. Con eso se resolvieron GVA43 y STA22, que figuraban como bloqueantes desde el 2026-08-14.",
+      "usoRecomendado": "Es la fuente para elegir cualquier default del pedido: el valor que usan los pedidos que el ERP ya acepto."
     },
     "contactos": {
       "process": 2117,
@@ -111,6 +113,307 @@
       "cargar": false,
       "motivoNoCarga": "NO SE CARGA desde el 2026-08-24 (decision de Matias). Ningun campo del mapeo de clientes la usa: era un request por corrida al pedido. La definicion queda porque GVA41 aparece en el payload de alta de pedidos (Fase 4); si algun dia hace falta, sacar este flag."
     },
+    "talonariosPedido": {
+      "process": null,
+      "processNoExiste": "2026-08-31: administracion confirmo que GVA43 NO tiene process. No es un pendiente: es definitivo. El talonario se elige por la mayoria de los pedidos reales, que ademas es unanime (3.234 de 3.234). Este metodo solo ve los talonarios EN USO, y para elegir un default es exactamente lo que hace falta.",
+      "tabla": "GVA43",
+      "id": "ID_GVA43_TALON_PED",
+      "codigo": "TALONARIO_PEDIDO",
+      "descripcion": "DESCRIPCION_TALONARIO_PEDIDO",
+      "campoEnPedido": "TALONARIO_PEDIDO",
+      "estatica": true,
+      "verificado": "2026-08-28",
+      "nota": "Resuelto SIN su process, por la columna interna de GVA21 (7.7 aplicado a pedidos): el process 19845 se puede LEER, y ID_GVA43_TALON_PED es columna real de la tabla base aunque la vista no la devuelva. Se barrieron los IDs 1..25 y solo el 1 tiene pedidos. Falsacion sobre el padron entero (TALONARIO_PEDIDO <> 2 con ID_GVA43_TALON_PED = 1): cero filas. OJO: codigo 2, ID interno 1 — divergen, como casi todas.",
+      "alcance": "Solo lista los talonarios de pedido EN USO. Un talonario que GVA43 tenga definido pero que ningun pedido use no aparece por este metodo, y no hace falta: el default se elige entre los que ya funcionan.",
+      "filas": [
+        {
+          "ID_GVA43_TALON_PED": 1,
+          "TALONARIO_PEDIDO": 2,
+          "DESCRIPCION_TALONARIO_PEDIDO": "PEDIDOS",
+          "pedidos2026": 1065,
+          "pedidos2025": 2169
+        }
+      ]
+    },
+    "depositos": {
+      "process": 2941,
+      "processDesde": "2026-08-31: lo consiguio Matias. Hasta esa fecha la tabla se habia reconstruido SIN el, por la columna interna de GVA21 (9.7), y solo con los depositos EN USO en algun pedido.",
+      "tabla": "STA22",
+      "id": "ID_STA22",
+      "codigo": "COD_STA22",
+      "descripcion": "NOMBRE_SUC",
+      "campoEnPedido": "COD_STA22",
+      "estatica": true,
+      "verificado": "2026-08-31",
+      "divergen": "30/36",
+      "nota": "Mismo metodo y misma fecha que talonariosPedido. Se barrieron los IDs 1..60. Falsacion sobre el padron entero (COD_STA22 <> '01' con ID_STA22 = 1): cero filas. Los codigos divergen fuerte del ID: 30->10, 10->20, 12->23, 40->26, 43->30, 48->35, 15->38. Leer el codigo como ID mandaria el pedido al deposito equivocado sin que nada falle.",
+      "alcance": "La tabla STA22 COMPLETA, leida con el process 2941 el 2026-08-31. Los conteos de pedidos son de 2026 y 2025 y valen 0 para los depositos que ningun pedido uso.",
+      "filas": [
+        {
+          "ID_STA22": 1,
+          "COD_STA22": "01",
+          "NOMBRE_SUC": "PRODUCTO TERMINADO",
+          "pedidos2026": 703,
+          "pedidos2025": 1283
+        },
+        {
+          "ID_STA22": 2,
+          "COD_STA22": "02",
+          "NOMBRE_SUC": "SERVICE US",
+          "pedidos2026": 0,
+          "pedidos2025": 2
+        },
+        {
+          "ID_STA22": 3,
+          "COD_STA22": "03",
+          "NOMBRE_SUC": "CUARENTENA",
+          "pedidos2026": 0,
+          "pedidos2025": 3
+        },
+        {
+          "ID_STA22": 4,
+          "COD_STA22": "04",
+          "NOMBRE_SUC": "CONSIGNADOS",
+          "pedidos2026": 3,
+          "pedidos2025": 15
+        },
+        {
+          "ID_STA22": 5,
+          "COD_STA22": "05",
+          "NOMBRE_SUC": "SCRAP",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 6,
+          "COD_STA22": "06",
+          "NOMBRE_SUC": "DEMO",
+          "pedidos2026": 6,
+          "pedidos2025": 27
+        },
+        {
+          "ID_STA22": 9,
+          "COD_STA22": "07",
+          "NOMBRE_SUC": "PRUEBA SERVICE",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 10,
+          "COD_STA22": "30",
+          "NOMBRE_SUC": "DEPOSITO PRODUCCION MATCO",
+          "pedidos2026": 35,
+          "pedidos2025": 106
+        },
+        {
+          "ID_STA22": 11,
+          "COD_STA22": "31",
+          "NOMBRE_SUC": "DEPOSITO WORKMAN - MTD",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 12,
+          "COD_STA22": "32",
+          "NOMBRE_SUC": "FALTANTES",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 13,
+          "COD_STA22": "33",
+          "NOMBRE_SUC": "DAI ICHI CIRCUITOS",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 14,
+          "COD_STA22": "34",
+          "NOMBRE_SUC": "ABREGU CBA",
+          "pedidos2026": 6,
+          "pedidos2025": 14
+        },
+        {
+          "ID_STA22": 15,
+          "COD_STA22": "35",
+          "NOMBRE_SUC": "PROCESOS",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 16,
+          "COD_STA22": "36",
+          "NOMBRE_SUC": "SERVICIO TECNICO",
+          "pedidos2026": 144,
+          "pedidos2025": 312
+        },
+        {
+          "ID_STA22": 17,
+          "COD_STA22": "08",
+          "NOMBRE_SUC": "EQUIPOS A RECUPERAR",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 18,
+          "COD_STA22": "37",
+          "NOMBRE_SUC": "SAVINO D-MAD SRL",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 19,
+          "COD_STA22": "09",
+          "NOMBRE_SUC": "DEPOSITO DE CANJE",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 20,
+          "COD_STA22": "10",
+          "NOMBRE_SUC": "COMPONENTES OBSOLETOS",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 21,
+          "COD_STA22": "11",
+          "NOMBRE_SUC": "OFICINA EXHIBICION",
+          "pedidos2026": 7,
+          "pedidos2025": 42
+        },
+        {
+          "ID_STA22": 22,
+          "COD_STA22": "38",
+          "NOMBRE_SUC": "ABREGU CBA PRUEBA-DEVOLUCIÓN",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 23,
+          "COD_STA22": "12",
+          "NOMBRE_SUC": "EQUIPOS VETERINARIA",
+          "pedidos2026": 104,
+          "pedidos2025": 238
+        },
+        {
+          "ID_STA22": 24,
+          "COD_STA22": "13",
+          "NOMBRE_SUC": "OFICINA EXHIBICION 2",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 25,
+          "COD_STA22": "39",
+          "NOMBRE_SUC": "DIFERENCIAS DE STOCK L.S.",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 26,
+          "COD_STA22": "40",
+          "NOMBRE_SUC": "CONGRESOS - EXPOS",
+          "pedidos2026": 45,
+          "pedidos2025": 115
+        },
+        {
+          "ID_STA22": 27,
+          "COD_STA22": "14",
+          "NOMBRE_SUC": "Busqueda",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 28,
+          "COD_STA22": "41",
+          "NOMBRE_SUC": "SOBRANTES - A ANALIZAR",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 29,
+          "COD_STA22": "42",
+          "NOMBRE_SUC": "MERCADERIA EN TRANSITO",
+          "pedidos2026": 0,
+          "pedidos2025": 0,
+          "deBaja": true
+        },
+        {
+          "ID_STA22": 30,
+          "COD_STA22": "43",
+          "NOMBRE_SUC": "JULIO PROCESOS",
+          "pedidos2026": 3,
+          "pedidos2025": 12
+        },
+        {
+          "ID_STA22": 31,
+          "COD_STA22": "44",
+          "NOMBRE_SUC": "NO CONFORME",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 32,
+          "COD_STA22": "45",
+          "NOMBRE_SUC": "CUARENTENA SERVICE",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 33,
+          "COD_STA22": "46",
+          "NOMBRE_SUC": "DESARROLLO CA",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 34,
+          "COD_STA22": "47",
+          "NOMBRE_SUC": "DESARROLLO US",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 35,
+          "COD_STA22": "48",
+          "NOMBRE_SUC": "EQUIPOS REACONDICIONADOS",
+          "pedidos2026": 3,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 36,
+          "COD_STA22": "49",
+          "NOMBRE_SUC": "FALTANTES DE ORIGEN",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 37,
+          "COD_STA22": "50",
+          "NOMBRE_SUC": "ABREGU ROTURAS",
+          "pedidos2026": 0,
+          "pedidos2025": 0
+        },
+        {
+          "ID_STA22": 38,
+          "COD_STA22": "15",
+          "NOMBRE_SUC": "Depósito Web",
+          "pedidos2026": 6,
+          "pedidos2025": 0
+        }
+      ],
+      "registros": 36,
+      "contraste": "Las 16 filas que se habian derivado desde los pedidos (9.7) coinciden ID por ID con la tabla. Dos caminos independientes, mismo resultado."
+    },
     "listasPrecios": {
       "process": null,
       "tabla": "GVA10",
@@ -122,7 +425,7 @@
       "divergen": "0/5",
       "estatica": true,
       "verificado": "2026-08-24",
-      "nota": "El process 10348 que paso administracion NO sirve: Api/Get, GetByFilter y GetById fallan con 'An exception was thrown while activating ViewsFacade'. Tampoco se puede resolver por columna interna: ni GVA14 ni GVA21 tienen ID_GVA10. Se resolvio con un oraculo booleano por subconsulta contra GVA10 (busqueda binaria sobre ID_GVA10) y se verifico para cada codigo que no hay mas de un ID. OJO: aca codigo == ID, pero es SUERTE ESTRUCTURAL de una tabla chica y temprana, igual que GVA05. Si Ultraschall crea una sexta lista hay que re-verificar: NO asumir que la coincidencia se mantiene.",
+      "nota": "El process 10348 que paso administracion NO sirve: Api/Get, GetByFilter y GetById fallan con 'An exception was thrown while activating ViewsFacade'. Tampoco se puede resolver por la columna interna de GVA14, que no la tiene. (CORREGIDO 2026-08-28: GVA21 SI tiene ID_GVA10. Barriendo esa columna sale la tabla entera, y da exactamente estas 5 filas — o sea que el resultado del oraculo booleano quedo confirmado por un segundo metodo independiente.) Se resolvio con un oraculo booleano por subconsulta contra GVA10 (busqueda binaria sobre ID_GVA10) y se verifico para cada codigo que no hay mas de un ID. OJO: aca codigo == ID, pero es SUERTE ESTRUCTURAL de una tabla chica y temprana, igual que GVA05. Si Ultraschall crea una sexta lista hay que re-verificar: NO asumir que la coincidencia se mantiene.",
       "filas": [
         {
           "ID_GVA10": 1,
@@ -234,32 +537,24 @@
   },
   "faltantes": {
     "_nota": "Sin estos process no se puede avanzar. Conseguirlos con el metodo de 5.7.",
-    "listasDePrecios": {
-      "tabla": "GVA10",
-      "bloquea": "Fase 4",
-      "pantalla": "Listas de precios"
-    },
+    "_antesDeDarUnoPorBloqueante": "Un process que falta NO siempre bloquea. Tres de los cuatro que estaban aca se resolvieron sin conseguirlo nunca, resolviendo la auxiliar por la columna interna de una tabla que SI se puede leer (7.7). La pregunta correcta no es 'cual es el process de esta tabla' sino 'que tabla legible la referencia'.",
     "preciosArticulos": {
       "tabla": null,
       "bloquea": "Fase 1 completa",
-      "pantalla": "Precios de articulos / actualizacion de precios"
-    },
-    "depositos": {
-      "tabla": "STA22",
-      "bloquea": "Fase 4",
-      "pantalla": "Depositos",
-      "nota": "Matias no la encontro en el menu"
-    },
-    "talonarios": {
-      "tabla": "GVA43",
-      "bloquea": "Fase 4",
-      "pantalla": "Talonarios",
-      "nota": "Matias no la encontro en el menu"
+      "pantalla": "Precios de articulos / actualizacion de precios",
+      "nota": "Es el unico que sigue bloqueando de verdad. No se puede rodear por columna interna: el precio no es una auxiliar referenciada, es un dato que la vista de STA11 no trae.",
+      "noBloquea": "La Fase 4. El renglon del pedido necesita ID_STA11 y el precio lo pone el line item de HubSpot."
     },
     "stockPorDeposito": {
       "tabla": null,
       "bloquea": "optimizacion",
       "nota": "STA11.STOCK es parametria, no existencia real"
+    },
+    "_resueltos": {
+      "listasDePrecios": "GVA10 — resuelto 2026-08-24 por oraculo booleano, y CONFIRMADO 2026-08-28 por la columna ID_GVA10 de GVA21. Ver auxiliares.listasPrecios.",
+      "depositos": "STA22 — resuelto 2026-08-28 por la columna ID_STA22 de GVA21. Ver auxiliares.depositos.",
+      "talonarios": "GVA43 — resuelto 2026-08-28 por la columna ID_GVA43_TALON_PED de GVA21. Ver auxiliares.talonariosPedido.",
+      "_nota": "Ninguna de las tres pantallas aparecio nunca en el menu del ERP, y ninguna hizo falta."
     }
   },
   "tiposDeDocumento": {

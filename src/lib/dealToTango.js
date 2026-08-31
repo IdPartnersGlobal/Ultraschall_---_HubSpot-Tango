@@ -4,6 +4,7 @@ const firmaHubSpot = require('./firmaHubSpot');
 const etapas = require('./etapas');
 const verificarPedido = require('./verificarPedido');
 const altaCliente = require('./altaCliente');
+const notaProblema = require('./notaProblema');
 const { silencioso } = require('./logger');
 const procesos = require('../../config/tango.processes.json');
 const mapeoPedidos = require('../../config/mapeo.pedidos.json');
@@ -134,6 +135,7 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     // El cliente todavia no existe en el ERP: se crea antes del pedido y la
     // company queda con su COD_GVA14, asi que la proxima vez ya no hace falta.
     let cliente = v.cliente;
+    let avisosDelAlta = [];
     if (v.cliente.faltaAlta) {
         log.paso('DEAL', `la empresa ${company.id} no esta creada en Tango; se da de alta antes del pedido`);
         const alta = await altaCliente.crear({
@@ -145,22 +147,32 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         });
 
         if (!alta.creado) {
-            const motivo = dryRun
-                ? `(dry-run) la empresa se habria creado como ${alta.codigo}`
-                : `no se pudo crear la empresa en Tango: ${alta.problemas.map((p) => `${p.campo} ${p.motivo}`).join('; ')}`;
-            if (!dryRun) await marcarProblema(hs, dealId, motivo, log, dryRun);
-            return { dealId, estado: dryRun ? 'dry-run' : 'incompleto', motivo, problemas: alta.problemas };
+            if (dryRun) {
+                const motivo = `(dry-run) la empresa se habria creado como ${alta.codigo}`;
+                return { dealId, estado: 'dry-run', motivo, problemas: alta.problemas };
+            }
+            // Los campos que le faltan a la EMPRESA se reportan igual que los
+            // del negocio: la persona que los tiene que cargar es la misma y no
+            // tiene por que saber de que lado del circuito falto el dato.
+            const r = await reportarIncompleto({
+                hs, dealId, etapaActual: deal.properties?.dealstage,
+                problemas: alta.problemas, log, dryRun, ahora,
+            });
+            return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: alta.problemas, retroceso: r.retroceso };
         }
 
         cliente = { idGva14: alta.idGva14, codigo: alta.codigo, faltaAlta: false };
         v.payload.ID_GVA14 = alta.idGva14;
+        avisosDelAlta = alta.avisos || [];
     }
 
     if (!v.ok) {
-        const motivo = v.problemas.map((p) => `${p.campo}: ${p.motivo}`).join(' | ');
-        log.aviso('DEAL', `${dealId} incompleto -> ${motivo}`);
-        await marcarProblema(hs, dealId, motivo, log, dryRun);
-        return { dealId, estado: 'incompleto', motivo, problemas: v.problemas };
+        const r = await reportarIncompleto({
+            hs, dealId, etapaActual: deal.properties?.dealstage,
+            problemas: v.problemas, log, dryRun, ahora,
+        });
+        log.aviso('DEAL', `${dealId} incompleto -> ${r.motivo}`);
+        return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: v.problemas, retroceso: r.retroceso };
     }
 
     if (dryRun) {
@@ -181,8 +193,15 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         [PROP_PROBLEMA]: '',
     });
 
+    // El cliente se creo con lo minimo (9.10): lo que quedo con un default o
+    // sin cargar tiene que llegarle a alguien. NO frena ni mueve la etapa: el
+    // pedido ya esta en el ERP.
+    if (avisosDelAlta.length) {
+        await anotarACompletar({ hs, dealId, avisos: avisosDelAlta, cliente, log, ahora });
+    }
+
     log.paso('DEAL-OK', `${dealId} -> pedido ${nroPedido} en Tango (cliente ${cliente.codigo})`);
-    return { dealId, estado: 'creado', nroPedido, cliente: cliente.codigo, avisos: v.avisos };
+    return { dealId, estado: 'creado', nroPedido, cliente: cliente.codigo, avisos: v.avisos, aCompletar: avisosDelAlta };
 }
 
 /**
@@ -200,6 +219,102 @@ function numeroDePedido(respuesta) {
 }
 
 /** Deja escrito en el Deal por que no se pudo, para que se vea sin logs. */
+/**
+ * Un negocio que no se puede mandar a Tango: se deja dicho QUE falta y se
+ * devuelve el negocio una etapa atras (§9.9, pedido de Matias 2026-08-28).
+ *
+ * Tres escrituras, en este orden y por este motivo:
+ *
+ *   1. `tango_pedido_problema` — la marca que lee el circuito y que se limpia
+ *      sola cuando el pedido finalmente sale.
+ *   2. La NOTA — lo que ve comercial. Va ANTES de mover la etapa, para que el
+ *      negocio nunca se mueva antes de que exista la explicacion.
+ *   3. La etapa. Se mueve AUNQUE la nota haya fallado: el motivo ya quedo en
+ *      `tango_pedido_problema` (paso 1), y dejar el negocio en "Cierre ganado"
+ *      sin pedido es peor — parece cerrado y no lo esta.
+ *
+ * ⚠️ Mover la etapa DISPARA EL WEBHOOK otra vez: esta suscripto a `dealstage`.
+ * No es un bucle porque se retrocede a una etapa abierta y el control 3 la
+ * descarta sin gastar red. `etapas.anterior` ademas se saltea las ganadas.
+ *
+ * ⚠️ La cola es at-least-once (§9.5). La guarda contra duplicar la nota y
+ * retroceder DOS etapas no es un flag propio: es que el negocio ya no esta en
+ * una etapa ganada. En la re-entrega, `procesarDeal` relee el Deal y lo ve.
+ *
+ * Ninguna de las tres puede tumbar el proceso: el problema ya esta logueado, y
+ * fallar al reportar no puede convertirse en un problema mayor.
+ */
+async function reportarIncompleto({ hs, dealId, etapaActual, problemas = [], tipo = 'datos', log = silencioso, dryRun = true, ahora = new Date() }) {
+    const motivo = notaProblema.resumen({ problemas });
+
+    if (dryRun) {
+        log.aviso('DRY-RUN', `${dealId}: no se anota ni se retrocede la etapa. Falta: ${motivo}`);
+        return { motivo, nota: false, retroceso: null };
+    }
+
+    await marcarProblema(hs, dealId, motivo, log, dryRun);
+
+    // De los embudos salen las dos cosas: cuales son las etapas ganadas y cual
+    // es la anterior. Una sola llamada, y solo en el camino de error.
+    let pipelines = [];
+    try {
+        pipelines = await hs.pipelines('deals');
+    } catch (e) {
+        log.aviso('DEAL', `no se pudieron leer los embudos: ${e.message}. El negocio queda donde esta.`);
+    }
+    const ganadas = etapas.desdePipelines(pipelines);
+
+    if (!etapas.esGanada(etapaActual, ganadas)) {
+        // O alguien ya lo movio a mano, o este mensaje es una re-entrega. En
+        // los dos casos ya se reporto: duplicar la nota y retroceder otra etapa
+        // seria peor que no hacer nada.
+        log.paso('DEAL', `${dealId} ya no esta en una etapa ganada; no se anota de nuevo`);
+        return { motivo, nota: false, retroceso: null, yaReportado: true };
+    }
+
+    const retroceso = etapas.anterior(etapaActual, pipelines, ganadas);
+    const etapaGanada = etapas.etiqueta(etapaActual, pipelines) || 'Cierre ganado';
+
+    let nota = false;
+    try {
+        await hs.crearNota('deals', dealId, notaProblema.cuerpo({ problemas, retroceso, etapaGanada, tipo }), { cuando: ahora });
+        nota = true;
+    } catch (e) {
+        log.aviso('DEAL', `no se pudo crear la nota en el negocio ${dealId}: ${e.message}`);
+    }
+
+    if (!retroceso) {
+        log.aviso('DEAL', `${dealId}: no hay etapa anterior a la que volver; queda en '${etapaGanada}'`);
+        return { motivo, nota, retroceso: null };
+    }
+
+    try {
+        await hs.actualizarObjeto('deals', dealId, { dealstage: retroceso.id });
+        log.paso('DEAL', `${dealId} vuelve a '${retroceso.label}' hasta que este completo`);
+        return { motivo, nota, retroceso };
+    } catch (e) {
+        log.aviso('DEAL', `no se pudo mover el negocio ${dealId} a '${retroceso.label}': ${e.message}`);
+        return { motivo, nota, retroceso: null };
+    }
+}
+
+/**
+ * El cliente se creo, el pedido salio, y hay datos que quedaron con un default
+ * o vacios (§9.10). Eso NO es un error: es trabajo pendiente de comercial.
+ *
+ * Por eso deja SOLO una nota. No escribe `tango_pedido_problema` —no hubo
+ * problema— y sobre todo no mueve la etapa: el negocio se gano y el pedido
+ * existe. Mover un negocio ya facturado seria mentirle al embudo.
+ */
+async function anotarACompletar({ hs, dealId, avisos, cliente, log = silencioso, ahora = new Date() }) {
+    try {
+        await hs.crearNota('deals', dealId, notaProblema.cuerpoACompletar({ avisos, cliente }), { cuando: ahora });
+        log.paso('DEAL', `${dealId}: quedan ${avisos.length} datos por completar en la empresa`);
+    } catch (e) {
+        log.aviso('DEAL', `no se pudo dejar la nota de datos a completar en ${dealId}: ${e.message}`);
+    }
+}
+
 async function marcarProblema(hs, dealId, motivo, log, dryRun) {
     if (dryRun) return;
     try {
@@ -253,7 +368,7 @@ function leerConfig(env = process.env) {
 }
 
 module.exports = {
-    admitir, procesarDeal, eventosGanados, numeroDePedido, leerConfig, leerConfigWebhook,
+    admitir, procesarDeal, eventosGanados, numeroDePedido, reportarIncompleto, anotarACompletar, leerConfig, leerConfigWebhook,
     PROP_NRO, PROP_CREADO, PROP_PROBLEMA, PROP_CLIENTE,
     PROPS_DEAL, PROPS_COMPANY, PROPS_LINEA, PROPS_PRODUCTO,
 };

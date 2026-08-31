@@ -53,16 +53,41 @@ const OPCIONES_BOOL = [
 /**
  * Opciones de HubSpot a partir del mapeo. `opciones` es codigo -> valor de la
  * opcion, y varios codigos pueden apuntar al mismo valor, asi que se deduplica.
+ *
+ * La etiqueta es el valor, salvo que el mapeo declare `opcionesEtiquetas`
+ * (valor de la opcion -> texto). Eso hace falta cuando el valor tiene que ser
+ * estable y cruzable contra el ERP pero no se puede mostrar: el desplegable de
+ * deposito guarda `'36'` y comercial tiene que leer "SERVICIO TECNICO". Sin
+ * esto habria que elegir entre un valor legible (que se rompe si el ERP
+ * renombra el deposito) o una lista de numeros que nadie entiende.
+ *
+ * El orden en que HubSpot las muestra sale de `opcionesOrden` si el mapeo lo
+ * declara. NO alcanza con el orden de `opciones`: JavaScript reordena solo las
+ * claves de un objeto que parecen enteros, asi que un mapa con codigos '01' y
+ * '36' sale con el '36' PRIMERO. Se descubrio el 2026-08-28 armando el
+ * desplegable de deposito, que quedaba con COMPONENTES OBSOLETOS arriba y
+ * PRODUCTO TERMINADO —el 66% de los pedidos— en el medio de la lista.
  */
 function opcionesDe(campo) {
     if (tipoHubSpot(campo).fieldType === 'booleancheckbox') return OPCIONES_BOOL;
     if (!campo.opciones) return undefined;
+    const etiquetas = campo.opcionesEtiquetas || {};
+    const declarados = Object.values(campo.opciones);
+    const orden = campo.opcionesOrden
+        // Lo que el orden no nombre va al final, en vez de desaparecer.
+        ? [...campo.opcionesOrden, ...declarados.filter((v) => !campo.opcionesOrden.includes(v))]
+        : declarados;
     const vistos = new Set();
     const salida = [];
-    for (const valor of Object.values(campo.opciones)) {
+    for (const valor of orden) {
         if (vistos.has(valor)) continue;
         vistos.add(valor);
-        salida.push({ label: valor, value: valor, displayOrder: salida.length, hidden: false });
+        salida.push({
+            label: etiquetas[valor] ?? valor,
+            value: valor,
+            displayOrder: salida.length,
+            hidden: false,
+        });
     }
     return salida;
 }

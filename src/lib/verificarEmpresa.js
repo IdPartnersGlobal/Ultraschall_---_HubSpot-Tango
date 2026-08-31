@@ -25,10 +25,22 @@ const defaults = require('../../config/defaults.tango.json');
  *               los defaults. Verificar y armar el payload son la misma
  *               pasada: si fueran dos, se desincronizarian.
  *
- * ⚠️ Que campos son obligatorios sale de `config/defaults.tango.json`, no de
- * aca, y hoy es una SUPOSICION tomada del payload de ejemplo: mientras
- * `alta._verificadoContraElERP` sea false, el catalogo no fue sondeado contra
- * Tango. Vive en config a proposito, para que confirmarlo sea editar un JSON.
+ * Que campos son obligatorios sale de `config/defaults.tango.json`, no de aca.
+ * Desde el 2026-08-28 ya NO es una suposicion: se sondeo el ERP mandando
+ * Api/Create con {} y agregando de a uno lo que fuera pidiendo (`alta._sondeo`).
+ *
+ * El resultado cambio la doctrina de este modulo. De los 28 campos que Tango
+ * exige, UNO SOLO es un dato del negocio: `RAZON_SOCI`. `CUIT`, `DOMICILIO`,
+ * `NOM_COM` y el pais estaban marcados obligatorios POR SUPOSICION y frenaban
+ * altas que el ERP habria aceptado sin chistar.
+ *
+ * Politica desde entonces (decision de Matias): **si la empresa no tiene ID de
+ * Tango, se crea con lo minimo**. Lo que el ERP no exige no frena nada — va con
+ * default o no va — y queda como AVISO para que comercial lo complete despues.
+ *
+ * Por eso un aviso no es un problema tibio: un problema es "esto no se puede
+ * crear", un aviso es "se creo, y falta esto". Meter el CUIT en la primera
+ * bolsa era lo que tenia el circuito entero parado.
  *
  * No hace red. La busqueda de duplicados, que si la hace, va aparte.
  */
@@ -135,7 +147,19 @@ function resolverCampo(campo, props, m, lookups) {
         case 'opcionLookup': {
             // El desplegable guarda la etiqueta; Tango quiere el ID interno. El
             // codigo sale del mapa `opciones` leido al reves.
-            if (vacio(crudo)) return {};
+            if (vacio(crudo)) {
+                // Sin elegir: si el catalogo declara un neutro, se usa y se avisa.
+                //
+                // ⚠️ HOY NINGUN CAMPO LO USA. Lo uso ID_CATEGORIA_IVA hasta que
+                // Matias decidio (2026-08-28) que la categoria fiscal se elige y
+                // no se adivina: determina como se factura, y un default
+                // equivocado no se nota hasta que sale mal una factura. Queda el
+                // mecanismo porque es la forma de que otro campo opte por el
+                // desde config, sin tocar codigo.
+                const alterno = porCodigo(campo, campo.codigoSiFalta, lookups);
+                if (alterno) return { ...alterno, porDefecto: true };
+                return {};
+            }
             const codigo = codigoDesdeEtiqueta(campo.hubspot, crudo, m);
             if (!codigo) return { motivo: `la opcion '${crudo}' no tiene equivalencia en Tango`, comoSeArregla: `revisar las opciones de ${campo.hubspot} en el mapeo` };
             const r = lookups.resolver(campo.lookup, codigo, campo.hubspot);
@@ -203,7 +227,7 @@ function tipoLogicoDesdeEtiqueta(etiqueta, m) {
  *                                campo de Tango: { ID_GVA10: 3, ... }
  * @param {object} [p.owners]     id de owner de HubSpot -> mail, para resolver
  *                                el vendedor. Sin esto el vendedor cae al default.
- * @returns {{ok, problemas, pendientes, valores, resueltos}}
+ * @returns {{ok, problemas, pendientes, avisos, valores, resueltos}}
  *
  * Nunca lanza. Una company incompleta es un informe, no una excepcion.
  */
@@ -212,8 +236,12 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
 
     const problemas = [];
     const pendientes = [];
+    const avisos = [];
     const valores = {};
     const resueltos = {};
+
+    /** Se creo igual, pero falta esto. No frena: lo lee la nota del negocio (9.9). */
+    const avisar = (campo, motivo, comoSeArregla) => avisos.push(problema(campo, motivo, comoSeArregla));
 
     for (const campo of ALTA.campos) {
         // El codigo lo elige lib/numeracion, no se verifica desde la company.
@@ -269,8 +297,18 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
         if (r.valor === undefined) {
             if (campo.obligatorio) {
                 problemas.push(problema(campo, 'falta', `cargar ${campo.hubspot} en la company`));
+            } else if (campo.avisarSiFalta) {
+                // Tango no lo exige, asi que el cliente se crea igual — pero
+                // sin CUIT no se le puede facturar, y eso tiene que llegarle a
+                // alguien.
+                avisar(campo, 'esta vacio: el cliente se crea sin ese dato', `cargar ${campo.hubspot} en la empresa`);
             }
             continue;
+        }
+
+        if (r.porDefecto && campo.avisarSiFalta) {
+            avisar(campo, `no estaba cargado: va '${r.codigo ?? r.valor}' por defecto`,
+                `confirmar ${campo.hubspot} en la empresa`);
         }
 
         valores[campo.tango] = r.valor;
@@ -281,7 +319,7 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
         if (r.revisar) resueltos.documentoARevisar = { valor: r.valor, sinNormalizar: !!r.sinNormalizar };
     }
 
-    return { ok: problemas.length === 0 && pendientes.length === 0, problemas, pendientes, valores, resueltos };
+    return { ok: problemas.length === 0 && pendientes.length === 0, problemas, pendientes, avisos, valores, resueltos };
 }
 
 // ---------------------------------------------------------------- duplicados

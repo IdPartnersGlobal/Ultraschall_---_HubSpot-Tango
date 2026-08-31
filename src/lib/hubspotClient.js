@@ -201,6 +201,38 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
             return pedir(`/crm/v3/objects/${objeto}`, { metodo: 'POST', body: { properties: propiedades } });
         },
 
+        /**
+         * Una nota en la linea de tiempo de un registro.
+         *
+         * `hs_timestamp` es OBLIGATORIO: sin el HubSpot rechaza la creacion.
+         * El cuerpo se interpreta como HTML, asi que lo que venga de datos
+         * tiene que llegar escapado (lo hace lib/notaProblema).
+         *
+         * La asociacion va en el alta y no en una llamada aparte: una nota que
+         * queda sin asociar no aparece en ningun registro y no la ve nadie.
+         * `associationTypeId` 214 es NOTE_TO_DEAL, definido por HubSpot.
+         *
+         * Permiso: verificado el 2026-08-28 contra el portal real que el token
+         * actual puede crear y borrar notas, aunque `crm.objects.notes.write`
+         * no este declarado en app-hsmeta.json. Si algun dia HubSpot lo
+         * empieza a exigir, ese es el scope que hay que agregar.
+         */
+        crearNota(objeto, id, cuerpoHtml, { cuando = new Date(), tipoAsociacion = 214 } = {}) {
+            return pedir('/crm/v3/objects/notes', {
+                metodo: 'POST',
+                body: {
+                    properties: {
+                        hs_timestamp: new Date(cuando).toISOString(),
+                        hs_note_body: cuerpoHtml,
+                    },
+                    associations: [{
+                        to: { id: String(id) },
+                        types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: tipoAsociacion }],
+                    }],
+                },
+            });
+        },
+
         /** PATCH de un registro puntual, por su ID de HubSpot. */
         actualizarObjeto(objeto, id, propiedades) {
             return pedir(`/crm/v3/objects/${objeto}/${id}`, { metodo: 'PATCH', body: { properties: propiedades } });

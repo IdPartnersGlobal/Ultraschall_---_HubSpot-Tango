@@ -198,8 +198,8 @@ POST https://{function-app}/api/testTangoConnection?process=2117
 | `GVA05` Zonas | ✅ **`842`** | 9 registros. |
 | `GVA41` Alícuotas de IVA | ✅ **`3010`** | 9 registros. |
 | `GVA10` Listas de precios | `____` | ⛔ Bloqueante Fase 4. |
-| `STA22` Depósitos | `____` | ⛔ Bloqueante Fase 4. No aparece en el menú del ERP. |
-| `GVA43` Talonarios | `____` | ⛔ Bloqueante Fase 4. No aparece en el menú del ERP. |
+| `STA22` Depósitos | ✅ **2941** | Reconstruida el 2026-08-28 sin él, por la columna `ID_STA22` de `GVA21` (§9.7); el `process` llegó el 2026-08-31 y confirmó las 16 filas derivadas, más 20 que ningún pedido usaba (§9.11). |
+| `GVA43` Talonarios | ✅ **no existe, y no hace falta** | Administración confirmó el 2026-08-31 que `GVA43` no tiene `process`. Resuelto el 2026-08-28 por la columna `ID_GVA43_TALON_PED` de `GVA21` (§9.7): el talonario se elige por la mayoría, que es unánime. |
 | `CATEGORIA_IVA` | `____` | ⛔ Bloqueante: es alfabética (§5.4). |
 
 > El catálogo completo y actualizado vive en **`config/tango.processes.json`**. Los que faltan se consiguen con el método de §5.7.
@@ -305,7 +305,7 @@ payload = { ...defaults[entidad], ...camposMapeadosDesdeHubSpot }
 
 Así el mapeo (`config/mapeo.*.json`) queda limpio: sólo lo que realmente viaja entre los dos sistemas.
 
-⚠️ Los valores actuales de `defaults.tango.json` salieron de los ejemplos de Postman. **Antes de producción los tiene que validar administración**, sobre todo talonario, depósito, alícuotas de IVA y clasificaciones SIAP.
+⚠️ Los valores de `defaults.tango.json` salieron de los ejemplos de Postman y **antes de producción los tiene que validar administración**. Lo que queda de eso son las **alícuotas de IVA y las clasificaciones SIAP** de artículos: talonario, depósito, moneda y lista de precios del pedido dejaron de ser suposiciones el 2026-08-28 (§9.7), y la parametría del alta de clientes sale de la moda del padrón (§7.12).
 
 El mismo archivo declara, en `clientes.alta`, **qué campos exige Tango y de dónde sale cada uno**. Eso es lo que lee la verificación previa de §7.12, y también lo que hay que corregir cuando se sondee el ERP: la lista de obligatorios de hoy es una suposición tomada del payload de ejemplo.
 
@@ -395,11 +395,11 @@ Pantallas a visitar y qué se busca:
 | Listas de precios | `GVA10` | ⛔ Fase 4 |
 | Vendedores | `GVA23` | ⛔ Fase 4 + owners |
 | Transportes / formas de envío | `GVA24` | ⛔ Fase 4 |
-| Depósitos | `STA22` | ⛔ Fase 4 |
+| ~~Depósitos~~ | `STA22` | ✅ Resuelto 2026-08-28 sin su `process` (§9.7); tabla completa con el `process` 2941 el 2026-08-31 (§9.11) |
 | Zonas | `GVA05` | Segmentación |
 | Provincias | `GVA18` | Alta de clientes |
 | Categorías / alícuotas de IVA | `GVA41`, `CATEGORIA_IVA` | Alta de clientes |
-| Talonarios | `GVA43` | Fase 4 |
+| ~~Talonarios~~ | `GVA43` | ✅ Resuelto 2026-08-28 sin su `process` (§9.7). No tiene `process` y no lo va a tener (§9.11) |
 | Stock / existencias por depósito | — | Optimización |
 
 Alcanza con anotar el número: con el `process` en mano, la tabla se lee sola y se arma el diccionario `código → ID` (§5.4).
@@ -860,7 +860,9 @@ Las 35 filas restantes de `TIPO_DOCUMENTO_GV` no las usa ningún cliente. Se agr
 
 > ⛔ **CORRECCIÓN (2026-08-24): esto NO servía para `GVA10`, como afirmaba este documento.** `GVA14` **no tiene** columna `ID_GVA10` — el ERP responde `Invalid column name`. `GVA21` tampoco. La generalización estaba mal: que una tabla se referencie desde `GVA14` no implica que su FK esté expuesta con el nombre `ID_<tabla>`. Ver §7.9.
 
-No sirve para `STA22` ni `GVA43`, que no se referencian desde `GVA14`.
+~~No sirve para `STA22` ni `GVA43`, que no se referencian desde `GVA14`.~~
+
+> ✅ **CORRECCIÓN (2026-08-28).** Lo de `GVA14` era cierto; la conclusión no. **`GVA21` sí referencia `STA22`, `GVA43` y `GVA10`**, y sus columnas `ID_` sirven en `filtroSql`. Con eso se resolvieron las tres sin conseguir nunca su `process`. La pregunta correcta no es *"cuál es el `process` de esta tabla"* sino *"qué tabla legible la referencia"*. Ver §9.7.
 
 ---
 
@@ -1231,9 +1233,9 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 | `ID_GVA10` | Company → `tango_id_gva10` | Lista de precios. **87% cargado** (medido 2026-08-14, no 30% como se estimó). Igual necesita default para el 13% restante. |
 | `ID_GVA23` | Company → `tango_id_gva23` | ✅ **Vendedor** (88% cargado). Identificado 2026-08-14, §5.4. |
 | `ID_GVA24` | Company → `tango_id_gva24` | ✅ **Transporte / forma de envío** (86% cargado). Identificado 2026-08-14, §5.4. |
-| `ID_MONEDA` | fijo `1` | 🟡 confirmar si siempre ARS. |
-| `ID_GVA43_TALON_PED` | config | Talonario de pedidos. 🟡 confirmar cuál usa Ultraschall. |
-| `ID_STA22` | config | Depósito. 🟡 confirmar cuál. |
+| `ID_MONEDA` | fijo `1` | ✅ `PES` "Pesos". Verificado 2026-08-28: los 1.065 pedidos de 2026 son en pesos (§9.7). |
+| `ID_GVA43_TALON_PED` | **Deal → `tango_talonario`**, si no config | ✅ Talonario `2` "PEDIDOS". Es el único en uso, 3.234 de 3.234 pedidos (§9.7). **El código es 2 y el ID es 1.** El desplegable existe para el día que haya un segundo (§9.8). |
+| `ID_STA22` | **Deal → `tango_deposito`**, si no config | ✅ Depósito. Lo elige comercial en un desplegable de 16 opciones con el nombre del depósito (§9.8); vacío = `01` "PRODUCTO TERMINADO", el 66% de los pedidos (§9.7). |
 | `FECHA_PEDIDO` | fecha de cierre del Deal | |
 | `FECHA_ENTREGA` | 🟡 propiedad del Deal a definir | |
 | `NRO_ORDEN_COMPRA` | 🟡 propiedad del Deal a definir | |
@@ -1250,7 +1252,7 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 | `CANTIDAD_PEDIDA` | `quantity` |
 | `PRECIO` | `price` |
 | `PORCENTAJE_BONIFICACION` | `discount` |
-| `ID_STA22` | depósito (mismo default de cabecera) |
+| `ID_STA22` | depósito: **el mismo que la cabecera**, elegido o default (§9.8) |
 
 ### 9.3 Casos de error — resueltos el 2026-08-25
 
@@ -1264,6 +1266,8 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 
 **Los problemas se escriben en el Deal, no sólo en los logs.** `tango_pedido_problema` dice qué falta y en qué línea. Sin eso, el único rastro de una falla queda en Application Insights, donde comercial no entra — y el negocio se quedaría "ganado" sin pedido y sin que nadie se entere.
 
+> **Ampliado el 2026-08-28 (§9.9):** además de la propiedad, un negocio incompleto deja **una nota** en el Deal y **vuelve una etapa atrás**. La propiedad sola no alcanzaba: se pisa a sí misma, no aparece en la actividad, y el negocio se quedaba figurando como ganado.
+
 **Un negocio que falla no se lleva puestos a los otros.** HubSpot puede mandar varios eventos en la misma tanda; cada uno se procesa aparte. Y la respuesta es `200` aunque alguno haya fallado: devolver un error haría que HubSpot reintente la tanda **entera**, incluidos los pedidos que sí se crearon.
 
 ### 9.4 Lo que falta
@@ -1271,7 +1275,7 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 | Qué | Quién |
 |---|---|
 | 🟡 **El catálogo de productos.** Las 14 propiedades existen (verificado 2026-08-27) pero **ningún product tiene `tango_id_sta11` cargado**, y el sync que los cargaría sigue bloqueado porque falta el `process` de precios. Ya no frena el circuito: hasta entonces los renglones van con el artículo de prueba (§9.6) | Ultraschall |
-| 🟡 Talonario `GVA43` y depósito `STA22`: hoy van en `1`, un valor **provisorio**. No se pueden elegir bien porque ni siquiera se consiguieron sus `process` | Ultraschall |
+| ✅ ~~Talonario `GVA43` y depósito `STA22` van en `1`, provisorio~~ **Resuelto el 2026-08-28** leyendo los pedidos que ya existen en el ERP (§9.7). Nunca hizo falta el `process`. ✅ Y desde el mismo día **HubSpot sí sabe de depósitos**: comercial los elige en el Deal (§9.8) | — |
 | 🟡 `FECHA_ENTREGA` y `NRO_ORDEN_COMPRA`: no hay propiedad de Deal que las lleve. El pedido va sin ellas | Definir |
 | ✅ ~~Riesgo 5 — el hook tiene que responder rápido~~ **Resuelto el 2026-08-26**: contesta `202` y encola (§9.5) | — |
 | 🔴 **De las 66 companies del portal, 65 no se pueden dar de alta en Tango** (medido 2026-08-27 con `verificarEmpresa`): falta `razon_social` en 64, `condicion_iva` en 64, `domicilio_del_consultorio` en 64 y `cuit` en 62. Es carga de datos, no código. Rodeado con una company de prueba (§7.13) para no quedar bloqueados | Comercial |
@@ -1371,6 +1375,280 @@ La distinción **aviso ≠ problema** es deliberada: un problema es algo que fal
 
 ---
 
+### 9.7 Talonario y depósito: resueltos leyendo los pedidos que ya existen (2026-08-28)
+
+Los cuatro valores fijos del pedido —talonario, depósito, moneda y lista— eran **provisorios**: salieron de un ejemplo de Postman y estaban anotados como "confirmar cuál usa Ultraschall". Iban en `1` porque había que poner algo. El riesgo no era teórico: si el talonario o el depósito no existen, **Tango rechaza el pedido y el error parece del circuito**.
+
+Ya no son provisorios. **No se eligieron: se leyeron de los pedidos que Ultraschall ya tiene cargados**, que son la prueba de que el ERP los acepta.
+
+#### El hallazgo: `process=19845` también se lee
+
+El catálogo tenía `pedidos` anotado como `"uso": "alta"`, y por eso **nunca se probó leerlo**. Se lee. Y la vista de `GVA21` devuelve, de cada pedido real, exactamente los campos que estaban en duda:
+
+```
+TALONARIO_PEDIDO  DESCRIPCION_TALONARIO_PEDIDO  COD_STA22  NOMBRE_SUC
+COD_MONEDA  DESC_MONEDA  NRO_DE_LIS  NOMBRE_LIS  COD_GVA23  COD_GVA24
+```
+
+#### El método: §7.7, ahora sobre `GVA21`
+
+Este documento decía (§7.7) que la resolución por columna interna *"no sirve para `STA22` ni `GVA43`, que no se referencian desde `GVA14`"*. Era cierto **desde `GVA14`**. La conclusión de ahí —que hacía falta el `process` de esas tablas— no lo era: **`GVA21` sí las referencia**, y sus columnas `ID_` son columnas reales de la tabla base aunque la vista no las devuelva.
+
+La consulta parte el filtro en dos, y eso es lo que hay que entender para reusarlo:
+
+```sql
+-- el WHERE de afuera corre contra la VISTA (ahí viven los COD_*)
+-- la subconsulta corre contra la TABLA BASE (ahí viven los ID_*)
+WHERE COD_STA22 <> '01'
+  AND ID_GVA21 IN (SELECT ID_GVA21 FROM GVA21 WHERE ID_STA22 = 1)
+```
+
+Mezclarlas da `Invalid column name`, que es lo que hace parecer que la columna no existe.
+
+Barriendo el `ID_` de 1 a N y leyendo qué código muestra la vista sale la tabla entera. **Falsación sobre el padrón completo de pedidos: cero contraejemplos** en los cuatro casos.
+
+#### Lo que dicen los pedidos reales
+
+| Campo | Valor | Evidencia |
+|---|---|---|
+| `ID_GVA43_TALON_PED` | **1** = talonario `2` "PEDIDOS" | **Unánime**: 3.234 de 3.234 pedidos de 2025 y 2026. No hay un segundo talonario de pedidos en uso. |
+| `ID_STA22` | **1** = depósito `01` "PRODUCTO TERMINADO" | Moda: 703 de 1.065 en 2026 (66%), 1.283 de 2.169 en 2025 (59%). |
+| `ID_MONEDA` | **1** = `PES` "Pesos" | Los 1.065 pedidos de 2026 son en pesos. El otro ID en uso es `2` = `DOL`. |
+| `ID_GVA10` | **3** = "CON IVA EN $" | 573 de 1.065 en 2026. Confirma por un **segundo método independiente** la tabla que §7.9 sacó por oráculo booleano: las 5 filas coinciden. |
+
+⚠️ **Los números coincidían con el provisorio, pero no por la razón que parece.** El talonario tiene **código 2 e ID interno 1**: si alguien hubiera "confirmado" el talonario mirando la pantalla del ERP y hubiera puesto el código, el pedido se caía. Es §5.4 otra vez.
+
+Y los depósitos divergen fuerte: `30→10`, `10→20`, `12→23`, `40→26`, `43→30`, `48→35`, `15→38`. Leer el código como ID mandaría el pedido **al depósito equivocado sin que nada falle**.
+
+Rederivar todo esto: `node scripts/defaultsDePedido.js` (sólo lectura, necesita Azure por §5.6). No reescribe la config a propósito: cambiar un default del pedido es una decisión, no un recálculo.
+
+Las dos tablas quedaron en `config/tango.processes.json → auxiliares.talonariosPedido` y `auxiliares.depositos`, con el conteo de pedidos de cada una. Este método sólo lista lo que **está en uso**, que para elegir un default alcanza: se elige entre los que ya funcionan. Para el desplegable no alcanzaba, y `STA22` se completó el 2026-08-31 con su `process` (§9.11); `GVA43` no tiene y se queda así.
+
+#### Lo que esto no arregla
+
+- **`VALIDA_STOCK` sigue sin evidencia.** Es el único default del pedido que no salió del ERP. Si `BAT250` no tiene stock, Tango rechaza (§9.6).
+- **HubSpot no sabe de depósitos.** Todo pedido sale de "PRODUCTO TERMINADO". Los 144 pedidos anuales de "SERVICIO TECNICO" y los 104 de "EQUIPOS VETERINARIA" los va a tener que corregir una persona en el ERP, o hará falta una propiedad de Deal que elija el depósito.
+- El `process` de **precios de artículos** sigue faltando y es el único que bloquea de verdad (Fase 1).
+
+### 9.8 El depósito lo elige comercial: desplegable en el Deal (2026-08-28)
+
+§9.7 dejó el depósito resuelto pero con un agujero de negocio: **todo pedido salía de PRODUCTO TERMINADO**, porque es el default. Eso está bien para dos tercios de los pedidos y mal para el otro tercio — los ~144 anuales de SERVICIO TECNICO y los ~104 de EQUIPOS VETERINARIA no salen de ahí. HubSpot no tenía forma de expresar la diferencia.
+
+Ahora la tiene: dos propiedades nuevas de Deal, las dos desplegables.
+
+| Propiedad | Qué es | Opciones |
+|---|---|---|
+| `tango_deposito` | De qué depósito sale la mercadería | **27** — los habilitados de `STA22`, ordenados por cantidad de pedidos reales (§9.11) |
+| `tango_talonario` | Con qué talonario se numera el pedido | **1** ("PEDIDOS"), hasta que Ultraschall abra otro |
+
+#### La etiqueta es texto, el valor es el código
+
+Es la decisión que hace que esto funcione, y tiene dos mitades que no se pueden juntar:
+
+- **Lo que ve comercial** es `SERVICIO TECNICO`. Un desplegable de números no lo usa nadie.
+- **Lo que se guarda** es `'36'`, el `COD_STA22` de Tango. Guardar la etiqueta rompería el día que el ERP renombre el depósito, y un export de HubSpot dejaría de ser cruzable contra Tango.
+- **Lo que viaja al ERP** es `ID_STA22 = 16`, que lo resuelve `lookups` contra la tabla del catálogo.
+
+Los tres son distintos, y ese es exactamente el punto: **el código no es el ID** (§5.4), y en depósitos divergen **30 de 36**. Guardar el ID directo en la opción habría sido más corto y es la trampa — el mismo criterio que provincias en el alta (§7.10).
+
+Para que la etiqueta pueda diferir del valor, `lib/propiedades` acepta ahora `opcionesEtiquetas` en el mapeo. Y también `opcionesOrden`, por una razón menos obvia: **JavaScript reordena solo las claves de un objeto que parecen enteros**, así que un mapa con códigos `'01'` y `'36'` sale con el `'36'` primero. El desplegable quedaba con COMPONENTES OBSOLETOS arriba y PRODUCTO TERMINADO —el 66% de los pedidos— perdido en el medio.
+
+#### Vacío es el caso normal; una opción desconocida frena el pedido
+
+Si comercial no toca nada va el default, y el pedido no queda marcado: es el 66% de los casos y no hay nada que reportar.
+
+Si en cambio el Deal trae una opción que no resuelve, **el pedido se frena** (`ok: false`, el motivo va a `tango_pedido_problema` y no se llama a `Api/Create`). No cae al default a propósito: caer al default sería **despachar desde otro depósito, válido, sin que nada falle**. Es el peor error posible de este circuito y el único que nadie descubriría leyendo logs.
+
+El renglón lleva el mismo `ID_STA22` que la cabecera. Si no, el pedido diría una cosa y la mercadería saldría de otro lado.
+
+#### Lo que faltaba, y ya está
+
+✅ **La lista incompleta se cerró el 2026-08-31 con el `process` de `STA22`.** Eran 16 depósitos —los que algún pedido había usado— y son 27. Ver §9.11.
+
+✅ **Las dos propiedades ya existen en el portal** (creadas el 2026-08-31, `2/2 aplicados`). Deals quedó en **6** propiedades del grupo `tango_erp`, con `0 a crear · 0 a parchear · 0 a rehacer`.
+
+### 9.9 Un negocio incompleto: nota en el Deal y vuelta una etapa atrás (2026-08-28)
+
+Pedido de Matías: **cuando a un negocio o a una empresa le falta un campo, dejarlo dicho en las notas del negocio y devolver el negocio una etapa atrás.**
+
+Hasta acá un negocio incompleto sólo escribía `tango_pedido_problema` (§9.3) y **se quedaba en "Cierre ganado"**. Eso es lo peor de los dos mundos: el negocio figura cerrado, no hay pedido en el ERP, y la única señal es una propiedad que hay que ir a buscar.
+
+Ahora son tres escrituras, en este orden:
+
+| | Qué | Para quién |
+|---|---|---|
+| 1 | `tango_pedido_problema` | La máquina. Es la marca que lee el circuito y que se limpia sola cuando el pedido sale |
+| 2 | **Una nota en el negocio** | La persona. Aparece en la actividad del Deal, se acumula, y deja el historial de cuántas veces se intentó |
+| 3 | **La etapa, una atrás** | El embudo. Un negocio incompleto deja de figurar como ganado |
+
+La propiedad **no** se reemplaza por la nota: una propiedad de texto se pisa a sí misma —el último intento borra el anterior— y no queda en la línea de tiempo. Las dos juntas son la respuesta correcta.
+
+#### Qué dice la nota
+
+Los campos que faltan **con cómo se arreglan** (decir "falta `razon_social`" no le sirve a quien no sabe qué es `razon_social`), a qué etapa se movió el negocio, y la instrucción de reintento: **volver a moverlo a "Cierre ganado" y el pedido se reintenta solo.** Eso no es una convención inventada — es literalmente el disparador (§9.1).
+
+El cuerpo se interpreta como HTML, así que todo lo que venga de datos va escapado. Vive en `lib/notaProblema`, que es texto puro y no toca la red.
+
+#### Cuál es "una etapa atrás"
+
+La anterior por `displayOrder` **dentro del mismo embudo**. Medido contra el portal el 2026-08-28:
+
+| Embudo | Ganado | Vuelve a |
+|---|---|---|
+| Ventas Ultraschall | `closedwon` (orden 5) | `decisionmakerboughtin` — **Negociación** |
+| Licitaciones | `1376134021` (orden 5) | `1376134020` — **Pendiente OC/Contrato** |
+
+⚠️ **Esto es seguro por cómo están hoy los embudos, no por construcción.** "Cierre perdido" está en `displayOrder` **6** en los dos, o sea *después* de ganado, así que retroceder nunca lo toca. Si alguien reordenara el embudo, un negocio incompleto se iría a "Cierre perdido". No se puede blindar con `isClosed`, porque en este portal "Cierre perdido" está mal cargado como `isClosed=false` en los dos embudos (§ nota de `etapas.desdePipelines`).
+
+Por eso el orden real quedó fijado en `test/fixtures/pipelines-deals.json` y hay un test que falla si "Cierre perdido" deja de ir después de "Cierre ganado". **Se rompe un test, no un pedido.**
+
+Si el negocio ya estaba en la primera etapa, o no se pudieron leer los embudos, **se anota igual y no se mueve nada**: reportar no depende de poder mover.
+
+#### Las dos trampas
+
+**Mover la etapa dispara el webhook otra vez.** La suscripción es a `dealstage` (`webhooks-hsmeta.json`), así que nuestra propia escritura nos vuelve a llamar. No es un bucle porque se retrocede a una etapa **abierta** y el control 3 la descarta sin gastar una sola llamada de red — y `etapas.anterior` además saltea las ganadas por si alguna vez hay dos.
+
+**La cola es at-least-once (§9.5).** Sin guarda, una re-entrega dejaría una segunda nota y retrocedería una segunda etapa. La guarda no es un flag propio: es que **el negocio ya no está en una etapa ganada**. En la re-entrega `procesarDeal` relee el Deal, lo ve, y no hace nada. El mismo mecanismo cubre el caso de que alguien lo haya movido a mano mientras tanto.
+
+#### La cola de veneno también retrocede
+
+Un negocio que agotó los reintentos (§9.5) cae en `deals-ganados-poison`. Antes eso sólo escribía la propiedad, y el negocio se quedaba en "Cierre ganado" sin pedido.
+
+**Decisión de Matías: ahí también retrocede.** Que el negocio vuelva solo **es en sí mismo la señal** — varios negocios retrocediendo a la vez es lo que hace visible una caída del ERP; quedándose en ganado no se entera nadie. Y la re-entrada es segura porque cada petición se valida contra etapa ganada.
+
+Lo que **sí** cambia es el texto (`tipo: 'tecnico'`): ahí no falta ningún dato, y decirle a comercial que cargue algo lo manda a buscar lo que no existe. La nota dice *"No falta ningún dato del negocio. Fue un problema técnico"*.
+
+⚠️ De paso se corrigió una instrucción que era **falsa**: el texto viejo decía *"volver a guardar el negocio para reintentar"*. Guardar el negocio **no dispara nada** — el webhook escucha `dealstage` y nada más (`webhooks-hsmeta.json`). Hay un test que falla si esa frase vuelve a aparecer en cualquier nota.
+
+#### Empresas incompletas
+
+Van por el mismo camino. Hoy es el caso real: **65 de 66 companies no se pueden dar de alta en Tango** (§9.4). Antes eso escribía la propiedad y dejaba el negocio en ganado; ahora deja la nota con los campos que le faltan a la **empresa** y devuelve el negocio. Quien tiene que cargar el dato es la misma persona, y no tiene por qué saber de qué lado del circuito faltó.
+
+#### Permisos
+
+Verificado contra el portal el 2026-08-28: **el token actual puede crear y borrar notas** (se creó una nota suelta, sin asociar, y se borró), aunque `crm.objects.notes.write` no esté declarado en `app-hsmeta.json`. No se agregó el scope a propósito: el `hs project upload` todavía no se hizo y tocar la lista de scopes sin necesidad es arriesgar el camino crítico. Si HubSpot algún día lo empieza a exigir, ese es el scope. Mover la etapa usa `crm.objects.deals.write`, que **sí** está declarado.
+
+### 9.10 Qué exige Tango de verdad, y la política del alta mínima (2026-08-28)
+
+Durante dos semanas la lista de campos obligatorios del alta fue **una suposición copiada del payload de ejemplo de Postman**. Con esa lista, `CUIT`, `DOMICILIO`, `NOM_COM` y el país frenaban el alta, y eso era lo que tenía **65 de 66 companies bloqueadas**.
+
+Se sondeó el ERP. El método es el de §7.6 llevado al extremo: **mandar `Api/Create` con `{}`**. Tango contesta *"El campo X es requerido"*, **uno por vez, y sin crear nada**. Se agrega X y se repite hasta que el alta entra. El único registro que se crea es el último — se creó el cliente `999950` (`ID_GVA14 6419`) y se borró.
+
+#### El resultado
+
+**Tango exige 28 campos. Uno solo es un dato del negocio: `RAZON_SOCI`.**
+
+| | Campos |
+|---|---|
+| **Exige** | `COD_GVA14`, `RAZON_SOCI`, `ID_CATEGORIA_IVA`, `ID_TIPO_DOCUMENTO_GV`, `ID_GVA01`, `ID_GVA05`, `ID_GVA18`, y 21 de parametría (`EXPORTA`, `SOBRE_IVA`, los siete `COBRA_*`, `TYP_*`, …) |
+| **NO exige** | `CUIT`, `DOMICILIO`, `NOM_COM`, `GVA133_NOM_PAIS`, `LOCALIDAD`, `C_POSTAL`, `TELEFONO_1`, `E_MAIL`, `ID_GVA10`, `ID_GVA23`, `ID_GVA24` |
+
+Los 21 de parametría ya estaban todos en `clientes.defaults`: el payload de ejemplo servía para eso. Lo que estaba mal era lo otro — **cuatro campos marcados obligatorios que el ERP nunca pidió**.
+
+⚠️ Y el sondeo volvió a chocar con §5.4: `ID_GVA05 = 9` —el **código** de "ZONA NO DEFINIDA"— fue rechazado con *"no existe el valor correspondiente en Zonas"*. El ID interno es **10**. El código no es el ID **ni en una tabla de nueve filas**.
+
+#### La política
+
+> **Decisión de Matías, 2026-08-28: si la empresa no tiene ID de Tango, se crea con lo mínimo.** Comercial completa después lo que tenga que completar, y el resto va con default.
+>
+> La lógica no se adapta a cómo están los datos hoy; los datos se adaptan a la lógica.
+
+Eso parte la verificación en dos bolsas, y la distinción es el punto:
+
+- **problema** — "esto no se puede crear". Hoy: `RAZON_SOCI` y `ID_CATEGORIA_IVA`.
+- **aviso** — "se creó, y falta esto". `CUIT` y `DOMICILIO`.
+
+Meter el CUIT en la primera bolsa era lo que tenía el circuito parado.
+
+#### El aviso no es un problema tibio
+
+Que Tango acepte un cliente sin CUIT **no significa que sirva sin CUIT**: no se le puede facturar. Por eso no desaparece — **va a una nota en el negocio**, con la forma opuesta a la de §9.9:
+
+> **La empresa se creó en Tango como el cliente 007611 y el pedido salió.**
+> Quedan 2 datos por completar en la empresa:
+> - **CUIT**: esta vacio: el cliente se crea sin ese dato → *cargar cuit en la empresa*
+> - **DOMICILIO**: esta vacio: el cliente se crea sin ese dato → *cargarlo en la empresa*
+>
+> No hace falta hacer nada con el negocio: el pedido ya está en el ERP.
+
+Esa nota **no escribe `tango_pedido_problema` y no mueve la etapa**: el negocio se ganó y el pedido existe. Mover un negocio ya facturado sería mentirle al embudo.
+
+#### La excepción: la categoría de IVA se elige, no se adivina
+
+`ID_CATEGORIA_IVA` es **la única excepción a la política del alta mínima**, por decisión de Matías. Todo lo demás que falta se completa con un default y se avisa; la categoría fiscal **no**.
+
+Llegó a estar con `RI` por defecto —la moda del padrón, 2805 de 5670— y se sacó a propósito. El motivo es el modo de falla, no la frecuencia: **la categoría determina cómo se le factura al cliente, y un default equivocado no se nota hasta que sale mal una factura**. Para entonces el error ya salió del sistema.
+
+Así que si falta, es un **problema**: el negocio no genera pedido, deja la nota y **retrocede de etapa como cualquier otro dato faltante** (§9.9). Alguien elige la categoría y lo vuelve a mover a ganado.
+
+Hay un test que falla si alguien le vuelve a poner `codigoSiFalta`, porque el síntoma de ese error sería el silencio.
+
+Rederivar todo esto: `node scripts/minimoDeAlta.js`. ⚠️ **Escribe en Tango**: crea un cliente y lo borra.
+
+### 9.11 La tabla de depósitos, entera: el `process` 2941 (2026-08-31)
+
+Matías consiguió el `process` de `STA22`: **2941**. Con eso se cerró lo último que §9.8 había dejado a medias, y de paso quedó verificado —por un camino independiente— el método con el que se había reconstruido la tabla sin él.
+
+Del talonario hay una respuesta distinta y hay que anotarla como definitiva: **`GVA43` no tiene `process` y no lo va a tener.** No es un pendiente. El talonario se elige por la mayoría de los pedidos reales, que además es unánime (3.234 de 3.234), y ese método sólo ve los talonarios en uso — que para elegir un default es exactamente lo que hace falta.
+
+#### El contraste: dos caminos, el mismo resultado
+
+Lo primero que hace `scripts/tablaDepositos.js` no es escribir: es **contrastar las 16 filas que §9.7 había derivado desde los pedidos contra las mismas 16 leídas de la tabla**, par `(ID, código, nombre)` por par.
+
+**Coinciden las 16, ID por ID.** Eso convierte al método de la columna interna (§7.7 aplicado a `GVA21`) de "lo mejor que se pudo hacer sin el `process`" en un método **verificado**: reconstruyó una tabla correcta sin acceso a la tabla. Es el mismo desenlace que tuvo `GVA10` en §9.7, y ahora son dos.
+
+El contraste corre siempre, también en el informe, y si un solo par discrepa el script sale con error y no toca nada. Una discrepancia ahí no sería un detalle: significaría que hay pedidos saliendo del depósito equivocado.
+
+#### Lo que apareció
+
+| | antes (§9.7) | ahora |
+|---|---|---|
+| filas de `STA22` | 16 | **36** |
+| divergencia código ≠ ID | 11 de 16 | **30 de 36** |
+| en el desplegable | 16 | **27** |
+
+Los 20 nuevos son depósitos que existen en el ERP y que ningún pedido de 2025-2026 usó: `SCRAP`, `PRUEBA SERVICE`, `FALTANTES`, `PROCESOS`, `NO CONFORME`, `CUARENTENA SERVICE`, `DESARROLLO CA`, `DESARROLLO US`, `MERCADERIA EN TRANSITO`, `ABREGU ROTURAS` y diez más. Ninguno era alcanzable por el método viejo, **por construcción**: mira los pedidos, y estos no tienen ninguno.
+
+#### El hallazgo que importa: 9 están inhabilitados
+
+La vista trae una columna que el método viejo no podía ver, porque no vive en `GVA21`: **`INHABILITA`**, booleana, y **9 de los 36 están en `true`**.
+
+Esos 9 **no entran al desplegable**. Y uno de ellos ya estaba adentro:
+
+> `38` · **ABREGU CBA PRUEBA-DEVOLUCIÓN** — inhabilitado en Tango, y en la lista de las 16.
+
+Había entrado por la puerta de atrás: el método viejo lista los depósitos que aparecen en algún pedido, y ese tenía uno viejo. Ofrecerle a comercial un depósito inhabilitado es ofrecerle un despacho que el ERP no acepta — y el error aparecería recién en el `Api/Create`, pareciendo culpa del circuito (§9.6). Se sacó antes de crear la propiedad, así que **nunca llegó a existir en el portal**: no hubo que borrar ninguna opción.
+
+Hay un test que falla si un depósito con `deBaja` vuelve a aparecer en el desplegable.
+
+⚠️ La columna se llama `INHABILITA`, no `INHABILITADO`: **Tango corta los nombres de columna a diez caracteres sin avisar**. La primera corrida la buscó por nombre exacto, no la encontró, e informó "la vista no trae ninguna columna de baja" — un falso negativo tranquilizador. Por eso el script ahora busca por prefijo, y por eso conviene mirar la lista de columnas que imprime antes de confiar en lo que dice que no encontró.
+
+#### El orden del desplegable
+
+Primero los que más pedidos tienen (PRODUCTO TERMINADO, SERVICIO TECNICO, EQUIPOS VETERINARIA…), después los que nunca se usaron, por código. Comercial abre la lista y lo que busca el 66% de las veces está arriba; las 20 opciones nuevas no le corren el uso cotidiano hacia abajo.
+
+#### Correr esto desde afuera de Azure: `lib/proxyTango`
+
+Todos los scripts usan `tangoClient`, y Tango sólo acepta tráfico desde la IP de la Function App (§5.6), así que hasta ahora un relevamiento se hacía **con `curl` contra el proxy, una consulta por vez**.
+
+`src/lib/proxyTango.js` es un `fetchImpl` que traduce, y con eso cualquier script corre desde cualquier máquina sin cambiar una línea:
+
+```
+http://138.99.6.77:17000/Api/Get?process=2941&pages=1
+  →  https://<función>/api/testTangoConnection?tangoPath=Api/Get&process=2941&pages=1
+```
+
+Dos detalles que lo hacen invisible para `tangoClient`: el proxy **envuelve** la respuesta en `{ status, proxyTarget, result }` y el adaptador devuelve `result` pelado; y **la API key no viaja** — la pone el proxy con la suya, porque mandarla sería filtrar la credencial del ERP a un endpoint anónimo (§10.0). Un `blocked` de la política sale como error propio y no se confunde con un rechazo de Tango.
+
+No es una puerta de atrás: es el mismo endpoint con otra sintaxis, y la política de `lib/politicaProxy` sigue aplicando igual. Un `process` fuera del catálogo necesita `TANGO_PROXY_MODO=relevamiento`, que es como está hoy.
+
+Rederivar: `node scripts/tablaDepositos.js --proxy <url>` (informe) o `--aplicar` (actualiza el catálogo y el desplegable). Sólo lectura contra el ERP.
+
+#### Lo que sigue sin resolverse
+
+- **`VALIDA_STOCK`** sigue siendo el único default del pedido sin evidencia.
+- El `process` de **precios de artículos** sigue faltando: es el único que queda pedido y el único que bloquea algo (Fase 1).
+
 ## 10. Seguridad
 
 ### 🔴 10.0 URGENTE — el proxy anónimo expone SQL arbitrario del ERP a internet
@@ -1423,7 +1701,7 @@ Dos interruptores, los dos **apagados por defecto**:
 
 Son independientes: relevamiento no habilita el alta, y escritura no habilita `process` desconocidos.
 
-⚠️ **Lo que esto NO cierra, y hay que saberlo:** en modo relevamiento el `filtroSql` sigue aceptando subconsultas — o sea lectura de cualquier tabla del ERP. Es a propósito: el oráculo booleano que resolvió `GVA10` y `CATEGORIA_IVA` (§7.9, §7.7) es exactamente eso, y todavía faltan los `process` de precios, `STA22` y `GVA43`. Por eso el modo es opt-in y el default es cerrado: **el día que esto apunte a producción, la configuración segura es la de no hacer nada**. Cuando se termine el relevamiento, sacar la Application Setting.
+⚠️ **Lo que esto NO cierra, y hay que saberlo:** en modo relevamiento el `filtroSql` sigue aceptando subconsultas — o sea lectura de cualquier tabla del ERP. Es a propósito: el oráculo booleano que resolvió `GVA10` y `CATEGORIA_IVA` (§7.9, §7.7) es exactamente eso, y también lo es la resolución por columna interna que cerró `STA22` y `GVA43` (§9.7). De los `process` que faltaban ya sólo queda el de precios. Por eso el modo es opt-in y el default es cerrado: **el día que esto apunte a producción, la configuración segura es la de no hacer nada**. Cuando se termine el relevamiento, sacar la Application Setting.
 
 ### 10.2 Autenticación del webhook de negocios ganados (decidido 2026-08-21)
 
@@ -1504,7 +1782,7 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 |---|---|---|
 | 0 | 🔴 **Aprobar los scopes de HubSpot.** Es el camino crítico de todo el proyecto. Paso a paso en `docs/RUNBOOK-SCOPES.md`; exige `hs account auth` en el navegador, así que no se puede automatizar. | ⛔ Fases 2 y 3 enteras |
 | 1 | **`process` de precios de artículos** — la pantalla de precios / actualización de precios | ⛔ Fase 1 entera |
-| 2 | **`process` de listas de precios (`GVA10`), depósitos (`STA22`) y talonarios (`GVA43`)**. Matías no encontró depósitos ni talonarios en el menú: puede que estén dentro de otra pantalla o requieran permiso. | ⛔ Fase 4 |
+| 2 | ✅ ~~`process` de listas de precios (`GVA10`), depósitos (`STA22`) y talonarios (`GVA43`)~~ **Resueltos**. Las tres salieron por la columna interna de una tabla legible (§7.9, §9.7) sin esperar el `process`. El de `STA22` llegó igual el 2026-08-31 —**2941**— y sirvió para completar el desplegable y para confirmar el método (§9.11). El de `GVA43` **no existe**, y no hace falta. | — |
 | 3 | **`ID_CATEGORIA_IVA` de `RS` y `EXE`.** Sólo hace falta para el **alta**; para la lectura ya se resuelve con `opciones` (§7.2). Qué significa `EXE` **no hay que preguntarlo**: sale de leer `DESC_CATEGORIA_IVA` contra el ERP. | Alta de clientes |
 | 4 | **Variables de entorno en Azure**: token nuevo de HubSpot + deuda D1 (`TANGO_API_KEY`, `TANGO_COMPANY`) | Toda corrida real |
 | 5 | **Revisar los mapeos propuestos** en `config/mapeo.*.json` | Fases 1 y 2 |

@@ -1,0 +1,145 @@
+{
+  "_nota": "Los dos embudos de deals del portal 51311915, tal como los devuelve /crm/v3/pipelines/deals. Copiado el 2026-08-28. No hay datos personales: son etapas de embudo. Fija el orden real para que un reordenamiento del embudo rompa un test y no un pedido.",
+  "pipelines": [
+    {
+      "id": "907189419",
+      "label": "Embudo de Licitaciones",
+      "displayOrder": 0,
+      "stages": [
+        {
+          "id": "1376134016",
+          "label": "Oportunidad Identificada",
+          "displayOrder": 0,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
+          "id": "1376134017",
+          "label": "Proceso Formal en Preparación",
+          "displayOrder": 1,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        },
+        {
+          "id": "1376134018",
+          "label": "Proceso Formal Publicado",
+          "displayOrder": 2,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        },
+        {
+          "id": "1376134019",
+          "label": "Propuesta Presentada",
+          "displayOrder": 3,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.6"
+          }
+        },
+        {
+          "id": "1376134020",
+          "label": "Pendiente OC/Contrato",
+          "displayOrder": 4,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.8"
+          }
+        },
+        {
+          "id": "1376134021",
+          "label": "Cierre ganado",
+          "displayOrder": 5,
+          "metadata": {
+            "isClosed": "true",
+            "probability": "1.0"
+          }
+        },
+        {
+          "id": "1376134022",
+          "label": "Cierre perdido",
+          "displayOrder": 6,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "default",
+      "label": "Embudo de Ventas Ultraschall",
+      "displayOrder": 0,
+      "stages": [
+        {
+          "id": "appointmentscheduled",
+          "label": "Lead Calificado",
+          "displayOrder": 0,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
+          "id": "qualifiedtobuy",
+          "label": "Diagnóstico de Necesidades",
+          "displayOrder": 1,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        },
+        {
+          "id": "1364103973",
+          "label": "Validación/Demo",
+          "displayOrder": 2,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        },
+        {
+          "id": "presentationscheduled",
+          "label": "Propuesta",
+          "displayOrder": 3,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.6"
+          }
+        },
+        {
+          "id": "decisionmakerboughtin",
+          "label": "Negociación",
+          "displayOrder": 4,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.8"
+          }
+        },
+        {
+          "id": "closedwon",
+          "label": "Cierre ganado",
+          "displayOrder": 5,
+          "metadata": {
+            "isClosed": "true",
+            "probability": "1.0"
+          }
+        },
+        {
+          "id": "closedlost",
+          "label": "Cierre perdido",
+          "displayOrder": 6,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        }
+      ]
+    }
+  ]
+}

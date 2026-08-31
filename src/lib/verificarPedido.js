@@ -1,6 +1,7 @@
 'use strict';
 
 const defaults = require('../../config/defaults.tango.json');
+const mapeoPedidos = require('../../config/mapeo.pedidos.json');
 
 /**
  * Verificacion previa del pedido, cuando un negocio se gana.
@@ -16,9 +17,15 @@ const defaults = require('../../config/defaults.tango.json');
  *   - cantidad y precio con sentido
  *
  * Todo lo demas —talonario, deposito, moneda, validacion de stock— sale de
- * `config/defaults.tango.json`, donde hoy son valores PROVISORIOS: los process
- * de GVA43 (talonarios) y STA22 (depositos) todavia no se consiguieron, asi
- * que ni siquiera se pueden leer esas tablas para elegir bien.
+ * `config/defaults.tango.json`. Desde el 2026-08-28 esos valores ya NO son
+ * provisorios: se leyeron de los pedidos que Ultraschall ya tiene cargados en
+ * el ERP. Talonario 2 "PEDIDOS" (el unico en uso, 3.234 de 3.234 pedidos de
+ * 2025-2026) y deposito 01 "PRODUCTO TERMINADO" (66% de los de 2026). Los
+ * process de GVA43 y STA22 nunca se consiguieron y ya no hacen falta: las
+ * auxiliares se resolvieron por la columna interna de GVA21 (7.7).
+ *
+ * El que sigue sin evidencia es VALIDA_STOCK. Si el articulo no tiene stock,
+ * Tango rechaza el pedido y el error va a parecer del circuito.
  *
  * ⚠️ Que la company no tenga `tango_id_gva14` NO es un problema del pedido: es
  * un cliente que todavia no existe en el ERP y hay que darlo de alta primero
@@ -33,6 +40,19 @@ const CAMPOS_CLIENTE = defaults.clientes.alta.campos;
 
 /** Parametria que el pedido hereda del cliente. Ver 9.2. */
 const DEL_CLIENTE = ['ID_GVA01', 'ID_GVA10', 'ID_GVA23', 'ID_GVA24'];
+
+/**
+ * Parametria que elige COMERCIAL en el Deal, con un desplegable (9.8).
+ *
+ * Es la unica parametria del pedido que no se hereda ni sale de un default: son
+ * decisiones del negocio que ni la company ni el catalogo pueden saber. De que
+ * deposito sale la mercaderia es la mas obvia — dos tercios de los pedidos
+ * salen de PRODUCTO TERMINADO, pero los ~144 anuales de SERVICIO TECNICO y los
+ * ~104 de EQUIPOS VETERINARIA no.
+ *
+ * Vacio no es un problema: es el caso normal, y va el default.
+ */
+const DEL_DEAL = ['ID_STA22', 'ID_GVA43_TALON_PED'];
 
 /** Lo que queda escrito en el pedido cuando se usa el articulo de prueba. */
 const LEYENDA_PRUEBA = 'ARTICULO DE PRUEBA - integracion de productos pendiente';
@@ -94,6 +114,40 @@ function parametria(tangoCampo, props, lookups) {
 }
 
 /**
+ * Un desplegable del Deal -> ID interno de Tango.
+ *
+ * El desplegable guarda el CODIGO de Tango, no el ID, y la etiqueta legible
+ * ("SERVICIO TECNICO") vive aparte. El ID lo resuelve `lookups` contra la
+ * tabla del catalogo: es el mismo criterio que provincias en el alta (7.10), y
+ * por el mismo motivo — el codigo NO es el ID, y en depositos divergen 11 de 16.
+ *
+ * @returns null si comercial no eligio nada (va el default), o
+ *          { valor } si resolvio, o { problema } si eligio algo que no resuelve.
+ */
+function deDesplegable(tangoCampo, deal, lookups) {
+    const campo = mapeoPedidos.campos.find((c) => c.tango === tangoCampo && c.opcionesInversas);
+    if (!campo) return null;
+
+    const elegido = deal[campo.hubspot];
+    if (vacio(elegido)) return null;
+
+    const codigo = campo.opcionesInversas[String(elegido).trim()];
+    // Que una opcion no resuelva NO puede terminar en "va el default": eso
+    // manda el pedido a OTRO deposito, valido, sin que nada falle. Es
+    // exactamente el modo de falla silencioso de 5.4, y frena el pedido.
+    if (codigo === undefined) {
+        return { problema: problema(tangoCampo, `'${elegido}' no es una opcion conocida de ${campo.label}`,
+            'revisar el desplegable del negocio, o actualizar el mapeo si Tango tiene una fila nueva') };
+    }
+    const r = lookups ? lookups.resolver(campo.lookupInverso, codigo, tangoCampo) : { ok: false, motivo: 'sin lookups' };
+    if (!r.ok) {
+        return { problema: problema(tangoCampo, `${campo.label}: ${r.motivo}`,
+            'revisar config/tango.processes.json: la fila del catalogo no existe') };
+    }
+    return { valor: r.id, codigo, descripcion: r.descripcion, delDeal: true };
+}
+
+/**
  * Fecha para Tango: 'YYYY-MM-DDTHH:mm:ss', sin zona. El ERP no interpreta el
  * offset y una fecha con 'Z' se guarda corrida.
  */
@@ -135,6 +189,16 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         // No es un problema: es un cliente que hay que crear antes (§7.12).
         faltaAlta: !!company && idGva14 === null,
     };
+
+    // ------------------------------------------- lo que eligio comercial (9.8)
+    const elegido = {};
+    for (const campo of DEL_DEAL) {
+        const r = deDesplegable(campo, deal, lookups);
+        if (!r) continue;
+        if (r.problema) { problemas.push(r.problema); continue; }
+        elegido[campo] = r;
+    }
+    const idSta22 = elegido.ID_STA22 ? elegido.ID_STA22.valor : PEDIDOS.defaults.ID_STA22;
 
     // -------------------------------------------------------- los renglones
     const renglones = [];
@@ -201,7 +265,9 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
             CANTIDAD_PEDIDA: cantidad,
             PRECIO: precio,
             PORCENTAJE_BONIFICACION: numero(p.hs_discount_percentage) ?? 0,
-            ID_STA22: PEDIDOS.defaults.ID_STA22,
+            // El renglon sale del mismo deposito que la cabecera. Si no, el
+            // pedido diria una cosa y la mercaderia saldria de otro lado.
+            ID_STA22: idSta22,
             // El articulo que correspondia, para que del lado del ERP se pueda
             // leer que se pidio de verdad. Es lo unico que queda del producto
             // original cuando va el de prueba.
@@ -232,6 +298,8 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         if (r) { cabecera[campo] = r.valor; heredado[campo] = r; }
     }
 
+    for (const [campo, r] of Object.entries(elegido)) cabecera[campo] = r.valor;
+
     const payload = { ...PEDIDOS.defaults, ...cabecera, RENGLON_DTO: renglones };
 
     return {
@@ -242,7 +310,8 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         cliente,
         renglones,
         heredado,
+        elegido,
     };
 }
 
-module.exports = { verificar, fechaTango, resolverProductoDePrueba, DEL_CLIENTE, LEYENDA_PRUEBA };
+module.exports = { verificar, fechaTango, resolverProductoDePrueba, deDesplegable, DEL_CLIENTE, DEL_DEAL, LEYENDA_PRUEBA };

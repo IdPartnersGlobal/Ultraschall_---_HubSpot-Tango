@@ -7,9 +7,14 @@ const path = require('node:path');
 
 const d2t = require('../src/lib/dealToTango');
 const etapas = require('../src/lib/etapas');
+const notaProblema = require('../src/lib/notaProblema');
 const verificarPedido = require('../src/lib/verificarPedido');
 const firma = require('../src/lib/firmaHubSpot');
 const { Lookups } = require('../src/lib/lookups');
+const defaults = require('../config/defaults.tango.json');
+const MAPEO_PEDIDOS = require('../config/mapeo.pedidos.json');
+const CATALOGO = require('../config/tango.processes.json');
+const propiedades = require('../src/lib/propiedades');
 
 const fixture = (n) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', `${n}.json`), 'utf8'));
 
@@ -84,6 +89,175 @@ test('una firma que no cierra es 401 y no se lee nada', () => {
     const p = peticion(eventoGanado());
     p.headers['x-hubspot-signature-v3'] = 'firma-falsa';
     assert.strictEqual(d2t.admitir(p).status, 401);
+});
+
+
+// ── Retroceder una etapa (§9.9) ─────────────────────────────────────────
+
+test('la etapa anterior sale de los embudos REALES del portal', () => {
+    // Fija el orden de hoy. Si alguien reordena el embudo, se rompe este test
+    // y no un pedido: hoy 'Cierre perdido' va DESPUES de 'Cierre ganado'
+    // (displayOrder 6 contra 5) en los dos embudos, y por eso retroceder por
+    // displayOrder es seguro. Si eso cambiara, dejaria de serlo.
+    const ps = require('./fixtures/pipelines-deals.json').pipelines;
+
+    const ventas = etapas.anterior('closedwon', ps);
+    assert.strictEqual(ventas.id, 'decisionmakerboughtin');
+    assert.strictEqual(ventas.label, 'Negociación');
+    assert.strictEqual(ventas.pipelineLabel, 'Embudo de Ventas Ultraschall');
+
+    const licitaciones = etapas.anterior('1376134021', ps);
+    assert.strictEqual(licitaciones.id, '1376134020');
+    assert.strictEqual(licitaciones.label, 'Pendiente OC/Contrato');
+
+    for (const p of ps) {
+        const orden = Object.fromEntries(p.stages.map((s) => [s.label, Number(s.displayOrder)]));
+        assert.ok(orden['Cierre perdido'] > orden['Cierre ganado'],
+            `en '${p.label}' Cierre perdido dejo de ir despues de Cierre ganado: revisar etapas.anterior`);
+    }
+});
+
+test('retroceder NUNCA cae en otra etapa ganada', () => {
+    // Mover la etapa dispara el webhook otra vez: caer en una ganada seria un bucle.
+    const pipelines = [{
+        id: 'p', label: 'Raro',
+        stages: [
+            { id: 'primera', label: 'Primera', displayOrder: 0 },
+            { id: 'ganado-viejo', label: 'Ganado viejo', displayOrder: 1 },
+            { id: 'closedwon', label: 'Cierre ganado', displayOrder: 2 },
+        ],
+    }];
+    const ganadas = new Set(['closedwon', 'ganado-viejo']);
+    assert.strictEqual(etapas.anterior('closedwon', pipelines, ganadas).id, 'primera');
+});
+
+test('sin etapa anterior no se inventa ninguna', () => {
+    const pipelines = [{ id: 'p', label: 'X', stages: [{ id: 'unica', label: 'Unica', displayOrder: 0 }] }];
+    assert.strictEqual(etapas.anterior('unica', pipelines), null, 'ya estaba en la primera');
+    assert.strictEqual(etapas.anterior('fantasma', pipelines), null, 'no pertenece a ningun embudo');
+    assert.strictEqual(etapas.anterior(null, pipelines), null);
+    assert.strictEqual(etapas.anterior('closedwon', []), null, 'sin embudos no se mueve nada');
+});
+
+test('anterior se ordena por displayOrder, no por como vengan', () => {
+    const pipelines = [{
+        id: 'p', label: 'X',
+        stages: [
+            { id: 'c', label: 'C', displayOrder: 2 },
+            { id: 'a', label: 'A', displayOrder: 0 },
+            { id: 'b', label: 'B', displayOrder: 1 },
+        ],
+    }];
+    assert.strictEqual(etapas.anterior('c', pipelines).id, 'b');
+});
+
+// ── El texto de la nota ─────────────────────────────────────────────────
+
+test('la nota dice que falta, como se arregla y que hacer despues', () => {
+    const html = notaProblema.cuerpo({
+        problemas: [{ campo: 'razon_social', motivo: 'esta vacio', comoSeArregla: 'cargarlo en la empresa' }],
+        retroceso: { label: 'Negociación' },
+        etapaGanada: 'Cierre ganado',
+    });
+    assert.match(html, /razon_social/);
+    assert.match(html, /esta vacio/);
+    assert.match(html, /cargarlo en la empresa/, 'decir que falta sin decir como no alcanza');
+    assert.match(html, /Negociación/, 'donde quedo el negocio');
+    assert.match(html, /Cierre ganado/, 'como se reintenta');
+});
+
+test('la nota escapa lo que venga de datos', () => {
+    // El cuerpo se interpreta como HTML: un nombre con < o & romperia la nota.
+    const html = notaProblema.cuerpo({ problemas: [{ campo: 'name', motivo: '<script>x</script> & cia' }] });
+    assert.ok(!html.includes('<script>'), 'no puede entrar markup desde los datos');
+    assert.match(html, /&lt;script&gt;/);
+    assert.match(html, /&amp; cia/);
+});
+
+test('sin retroceso la nota no dice que se movio, pero si como reintentar', () => {
+    const html = notaProblema.cuerpo({ problemas: [{ campo: 'x', motivo: 'y' }], retroceso: null });
+    assert.ok(!html.includes('se movió a'), 'no puede decir que se movio si no se movio');
+    assert.ok(html.includes('movelo de nuevo a <b>Cierre ganado</b>'));
+});
+
+test('la nota NUNCA dice "volvé a guardar el negocio"', () => {
+    // Guardar el negocio no dispara nada: el webhook escucha el cambio de
+    // ETAPA. La cola de veneno decia eso y mandaba a hacer algo inutil.
+    for (const html of [
+        notaProblema.cuerpo({ problemas: [{ campo: 'x', motivo: 'y' }] }),
+        notaProblema.cuerpo({ problemas: [{ campo: 'x', motivo: 'y' }], tipo: 'tecnico' }),
+        notaProblema.cuerpo({ problemas: [{ campo: 'x', motivo: 'y' }], retroceso: { label: 'Negociación' } }),
+    ]) {
+        assert.ok(!/guardar el negocio/i.test(html), html);
+    }
+});
+
+test('una falla tecnica NO le pide a comercial que cargue nada', () => {
+    // Es el caso de la cola de veneno: el ERP se cayo. Decirle "faltan datos"
+    // lo manda a buscar lo que no existe.
+    const html = notaProblema.cuerpo({
+        problemas: [{ campo: 'Tango', motivo: 'el ERP no respondio', comoSeArregla: 'avisar a sistemas' }],
+        retroceso: { label: 'Negociación' },
+        tipo: 'tecnico',
+    });
+    assert.match(html, /No falta ningún dato del negocio/);
+    assert.ok(!/Faltan? d* ?dato/.test(html.replace('No falta ningún dato del negocio', '')));
+    assert.match(html, /cuando Tango vuelva a estar disponible/i);
+});
+
+test('la nota cuenta los problemas en singular y en plural', () => {
+    assert.match(notaProblema.cuerpo({ problemas: [{ campo: 'a', motivo: 'b' }] }), /Falta este dato/);
+    assert.match(notaProblema.cuerpo({ problemas: [{ campo: 'a', motivo: 'b' }, { campo: 'c', motivo: 'd' }] }), /Faltan 2 datos/);
+});
+
+
+// ── "Se creo con lo minimo, completá esto" (§9.10) ───────────────────────
+
+test('la nota de datos a completar dice que YA salio, no que fallo', () => {
+    const html = notaProblema.cuerpoACompletar({
+        avisos: [{ campo: 'CUIT', motivo: 'esta vacio: el cliente se crea sin ese dato', comoSeArregla: 'cargar cuit en la empresa' }],
+        cliente: { codigo: '007611' },
+    });
+    assert.match(html, /se creó en Tango/);
+    assert.match(html, /007611/, 'con que codigo quedo, para poder buscarlo en el ERP');
+    assert.match(html, /CUIT/);
+    assert.match(html, /Queda un dato/);
+    assert.ok(!/no se pudo/i.test(html), 'no puede leerse como un error: el pedido salio');
+});
+
+test('anotarACompletar deja SOLO una nota: ni propiedad ni etapa', async () => {
+    // El negocio se gano y el pedido existe. Moverlo seria mentirle al embudo.
+    const hs = hsFalso();
+    await d2t.anotarACompletar({
+        hs, dealId: '111',
+        avisos: [{ campo: 'DOMICILIO', motivo: 'esta vacio', comoSeArregla: 'cargarlo' }],
+        cliente: { codigo: '007611' },
+    });
+    assert.strictEqual(hs.notas.length, 1);
+    assert.strictEqual(hs.escrituras.length, 0, 'no toca ninguna propiedad');
+    assert.strictEqual(hs.etapaFinal, null, 'y no mueve la etapa');
+});
+
+test('que falle la nota de completar no tumba el pedido, que ya salio', async () => {
+    const hs = hsFalso();
+    hs.crearNota = async () => { throw new Error('HubSpot rechazo la nota'); };
+    await d2t.anotarACompletar({ hs, dealId: '111', avisos: [{ campo: 'CUIT', motivo: 'x' }], cliente: {} });
+});
+
+test('una empresa con razon social y condicion de IVA pasa y deja los avisos', () => {
+    // Es la politica del 2026-08-28 vista desde el pedido: el alta no frena, y
+    // lo que se completo con default viaja como aviso.
+    const verificarEmpresa = require('../src/lib/verificarEmpresa');
+    const mapper = require('../src/lib/mapper');
+    const mapeoClientes = require('../config/mapeo.clientes.json');
+    const r = verificarEmpresa.verificar({
+        propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' },
+        mapper: mapper.crear(mapeoClientes, lk),
+        lookups: lk,
+    });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.ok(r.avisos.length >= 2, 'CUIT y domicilio, por lo menos');
+    for (const a of r.avisos) assert.ok(a.comoSeArregla, `el aviso de ${a.campo} no dice que hacer`);
 });
 
 test('un cambio de etapa que no es ganado se descarta con 204', () => {
@@ -179,10 +353,152 @@ test('si la company no trae la parametria, va el default del catalogo', () => {
 
 test('el talonario, el deposito, la moneda y el stock salen de los defaults', () => {
     const r = verificar();
-    assert.strictEqual(r.payload.ID_GVA43_TALON_PED, 1, 'PROVISORIO: falta el process de GVA43');
-    assert.strictEqual(r.payload.ID_STA22, 1, 'PROVISORIO: falta el process de STA22');
-    assert.strictEqual(r.payload.ID_MONEDA, 1);
+    // Los tres primeros dejaron de ser provisorios el 2026-08-28: se leyeron de
+    // los pedidos que el ERP ya tiene cargados. Evidencia y metodo en
+    // config/defaults.tango.json -> pedidos._comoSeVerifico.
+    assert.strictEqual(r.payload.ID_GVA43_TALON_PED, 1, 'talonario 2 PEDIDOS, el unico en uso');
+    assert.strictEqual(r.payload.ID_STA22, 1, 'deposito 01 PRODUCTO TERMINADO, 66% de los pedidos');
+    assert.strictEqual(r.payload.ID_MONEDA, 1, 'PES');
     assert.strictEqual(r.payload.VALIDA_STOCK, true, 'decision de Matias 2026-08-25');
+});
+
+test('los defaults del pedido apuntan a filas que existen en el ERP', () => {
+    // Que el numero sea 1 no dice nada: el codigo no es el ID (5.4). Lo que
+    // importa es que ese ID este en la tabla que se relevo. Si alguien cambia
+    // un default a ojo, esto se cae.
+    const catalogo = require('../config/tango.processes.json');
+    const d = defaults.pedidos.defaults;
+
+    const talonario = catalogo.auxiliares.talonariosPedido.filas
+        .find((f) => f.ID_GVA43_TALON_PED === d.ID_GVA43_TALON_PED);
+    assert.ok(talonario, `ID_GVA43_TALON_PED ${d.ID_GVA43_TALON_PED} no esta en GVA43`);
+    assert.strictEqual(talonario.DESCRIPCION_TALONARIO_PEDIDO, 'PEDIDOS');
+
+    const deposito = catalogo.auxiliares.depositos.filas
+        .find((f) => f.ID_STA22 === d.ID_STA22);
+    assert.ok(deposito, `ID_STA22 ${d.ID_STA22} no esta en STA22`);
+    assert.strictEqual(deposito.NOMBRE_SUC, 'PRODUCTO TERMINADO');
+
+    // Y el default de lista de precios del cliente tiene que existir tambien.
+    const gva10 = defaults.clientes.alta.campos.find((c) => c.tango === 'ID_GVA10');
+    assert.ok(catalogo.auxiliares.listasPrecios.filas
+        .some((f) => String(f.NRO_DE_LIS) === gva10.codigoPorDefecto));
+});
+
+
+// --------------------------------------------- el deposito que elige comercial
+
+const conDeposito = (valor) => verificar({
+    deal: { ...{ hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z' }, tango_deposito: valor },
+});
+
+test('sin elegir deposito va el default, y el pedido no marca nada', () => {
+    const r = verificar();
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.deepStrictEqual(r.elegido, {}, 'no eligio nada: no hay que inventar que si');
+    assert.strictEqual(r.payload.ID_STA22, 1, 'PRODUCTO TERMINADO');
+});
+
+test('el deposito elegido en el Deal le gana al default', () => {
+    const r = conDeposito('36');
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_STA22, 16, 'SERVICIO TECNICO');
+    assert.strictEqual(r.elegido.ID_STA22.descripcion, 'SERVICIO TECNICO');
+});
+
+test('el renglon sale del mismo deposito que la cabecera', () => {
+    // Si no, el pedido diria una cosa y la mercaderia saldria de otro lado.
+    const r = conDeposito('36');
+    assert.strictEqual(r.payload.RENGLON_DTO[0].ID_STA22, r.payload.ID_STA22);
+});
+
+test('el desplegable guarda el CODIGO, no el ID interno', () => {
+    // Es 5.4 otra vez, y aca el modo de falla es mudo: el codigo 36 tambien es
+    // un ID_STA22 valido (SERVICE US es 2, pero 36 existe en otras auxiliares).
+    // Mandar el codigo como ID despacharia de otro deposito sin ningun error.
+    const r = conDeposito('36');
+    assert.notStrictEqual(r.payload.ID_STA22, 36, 'mando el codigo en vez del ID');
+    assert.strictEqual(r.elegido.ID_STA22.codigo, '36');
+});
+
+test('cada deposito del desplegable resuelve a un ID que existe', () => {
+    for (const cod of Object.values(MAPEO_PEDIDOS.campos.find((c) => c.hubspot === 'tango_deposito').opciones)) {
+        const r = conDeposito(cod);
+        assert.strictEqual(r.ok, true, `el deposito '${cod}' no resolvio: ${JSON.stringify(r.problemas)}`);
+        assert.ok(Number.isInteger(r.payload.ID_STA22), `'${cod}' no dio un ID`);
+    }
+});
+
+test('un deposito que no esta en la lista FRENA el pedido, no cae al default', () => {
+    // Caer al default seria despachar desde otro deposito, valido, sin que nada
+    // falle. Es el peor error posible de este circuito, y por eso no es un
+    // aviso: con ok=false dealToTango escribe el motivo en tango_pedido_problema
+    // y NO llama a Api/Create.
+    const r = conDeposito('99');
+    assert.strictEqual(r.ok, false);
+    const p = r.problemas.find((x) => x.campo === 'ID_STA22');
+    assert.ok(p, JSON.stringify(r.problemas));
+    assert.match(p.motivo, /99/, 'el problema tiene que decir QUE se eligio');
+    assert.ok(p.comoSeArregla, 'comercial tiene que poder leer que hacer');
+});
+
+test('el talonario tambien se puede elegir, aunque hoy haya uno solo', () => {
+    const r = verificar({ deal: { ...{ hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z' }, tango_talonario: '2' } });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_GVA43_TALON_PED, 1, 'el codigo es 2 y el ID es 1');
+});
+
+test('el desplegable muestra texto y guarda el codigo', () => {
+    // Lo que ve comercial no puede ser '36'. Y lo que se guarda no puede ser
+    // 'SERVICIO TECNICO', porque el ERP puede renombrar el deposito.
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.hubspot === 'tango_deposito');
+    const opciones = propiedades.opcionesDe(campo);
+    const habilitados = CATALOGO.auxiliares.depositos.filas.filter((f) => !f.deBaja);
+    assert.strictEqual(opciones.length, habilitados.length,
+        'el desplegable ofrece exactamente los depositos habilitados de STA22');
+    assert.deepStrictEqual(opciones[0], { label: 'PRODUCTO TERMINADO', value: '01', displayOrder: 0, hidden: false },
+        'PRODUCTO TERMINADO va primero: es el 66% de los pedidos');
+    for (const o of opciones) assert.notStrictEqual(o.label, o.value, `'${o.value}' quedo sin etiqueta legible`);
+});
+
+test('cada opcion del desplegable existe en la tabla del catalogo', () => {
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.hubspot === 'tango_deposito');
+    const delCatalogo = new Set(CATALOGO.auxiliares.depositos.filas.map((f) => String(f.COD_STA22)));
+    for (const cod of Object.values(campo.opciones)) {
+        assert.ok(delCatalogo.has(cod), `la opcion '${cod}' no esta en STA22`);
+    }
+    assert.strictEqual(campo.opcionesOrden.length, Object.keys(campo.opciones).length,
+        'el orden tiene que nombrar a todas las opciones');
+});
+
+test('un deposito INHABILITADO en Tango no se le ofrece a comercial', () => {
+    // Los 9 inhabilitados aparecieron recien con el process 2941 (9.11). Uno de
+    // ellos, ABREGU CBA PRUEBA-DEVOLUCION (cod 38), ya estaba en el desplegable
+    // de las 16: entro por la puerta de atras, porque el metodo viejo miraba los
+    // pedidos y ese deposito tenia uno viejo. Ofrecerlo es ofrecer un despacho
+    // que el ERP no acepta.
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.hubspot === 'tango_deposito');
+    const ofrecidos = new Set(Object.keys(campo.opciones));
+    const deBaja = CATALOGO.auxiliares.depositos.filas.filter((f) => f.deBaja);
+
+    assert.ok(deBaja.length > 0, 'si STA22 dejo de traer inhabilitados, este test perdio sentido');
+    for (const f of deBaja) {
+        assert.ok(!ofrecidos.has(String(f.COD_STA22)),
+            `'${f.COD_STA22}' (${f.NOMBRE_SUC}) esta inhabilitado en Tango y sigue en el desplegable`);
+    }
+});
+
+test('los defaults del pedido no llevan metadata al ERP', () => {
+    // `defaults` se derrama tal cual en el payload: una clave de documentacion
+    // ahi adentro viaja a Tango. Paso el 2026-08-28 con _evidencia.
+    for (const bloque of [defaults.pedidos.defaults, defaults.clientes.defaults]) {
+        for (const k of Object.keys(bloque)) {
+            assert.ok(!k.startsWith('_'), `'${k}' es documentacion y esta adentro de defaults`);
+        }
+    }
+    for (const k of Object.keys(verificar().payload)) {
+        assert.ok(!k.startsWith('_'), `'${k}' llego al payload de Tango`);
+    }
 });
 
 test('el ID del Deal viaja al ERP para poder rastrear el pedido', () => {
@@ -294,13 +610,31 @@ test('la fecha va sin zona horaria: Tango no interpreta el offset', () => {
 
 // ── El circuito, con dobles ──────────────────────────────────────────────
 
+/** Los dos embudos REALES del portal (test/fixtures/pipelines-deals.json). */
+const PIPELINES = require('./fixtures/pipelines-deals.json').pipelines;
+
 /** Un HubSpot de mentira que registra lo que se le pide y lo que se le escribe. */
-function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], productos = [{ id: '77', properties: { tango_id_sta11: '394' } }] } = {}) {
+function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], productos = [{ id: '77', properties: { tango_id_sta11: '394' } }], pipelines = PIPELINES } = {}) {
     const escrituras = [];
+    const notas = [];
     return {
         escrituras,
+        notas,
+        /** El PATCH de la etapa, que es lo que hay que poder mirar aparte. */
+        get etapaFinal() {
+            return escrituras.filter((e) => e.props.dealstage).at(-1)?.props.dealstage ?? null;
+        },
+        problemaEscrito() {
+            return escrituras.filter((e) => e.props.tango_pedido_problema !== undefined).at(-1)?.props.tango_pedido_problema;
+        },
+        async pipelines() {
+            if (!pipelines) throw new Error('HubSpot no contesta los embudos');
+            return pipelines;
+        },
+        async crearNota(objetoTipo, id, cuerpo) { notas.push({ objetoTipo, id, cuerpo }); return { id: 'n1' }; },
         async objeto(objetoTipo, id) {
-            if (objetoTipo === 'deals') return { id, properties: { hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', ...deal } };
+            // dealstage va por defecto: el webhook SOLO llega por un ganado.
+            if (objetoTipo === 'deals') return { id, properties: { hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', ...deal } };
             return null;
         },
         async asociaciones(_o, _id, destino) {
@@ -360,7 +694,106 @@ test('si falta algo, el problema queda escrito en el Deal y no se crea el pedido
 
     assert.strictEqual(r.estado, 'incompleto');
     assert.strictEqual(tango.creados.length, 0);
-    assert.match(hs.escrituras.at(-1).props.tango_pedido_problema, /catalogo/);
+    assert.match(hs.problemaEscrito(), /catalogo/);
+});
+
+// ── Un negocio incompleto: nota y vuelta atras (§9.9) ────────────────────
+
+test('un negocio incompleto deja una nota que dice QUE falta', async () => {
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(hs.notas.length, 1, 'una nota, no una por problema');
+    assert.strictEqual(hs.notas[0].objetoTipo, 'deals');
+    assert.strictEqual(hs.notas[0].id, '111');
+    assert.match(hs.notas[0].cuerpo, /catalogo/, 'la nota dice que falta');
+    assert.match(hs.notas[0].cuerpo, /Negociación/, 'y a que etapa se movio');
+});
+
+test('un negocio incompleto vuelve UNA etapa atras', async () => {
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'Negociación, la anterior a Cierre ganado');
+    assert.strictEqual(r.retroceso.label, 'Negociación');
+});
+
+test('la nota se escribe ANTES de mover la etapa', async () => {
+    // Si se moviera primero, un fallo al anotar dejaria el negocio en otra
+    // etapa sin ninguna explicacion.
+    const orden = [];
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    const notaOriginal = hs.crearNota, patchOriginal = hs.actualizarObjeto;
+    hs.crearNota = async (...a) => { orden.push('nota'); return notaOriginal(...a); };
+    hs.actualizarObjeto = async (o, i, props) => { if (props.dealstage) orden.push('etapa'); return patchOriginal(o, i, props); };
+
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.deepStrictEqual(orden, ['nota', 'etapa']);
+});
+
+test('si la nota falla, el negocio se mueve igual', async () => {
+    // El motivo ya quedo en tango_pedido_problema, y dejarlo en "Cierre ganado"
+    // sin pedido es peor: parece cerrado y no lo esta.
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    hs.crearNota = async () => { throw new Error('HubSpot rechazo la nota'); };
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+    assert.ok(hs.problemaEscrito(), 'la explicacion quedo en la propiedad');
+});
+
+test('un negocio de Licitaciones vuelve a la etapa de SU embudo', async () => {
+    // Filtrar por 'closedwon' perderia los de licitaciones en silencio, y
+    // retroceder con la tabla del otro embudo lo mandaria a cualquier lado.
+    const hs = hsFalso({ deal: { dealstage: '1376134021' }, lineItems: [linea({ hs_product_id: undefined })] });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    assert.strictEqual(hs.etapaFinal, '1376134020');
+    assert.strictEqual(r.retroceso.label, 'Pendiente OC/Contrato');
+    assert.strictEqual(r.retroceso.pipelineLabel, 'Embudo de Licitaciones');
+});
+
+test('una re-entrega de la cola no duplica la nota ni retrocede dos etapas', async () => {
+    // La cola es at-least-once (§9.5). La guarda no es un flag propio: es que
+    // el negocio ya NO esta en una etapa ganada cuando vuelve el mensaje.
+    const hs = hsFalso({ deal: { dealstage: 'decisionmakerboughtin' }, lineItems: [linea({ hs_product_id: undefined })] });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(hs.notas.length, 0, 'ya se habia anotado');
+    assert.strictEqual(hs.etapaFinal, null, 'y no se retrocede otra etapa');
+    assert.ok(hs.problemaEscrito(), 'la propiedad si se refresca: es idempotente');
+});
+
+test('si no se pueden leer los embudos, se anota igual y no se mueve nada', async () => {
+    const hs = hsFalso({ pipelines: null, lineItems: [linea({ hs_product_id: undefined })] });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    assert.strictEqual(hs.notas.length, 1, 'reportar no depende de poder mover');
+    assert.strictEqual(hs.etapaFinal, null);
+    assert.strictEqual(r.retroceso, null);
+});
+
+test('en dry-run un negocio incompleto no deja nota ni se mueve', async () => {
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: true });
+
+    assert.strictEqual(hs.notas.length, 0);
+    assert.strictEqual(hs.escrituras.length, 0);
+});
+
+test('a una empresa incompleta se la reporta igual que a un negocio', async () => {
+    // Es el caso REAL de hoy: 65 de 66 companies no se pueden dar de alta en
+    // Tango. Quien tiene que cargar el dato es la misma persona, y no tiene por
+    // que saber de que lado del circuito falto.
+    const hs = hsFalso({ company: { name: 'Sin datos' } });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false, estrategiaNumeracion: 'correlativo' });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(hs.notas.length, 1);
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
 });
 
 test('el circuito entero sale con el articulo de prueba y crea el pedido', async () => {
