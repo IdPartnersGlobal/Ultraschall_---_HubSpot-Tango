@@ -18,7 +18,8 @@
       "hubspot": "hs_sku",
       "unique": true
     },
-    "bloqueante": "process=87 NO devuelve precio. HubSpot Products requiere 'price'. Falta el process de listas de precios (ARQUITECTURA.md §5.1).",
+    "bloqueante": null,
+    "_bloqueanteResuelto": "Hasta el 2026-08-31 decia: 'process=87 NO devuelve precio, falta el process de listas de precios'. Los precios no estan en STA11 sino en GVA17, y se leen sin su process: Api/GetById?process=87 devuelve el array GVA17 con NRO_DE_LIS, ID_GVA10 y PRECIO. Ver src/lib/preciosArticulo.js y ARQUITECTURA.md §9.12.",
     "convenciones": {
       "prefijo": "tango_",
       "autoritativoTango": "true = el sync pisa el valor en HubSpot en cada corrida.",
@@ -64,8 +65,9 @@
       "tipo": "string",
       "hsFieldType": "textarea",
       "autoritativoTango": false,
-      "transform": "concatenarConObservaciones",
-      "notas": "Bajo nivel de carga. Evaluar concatenar con OBSERVACIONES (30%)."
+      "transformRegistro": "descripcionConObservaciones",
+      "porcentajeCarga": 41,
+      "notas": "RESUELTO 2026-08-31: se concatena con OBSERVACIONES. Medido sobre los 826 articulos, DESC_ADIC esta en 108 (13%) y OBSERVACIONES en 269 (33%), y 223 articulos tienen observaciones SIN descripcion adicional: mapear solo DESC_ADIC dejaba a esos 223 sin ninguna descripcion. Juntas cubren el 41%. El texto queda duplicado con tango_observaciones a proposito: esa es el dato crudo del ERP y esta es la que ve comercial."
     },
     {
       "tango": null,
@@ -74,7 +76,8 @@
       "tipo": "number",
       "hsFieldType": "number",
       "autoritativoTango": false,
-      "notas": "NO viene en process=87: ninguno de sus 141 campos es de precio, y el process de listas de precios sigue sin conseguirse. Mientras tanto el mapper no lo emite, asi que el sync nunca escribe un precio en blanco. | NO AUTORITATIVO desde el 2026-08-25 (decision de Matias): los precios se cargan A MANO en HubSpot, asi que el dia que aparezca el process de precios el sync NO los va a pisar — solo va a completar los que esten vacios. Si algun dia se quiere que Tango mande, cambiar este flag a proposito."
+      "origenReal": "GVA17.PRECIO, de la lista que diga defaults.tango.json -> productos.listaPrecios",
+      "notas": "`tango` queda en null A PROPOSITO aunque el precio ya tenga origen: el mapper mapea el registro de STA11, y el precio vive en OTRA tabla (GVA17), asi que lo agrega el sync despues de mapear (lib/syncProductos paso 4b). Ponerle un origen aca haria que el mapper buscara una columna que el registro no tiene. | NO AUTORITATIVO desde el 2026-08-25 (decision de Matias): los precios se cargan A MANO en HubSpot. El sync SOLO completa los que estan vacios y jamas pisa uno cargado. | El precio NO entra en el hash: el hash resume STA11 y el precio viene de afuera. | OJO CON LA MONEDA: la lista 2 es SIN IVA EN U$S. Ver defaults.tango.json -> productos._listaPrecios_ojo."
     },
     {
       "tango": "COD_BARRA",
@@ -139,7 +142,9 @@
       "hsFieldType": "select",
       "porcentajeCarga": 100,
       "autoritativoTango": true,
-      "notas": "CONFIRMAR valores posibles. Probable: A=ambos, V=ventas, C=compras. Si existe 'C', esos articulos quizas no deban ir al catalogo comercial."
+      "valores": "A = ambos (compra y venta) · V = solo ventas · C = solo compras · N = ninguno",
+      "_porQueNoEsUnSelect": "Los valores estan documentados aca y NO como `opciones` a proposito. La propiedad ya existe en el portal como string/text; declararle opciones la convierte en enumeration, y eso no se arregla con un PATCH: hay que borrar y recrear, que borra el valor en todos los registros. Ver [[nunca-borrar-propiedades-hubspot]]. Ademas nadie elige este campo a mano: lo escribe el sync.",
+      "notas": "RESUELTO 2026-08-31 midiendo los 826 articulos: A=714, V=62, N=41, C=9. 'N' no estaba previsto. Que son, mirando los articulos: V son servicios (Service, Reparacion, Envio a domicilio) que se venden y no se stockean; C son insumos de compra (barra de grilon, cinta de embalaje, manija); N son articulos que no participan de compras ni de ventas. Confirmacion independiente: de los 133 articulos con precio en la lista 2, 131 son A y 2 son V — ningun C ni N tiene precio. Por eso el sync publica A y V, y deja C y N afuera (ver defaults.tango.json -> productos.perfilesQueSePublican)."
     },
     {
       "tango": "REMITIBLE",
@@ -166,10 +171,10 @@
       "label": "Codigo NCM",
       "tipo": "string",
       "hsFieldType": "text",
-      "porcentajeCarga": 96,
+      "porcentajeCarga": 12,
       "autoritativoTango": true,
       "transform": "trimNcm",
-      "notas": "Puede venir como mascara vacia: '    .  .  '. Guardar null en ese caso."
+      "notas": "IMPLEMENTADO 2026-08-31. El 96% era falso: contaba la mascara vacia '    .  .  ' como dato. Medido de nuevo sobre los 826 articulos, 727 la tienen vacia — la carga real es del 12%. `trimNcm` devuelve null cuando no queda nada mas que la mascara, asi que el catalogo no se llena de codigos NCM inventados."
     },
     {
       "tango": "OBSERVACIONES",

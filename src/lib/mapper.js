@@ -146,6 +146,19 @@ const transforms = {
         if (!m) return null;
         return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
     },
+
+    /**
+     * Codigo NCM, o nada.
+     *
+     * Tango devuelve la mascara vacia '    .  .  ' cuando el campo no se cargo,
+     * y son 727 de 826 articulos. Guardarla tal cual llenaria el catalogo de
+     * codigos NCM que no existen, con la pinta de un dato real.
+     */
+    trimNcm(v) {
+        if (v === null || v === undefined) return null;
+        const limpio = String(v).replace(/[\s.]/g, '');
+        return limpio === '' ? null : String(v).trim();
+    },
 };
 
 // ------------------------------------------------- transforms de registro
@@ -169,6 +182,32 @@ const transformsRegistro = {
      */
     tipoDocumento(registro) {
         return documento.resolver(registro).tipo;
+    },
+
+    /**
+     * La descripcion larga del articulo, junten lo que junten las dos columnas
+     * que la tienen a medias.
+     *
+     * Medido sobre los 826 articulos: DESC_ADIC esta cargada en 108 (13%) y
+     * OBSERVACIONES en 269 (33%), y **223 articulos tienen observaciones sin
+     * descripcion adicional**. Mapear solo DESC_ADIC dejaria a esos 223 sin
+     * ninguna descripcion en HubSpot.
+     *
+     * Se concatenan en vez de elegir una: cuando estan las dos (46 articulos)
+     * dicen cosas distintas. El texto queda duplicado con
+     * `tango_observaciones`, y esta bien: esa propiedad es el dato crudo del
+     * ERP y `description` es lo que ve comercial en la ficha del producto.
+     */
+    descripcionConObservaciones(registro) {
+        const partes = [registro.DESC_ADIC, registro.OBSERVACIONES]
+            .map((v) => String(v ?? '').trim())
+            .filter((v) => v !== '');
+        if (!partes.length) return null;
+        // Si una es prefijo de la otra no se repite: pasa cuando alguien copio
+        // la descripcion adicional en observaciones.
+        if (partes.length === 2 && partes[1].startsWith(partes[0])) return partes[1];
+        if (partes.length === 2 && partes[0].startsWith(partes[1])) return partes[0];
+        return partes.join('\n\n');
     },
 };
 

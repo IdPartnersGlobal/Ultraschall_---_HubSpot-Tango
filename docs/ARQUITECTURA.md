@@ -20,7 +20,7 @@ Sincronizar la información maestra y transaccional entre **Tango Gestión** (ER
 | Fase | Flujo | Origen → Destino | Estado |
 |---|---|---|---|
 | 0 | Conectividad y proxy a Tango | — | ✅ Hecho |
-| 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | 🔨 Sync construido el 2026-08-25, **sin precio**: `process=87` no lo trae y el process de precios sigue sin conseguirse (826 art.) |
+| 1 | Artículos → catálogo | Tango `STA11` → HubSpot **Products** | 🔨 Sync construido el 2026-08-25. **Con precio desde el 2026-08-31**: sale de `GVA17` por `Api/GetById` (§9.12). 826 artículos, 776 publicables, 133 con precio |
 | 2 | Clientes → cuentas | Tango `GVA14` → HubSpot **Companies** | 🔨 A construir (5.670 reg.) |
 | 3 | Contactos | Tango `GVA27` → HubSpot **Contacts** | ⛔ **FUERA DE ALCANCE** (decidido 2026-08-24, §7.3). El relevamiento y `config/mapeo.contactos.json` se conservan. |
 | 4 | Pedidos | HubSpot **Deal** ganado → Tango `Api/Create` (`process=19845`) | 🔨 Circuito construido el 2026-08-25 (§9). ⛔ Los renglones esperan el catálogo de productos (Fase 1) |
@@ -1428,7 +1428,7 @@ Las dos tablas quedaron en `config/tango.processes.json → auxiliares.talonario
 
 - **`VALIDA_STOCK` sigue sin evidencia.** Es el único default del pedido que no salió del ERP. Si `BAT250` no tiene stock, Tango rechaza (§9.6).
 - **HubSpot no sabe de depósitos.** Todo pedido sale de "PRODUCTO TERMINADO". Los 144 pedidos anuales de "SERVICIO TECNICO" y los 104 de "EQUIPOS VETERINARIA" los va a tener que corregir una persona en el ERP, o hará falta una propiedad de Deal que elija el depósito.
-- El `process` de **precios de artículos** sigue faltando y es el único que bloquea de verdad (Fase 1).
+- ✅ ~~El `process` de **precios de artículos** sigue faltando~~ **Resuelto el 2026-08-31 sin conseguirlo**: los precios están en `GVA17` (§9.12).
 
 ### 9.8 El depósito lo elige comercial: desplegable en el Deal (2026-08-28)
 
@@ -1647,7 +1647,67 @@ Rederivar: `node scripts/tablaDepositos.js --proxy <url>` (informe) o `--aplicar
 #### Lo que sigue sin resolverse
 
 - **`VALIDA_STOCK`** sigue siendo el único default del pedido sin evidencia.
-- El `process` de **precios de artículos** sigue faltando: es el único que queda pedido y el único que bloquea algo (Fase 1).
+- ✅ ~~El `process` de **precios de artículos**~~ **resuelto el 2026-08-31 sin conseguirlo** (§9.12). Ya no queda ningún `process` pedido.
+
+### 9.12 El precio, que estaba en otra tabla (2026-08-31)
+
+El `process` de precios era el último pedido que quedaba abierto y el único que bloqueaba una fase entera. **No hizo falta.**
+
+La pregunta estaba mal hecha, igual que con `STA22` y `GVA43` (§9.7). No es *"cuál es el `process` de la lista de precios"* sino *"dónde están los precios"*, y la respuesta es que **no están en `STA11`**: viven en `GVA17`, una fila por artículo y por lista. Por eso ninguno de los 141 campos de `process=87` es de precio — no es que Tango los esconda, es que no están ahí.
+
+`GVA17` tampoco tiene `process` propio. Se llega igual, por dos caminos que ya estaban en el proyecto:
+
+| | cómo | costo |
+|---|---|---|
+| **quiénes** tienen precio | la subconsulta de §7.7: `ID_STA11 IN (SELECT ID_STA11 FROM GVA17 WHERE ID_GVA10 = N AND PRECIO > 0)` | **1** request |
+| **cuánto** vale cada uno | `Api/GetById?process=87&id=<ID_STA11>` devuelve **157** campos contra los 141 de `Api/Get`, y entre ellos el array `GVA17` entero | 1 request por artículo |
+
+La proyección ancha de `GetById` es la misma rareza por la que aparecieron los contactos en `GVA27` (§7.4). Ya había pasado dos veces: **cuando un campo "no existe", probar `GetById` antes de concluir**.
+
+#### El orden es lo que lo hace barato
+
+Primero se pregunta quiénes y recién después se pagan los `GetById` **de esos**. Al revés serían 826 requests por corrida para completar 133 precios. Así son 134, y la corrida completa del catálogo tarda **41 s**.
+
+#### Qué hay realmente cargado
+
+Medido sobre los 826 artículos:
+
+- **214** tienen precio en alguna lista; **133** en la lista 2.
+- De esos 133, **131 son de perfil `A` y 2 de `V`** — ningún artículo de compras tiene precio. Es una confirmación independiente de que el perfil dice quién se vende.
+- Los otros **643 se publican igual, sin precio**: el catálogo sirve lo mismo, porque lo que el renglón del pedido necesita es `ID_STA11`.
+
+#### ⚠️ La lista 2 está en dólares
+
+`NRO_DE_LIS = 2` se llama **"SIN IVA EN U$S"**. Un mismo artículo (`AX8`, Ecógrafo Edan Acclarix) sale **15.000** en la lista 2 y **20.155.200** en la lista 3, que es "CON IVA EN $".
+
+La lista está **sin confirmar** al 2026-08-31: Matías dijo *"hagamos de cuenta que va a ser la lista 2"* mientras Ultraschall define. Vive en `config/defaults.tango.json → productos.listaPrecios` y `TANGO_LISTA_PRECIOS` la pisa; `0` apaga la lectura de precios.
+
+Lo que hay que mirar antes de la primera corrida real: **si el portal de HubSpot muestra los importes en pesos, un precio de la lista 2 se va a leer como pesos sin que nada falle**. Es el mismo modo de falla que el depósito equivocado (§9.8) — válido, silencioso y a destiempo.
+
+También conviene tenerlo presente en el pedido: la lista del pedido sale del cliente (`ID_GVA10`, §7.9), no de la que se use para el catálogo. Si el catálogo se llena con la lista 2 y el cliente factura por la 3, el precio del renglón y la lista de la cabecera hablan de cosas distintas. Hoy no rompe nada porque el precio del renglón lo pone el line item del Deal, cargado a mano.
+
+#### Cómo entra el precio sin ensuciar el resto
+
+- **No pisa lo cargado a mano.** `price` sigue siendo no autoritativo (decisión del 2026-08-25): el sync **sólo completa los vacíos**. Si el producto ya tiene precio en HubSpot, ni se consulta — se ahorra el request.
+- **El precio NO entra en el hash.** El hash resume el registro de `STA11` y decide si hay algo que reescribir; el precio viene de otra tabla. Meterlo adentro haría que el hash cambiara según si se pudo leer el precio o no, y eso reescribiría productos sin motivo.
+- **Por eso los candidatos se eligen ANTES del corte por hash.** Un artículo sin cambios en `STA11` al que recién ahora le cargaron el precio tiene que poder recibirlo; si el corte por hash pasara primero, se quedaría sin precio para siempre. Hay un test que cubre exactamente ese caso.
+- **Si falla la lectura de precios, el catálogo se publica igual**, sin precio y con el problema anotado. Un problema en `GVA17` no puede voltear el sync entero.
+
+#### Lo que se terminó de cerrar del mapeo
+
+**`PERFIL`** decía *"CONFIRMAR valores posibles. Probable: A=ambos, V=ventas, C=compras"*. Medido: **A=714, V=62, N=41, C=9**. `N` no estaba previsto. Mirando los artículos: `V` son servicios (Service, Reparación, Envío a domicilio), `C` son insumos de compra (barra de grilón, cinta de embalaje, manija), `N` no participa de ninguna de las dos.
+
+El sync ahora publica **`A` y `V`** y deja `C` y `N` afuera: 50 de 826. Es el mismo criterio que los depósitos inhabilitados (§9.11) — no ofrecerle a comercial lo que no se puede usar. **No borra nada**: un artículo que ya esté en HubSpot se queda, sólo deja de actualizarse. Y pedir explícitamente un artículo excluido ahora dice *por qué* no se publicó, en vez de "no existe en Tango", que era falso y mandaba a buscar el problema al lugar equivocado.
+
+⚠️ Los 41 de perfil `N` incluyen cosas que suenan vendibles (`BAT300` "Batería monitor fetal BT300", cabezales). Si alguno se vende, la corrección es en Tango —ponerle perfil `A` o `V`— o agregar `"N"` a `perfilesQueSePublican`.
+
+**`COD_NCM`** figuraba con 96% de carga. Era falso: contaba la máscara vacía `'    .  .  '` como dato. La carga real es **12%** — 727 de 826 están vacíos. `trimNcm` devuelve null en ese caso, así que el catálogo no se llena de códigos NCM inventados.
+
+**`DESC_ADIC`** iba sola y cubría el 13%. `OBSERVACIONES` cubre el 33%, y **223 artículos tienen observaciones sin descripción adicional**: mapear sólo `DESC_ADIC` dejaba a esos 223 sin ninguna descripción en HubSpot. Ahora se concatenan (41% de cobertura) y no se repite el texto cuando una es prefijo de la otra.
+
+**`tango_perfil` se dejó como texto a propósito.** Documentar sus cuatro valores como `opciones` la habría convertido en `enumeration`, y eso no se arregla con un PATCH: hay que borrar y recrear, lo que borra el valor en todos los registros. Los valores quedan en el mapeo, en `valores`. Ver la regla de [[nunca-borrar-propiedades-hubspot]].
+
+Rederivar: `node scripts/tablaDepositos.js` no aplica acá; el sync es `SYNC_PRODUCTOS_ENABLED` + `SYNC_DRY_RUN`. Una corrida completa en dry-run contra los datos reales da hoy: **826 leídos · 50 excluidos por perfil · 749 a crear · 27 a actualizar · 133 precios · 0 problemas**.
 
 ## 10. Seguridad
 
@@ -1781,7 +1841,7 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 | # | Qué | Bloquea |
 |---|---|---|
 | 0 | 🔴 **Aprobar los scopes de HubSpot.** Es el camino crítico de todo el proyecto. Paso a paso en `docs/RUNBOOK-SCOPES.md`; exige `hs account auth` en el navegador, así que no se puede automatizar. | ⛔ Fases 2 y 3 enteras |
-| 1 | **`process` de precios de artículos** — la pantalla de precios / actualización de precios | ⛔ Fase 1 entera |
+| 1 | ✅ ~~**`process` de precios de artículos**~~ **Ya no hace falta** (2026-08-31). Los precios no están en `STA11` sino en `GVA17`, y se leen por la proyección ancha de `Api/GetById` más la subconsulta de §7.7. Ver §9.12. Lo que sí queda pendiente es **confirmar de qué lista se toman**: hoy va la 2, que está en dólares. | — |
 | 2 | ✅ ~~`process` de listas de precios (`GVA10`), depósitos (`STA22`) y talonarios (`GVA43`)~~ **Resueltos**. Las tres salieron por la columna interna de una tabla legible (§7.9, §9.7) sin esperar el `process`. El de `STA22` llegó igual el 2026-08-31 —**2941**— y sirvió para completar el desplegable y para confirmar el método (§9.11). El de `GVA43` **no existe**, y no hace falta. | — |
 | 3 | **`ID_CATEGORIA_IVA` de `RS` y `EXE`.** Sólo hace falta para el **alta**; para la lectura ya se resuelve con `opciones` (§7.2). Qué significa `EXE` **no hay que preguntarlo**: sale de leer `DESC_CATEGORIA_IVA` contra el ERP. | Alta de clientes |
 | 4 | **Variables de entorno en Azure**: token nuevo de HubSpot + deuda D1 (`TANGO_API_KEY`, `TANGO_COMPANY`) | Toda corrida real |

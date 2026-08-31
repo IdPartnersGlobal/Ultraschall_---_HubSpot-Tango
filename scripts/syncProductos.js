@@ -12,14 +12,19 @@
  * Toma la config de local.settings.json si no esta en el entorno. `--solo`
  * pisa a SYNC_PRODUCTOS_SOLO.
  *
- * OJO: Tango solo acepta trafico desde la Function App (5.6), asi que la
- * lectura del ERP falla desde una maquina local. Correrlo desde un entorno
- * con salida permitida.
+ * Tango solo acepta trafico desde la Function App (5.6). Desde cualquier otra
+ * maquina hay que salir por el proxy desplegado:
+ *
+ *   node scripts/syncProductos.js --proxy https://<funcion>/api/testTangoConnection
+ *
+ * o dejando `TANGO_PROXY_URL` en local.settings.json. Ver lib/proxyTango.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const sync = require('../src/lib/syncProductos');
+const tangoClient = require('../src/lib/tangoClient');
+const { fetchPorProxy } = require('../src/lib/proxyTango');
 
 function cargarConfigLocal() {
     const p = path.join(__dirname, '..', 'local.settings.json');
@@ -50,16 +55,34 @@ const log = {
     const iSolo = process.argv.indexOf('--solo');
     if (iSolo !== -1 && process.argv[iSolo + 1]) env.SYNC_PRODUCTOS_SOLO = process.argv[iSolo + 1];
 
+    // --proxy <url>: salir por la Function App en vez de hablarle a Tango de
+    // frente. Es lo unico que hace falta para correr esto desde afuera.
+    const iProxy = process.argv.indexOf('--proxy');
+    const urlProxy = (iProxy !== -1 && process.argv[iProxy + 1]) || env.TANGO_PROXY_URL || null;
+
     const config = sync.leerConfig(env);
     log.inicio('Sync articulos Tango -> HubSpot Products');
     log.datos('CONFIG', {
         'Tango URL': config.TANGO_API_URL,
+        'Salida': urlProxy ? `por el proxy (${new URL(urlProxy).host})` : 'directa (solo funciona desde Azure)',
         'Empresa': config.TANGO_COMPANY,
         'Articulos': config.SOLO_CODIGOS.length ? config.SOLO_CODIGOS.join(', ') : 'TODOS',
+        'Perfiles que se publican': config.PERFILES.length ? config.PERFILES.join(', ') : 'todos',
+        'Lista de precios': config.LISTA_PRECIOS ?? '(apagada)',
         'Modo': config.DRY_RUN ? 'DRY-RUN (no escribe)' : '*** ESCRITURA REAL ***',
     });
 
-    const r = await sync.correr({ config, log, dryRun: config.DRY_RUN });
+    const tango = urlProxy
+        ? tangoClient.crear({
+            baseUrl: config.TANGO_API_URL,
+            apiKey: config.TANGO_API_KEY,
+            company: config.TANGO_COMPANY,
+            log,
+            fetchImpl: fetchPorProxy(urlProxy),
+        })
+        : null;
+
+    const r = await sync.correr({ config, log, dryRun: config.DRY_RUN, tango });
 
     log.datos('RESUMEN', {
         'leidos de Tango': r.leidosTango,
@@ -68,6 +91,10 @@ const log = {
         'a crear': r.aCrear,
         'a actualizar': r.aActualizar,
         'sin cambios': r.sinCambios,
+        'excluidos por perfil': r.excluidosPorPerfil,
+        'precios completados': `${r.preciosCompletados} (lista ${r.listaPrecios ?? '-'}${r.nombreLista ? `, ${r.nombreLista}` : ''})`,
+        'sin precio en Tango': r.sinPrecioEnTango,
+        'precios respetados': r.preciosRespetados,
         'escritos': r.dryRun ? '(dry-run)' : r.escritos,
         'problemas de mapeo': r.problemas.length,
         'fallidos': r.fallidos.length,

@@ -107,19 +107,201 @@ test('el hash evita reescribir un articulo que no cambio', () => {
     assert.notStrictEqual(h1, h3, 'y si cambia, cambia');
 });
 
-test('el precio cargado a mano no se puede pisar: hoy porque no se emite, manana porque no es autoritativo', () => {
+test('el mapper NO emite precio: viene de otra tabla y lo agrega el sync', () => {
     // Decision de Matias 2026-08-25: los precios se cargan a mano en HubSpot.
-    // Son DOS protecciones distintas y conviene no confundirlas:
-    //
-    //  hoy      `price` no tiene origen en Tango (tango: null), asi que el
-    //           mapper ni siquiera lo incluye entre sus campos y nunca lo emite.
-    //  manana   si aparece el process de precios y alguien le pone origen, el
-    //           flag `autoritativoTango: false` hace que solo se escriba cuando
-    //           esta vacio.
+    // Desde el 2026-08-31 el precio ya tiene origen (GVA17), pero `tango` sigue
+    // en null a proposito: el mapper mapea el registro de STA11 y el precio
+    // vive en otra tabla, asi que lo inyecta lib/syncProductos en el paso 4b.
+    // Darle un origen aca haria que el mapper buscara una columna inexistente.
     const price = mapeoProductos.campos.find((c) => c.hubspot === 'price');
-    assert.strictEqual(price.tango, null, 'todavia no hay de donde sacarlo');
-    assert.strictEqual(price.autoritativoTango, false, 'y cuando lo haya, no pisa lo cargado a mano');
+    assert.strictEqual(price.tango, null, 'el precio no sale del registro de STA11');
+    assert.ok(price.origenReal, 'pero tiene que estar dicho de donde sale de verdad');
+    assert.strictEqual(price.autoritativoTango, false, 'no pisa lo cargado a mano');
 
     const m = crear(mapeoProductos);
     assert.strictEqual(m.aHubSpot(articulo('BAT250')).propiedades.price, undefined);
+});
+
+// ── La corrida entera, con precios (9.12) ────────────────────────────────
+
+const silencioso = { paso() {}, aviso() {}, datos() {}, error() {} };
+
+/**
+ * Arnes: Tango y HubSpot de mentira.
+ *
+ * `preciosPorId` es lo que devuelve GVA17 por articulo; `enHubSpot` es lo que
+ * ya existe en el portal.
+ */
+function arnes({ articulos, preciosPorId = {}, enHubSpot = [] }) {
+    const escrituras = [];
+    const getByIdLlamados = [];
+
+    const tango = {
+        async get() { return { registros: articulos, total: articulos.length }; },
+        async getByFilter() {
+            return articulos.filter((a) => preciosPorId[a.ID_STA11] !== undefined);
+        },
+        async getById(_p, id) {
+            getByIdLlamados.push(id);
+            const precio = preciosPorId[id];
+            return { GVA17: precio === undefined ? [] : [{ NRO_DE_LIS: 2, ID_GVA10: 2, PRECIO: precio }] };
+        },
+    };
+
+    const hs = {
+        async leerTodos() { return enHubSpot; },
+        async batchUpsert(_o, _k, registros) {
+            escrituras.push(...registros);
+            return { procesados: registros.length, fallidos: [] };
+        },
+    };
+
+    return { tango, hs, escrituras, getByIdLlamados };
+}
+
+const config = { TANGO_API_URL: 'x', TANGO_API_KEY: 'k', HUBSPOT_TOKEN: 't', LISTA_PRECIOS: 2, SOLO_CODIGOS: [] };
+
+test('el precio de la lista configurada llega al producto nuevo', async () => {
+    const a = arnes({ articulos: [articulo('BAT250', { ID_STA11: 187 })], preciosPorId: { 187: 70 } });
+    const r = await sync.correr({ config, log: silencioso, dryRun: false, tango: a.tango, hs: a.hs });
+
+    assert.strictEqual(r.aCrear, 1);
+    assert.strictEqual(r.preciosCompletados, 1);
+    assert.strictEqual(r.nombreLista, 'SIN IVA EN U$S', 'el resumen dice de que lista salio');
+    assert.strictEqual(a.escrituras[0].properties.price, 70);
+    assert.strictEqual(a.escrituras[0].id, 'BAT250');
+});
+
+test('un articulo sin precio en la lista se publica igual, sin price', async () => {
+    // 83% del catalogo no tiene precio cargado en Tango. Un catalogo sin
+    // precios sigue sirviendo: el renglon del pedido necesita ID_STA11.
+    const a = arnes({ articulos: [articulo('APY', { ID_STA11: 5 })], preciosPorId: {} });
+    const r = await sync.correr({ config, log: silencioso, dryRun: false, tango: a.tango, hs: a.hs });
+
+    assert.strictEqual(r.aCrear, 1);
+    assert.strictEqual(r.preciosCompletados, 0);
+    assert.strictEqual(a.escrituras[0].properties.price, undefined, 'nunca un precio vacio');
+    assert.ok(a.escrituras[0].properties.tango_id_sta11, 'pero si el ID que necesita el pedido');
+});
+
+test('un articulo SIN CAMBIOS al que recien le cargaron el precio igual lo recibe', async () => {
+    // El precio no esta en el hash, asi que el corte por hash lo saltearia y el
+    // producto se quedaria sin precio para siempre. Es el caso que obliga a
+    // decidir los candidatos ANTES del corte.
+    const art = articulo('BAT250', { ID_STA11: 187 });
+    const m = crear(mapeoProductos);
+    const hashActual = m.hash(m.aHubSpot(art).propiedades);
+
+    const a = arnes({
+        articulos: [art],
+        preciosPorId: { 187: 70 },
+        enHubSpot: [{ properties: { hs_sku: 'BAT250', tango_sync_hash: hashActual, price: '' } }],
+    });
+
+    const r = await sync.correr({ config, log: silencioso, dryRun: false, tango: a.tango, hs: a.hs });
+
+    assert.strictEqual(r.sinCambios, 0, 'dejo de estar "sin cambios" porque le falta el precio');
+    assert.strictEqual(r.aActualizar, 1);
+    assert.strictEqual(a.escrituras.length, 1);
+    assert.strictEqual(a.escrituras[0].properties.price, 70);
+    assert.strictEqual(a.escrituras[0].properties.tango_sync_hash, hashActual, 'el hash no cambia: STA11 no cambio');
+});
+
+test('si falla la lectura de precios, el catalogo se publica igual', async () => {
+    // Un problema con GVA17 no puede voltear el sync entero.
+    const a = arnes({ articulos: [articulo('BAT250', { ID_STA11: 187 })], preciosPorId: { 187: 70 } });
+    a.tango.getByFilter = async () => { throw new Error('Tango rechazo la consulta'); };
+
+    const r = await sync.correr({ config, log: silencioso, dryRun: false, tango: a.tango, hs: a.hs });
+
+    assert.strictEqual(r.aCrear, 1, 'el articulo se publica');
+    assert.strictEqual(a.escrituras[0].properties.price, undefined);
+    assert.ok(r.problemas.some((p) => /precios/.test(p)), 'y queda dicho que fallo');
+});
+
+test('con la lista apagada no se consulta ningun precio', async () => {
+    const a = arnes({ articulos: [articulo('BAT250', { ID_STA11: 187 })], preciosPorId: { 187: 70 } });
+    const r = await sync.correr({ config: { ...config, LISTA_PRECIOS: null }, log: silencioso, dryRun: false, tango: a.tango, hs: a.hs });
+
+    assert.strictEqual(r.preciosCompletados, 0);
+    assert.deepStrictEqual(a.getByIdLlamados, []);
+    assert.strictEqual(a.escrituras[0].properties.price, undefined);
+});
+
+test('la lista sale de defaults y el entorno solo la pisa', () => {
+    const base = { TANGO_API_URL: 'x', TANGO_API_KEY: 'k', HUBSPOT_TOKEN: 't' };
+    const defaults = require('../config/defaults.tango.json');
+
+    assert.strictEqual(sync.leerConfig(base).LISTA_PRECIOS, defaults.productos.listaPrecios);
+    assert.strictEqual(sync.leerConfig({ ...base, TANGO_LISTA_PRECIOS: '3' }).LISTA_PRECIOS, 3);
+    assert.strictEqual(sync.leerConfig({ ...base, TANGO_LISTA_PRECIOS: '0' }).LISTA_PRECIOS, null, '0 apaga los precios');
+});
+
+test('un precio ya cargado en HubSpot no se toca, y ni siquiera se consulta', async () => {
+    const a = arnes({
+        articulos: [articulo('BAT250', { ID_STA11: 187 })],
+        preciosPorId: { 187: 70 },
+        enHubSpot: [{ properties: { hs_sku: 'BAT250', tango_sync_hash: 'viejo', price: '99999' } }],
+    });
+
+    const r = await sync.correr({ config, log: silencioso, dryRun: true, tango: a.tango, hs: a.hs });
+    assert.strictEqual(r.preciosRespetados, 1, 'el cargado a mano se respeta');
+    assert.deepStrictEqual(a.getByIdLlamados, [], 'y no se gasta un request en algo que no se va a escribir');
+});
+
+// ── Que articulos se publican: el PERFIL ─────────────────────────────────
+
+test('los articulos de compras no van al catalogo comercial', () => {
+    // C = solo compras: barra de grilon, cinta de embalaje, manija. No se venden.
+    const r = sync.porPerfil([
+        articulo('A1', { PERFIL: 'A' }),
+        articulo('BAR', { PERFIL: 'C' }),
+        articulo('SCS', { PERFIL: 'V' }),
+        articulo('BAT300', { PERFIL: 'N' }),
+    ], ['A', 'V']);
+
+    assert.deepStrictEqual(r.registros.map((x) => x.COD_STA11), ['A1', 'SCS']);
+    assert.deepStrictEqual(r.excluidos.map((x) => x.COD_STA11), ['BAR', 'BAT300']);
+});
+
+test('los servicios SI se publican: se venden aunque no se stockeen', () => {
+    // V son Service, Reparacion, Envio a domicilio. Dejarlos afuera sacaria del
+    // catalogo cosas que Ultraschall factura.
+    const r = sync.porPerfil([articulo('SCS', { PERFIL: 'V' })], ['A', 'V']);
+    assert.strictEqual(r.registros.length, 1);
+});
+
+test('una lista de perfiles vacia publica todo: se puede volver atras sin tocar codigo', () => {
+    const todos = [articulo('A1', { PERFIL: 'A' }), articulo('BAR', { PERFIL: 'C' })];
+    assert.strictEqual(sync.porPerfil(todos, []).registros.length, 2);
+    assert.strictEqual(sync.porPerfil(todos, null).registros.length, 2);
+});
+
+test('el perfil se compara sin distinguir mayusculas ni espacios', () => {
+    const r = sync.porPerfil([articulo('A1', { PERFIL: ' a ' })], ['A', 'V']);
+    assert.strictEqual(r.registros.length, 1);
+});
+
+test('un articulo sin PERFIL no se publica: no se adivina', () => {
+    const r = sync.porPerfil([articulo('A1', { PERFIL: null })], ['A', 'V']);
+    assert.strictEqual(r.registros.length, 0);
+});
+
+test('pedir un articulo de compras dice POR QUE no se publico, no "no existe"', async () => {
+    // El mensaje viejo habria dicho que el articulo no esta en Tango, que es
+    // falso y manda a buscar el problema al lugar equivocado.
+    const a = arnes({ articulos: [articulo('BAR', { ID_STA11: 9, PERFIL: 'C' })] });
+    const r = await sync.correr({
+        config: { ...config, SOLO_CODIGOS: ['BAR'], PERFILES: ['A', 'V'] },
+        log: silencioso, dryRun: true, tango: a.tango, hs: a.hs,
+    });
+
+    assert.strictEqual(r.excluidosPorPerfil, 1);
+    assert.ok(r.problemas.some((p) => /PERFIL es 'C'/.test(p)), JSON.stringify(r.problemas));
+});
+
+test('los defaults publican A y V, que son los que se venden', () => {
+    const defaults = require('../config/defaults.tango.json');
+    assert.deepStrictEqual(defaults.productos.perfilesQueSePublican, ['A', 'V']);
+    assert.deepStrictEqual(sync.leerConfig({ TANGO_API_URL: 'x', TANGO_API_KEY: 'k', HUBSPOT_TOKEN: 't' }).PERFILES, ['A', 'V']);
 });
