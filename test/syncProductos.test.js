@@ -149,7 +149,18 @@ function arnes({ articulos, preciosPorId = {}, enHubSpot = [] }) {
     };
 
     const hs = {
-        async leerTodos() { return enHubSpot; },
+        // Devuelve SOLO las propiedades que se le piden, como HubSpot de
+        // verdad. Un fake que devuelve todo esconde el bug de no pedir una
+        // propiedad: fue exactamente lo que paso con `price`.
+        async leerTodos(_objeto, propiedades = []) {
+            const pedidas = new Set(propiedades);
+            return enHubSpot.map((r) => ({
+                ...r,
+                properties: Object.fromEntries(
+                    Object.entries(r.properties || {}).filter(([k]) => pedidas.has(k)),
+                ),
+            }));
+        },
         async batchUpsert(_o, _k, registros) {
             escrituras.push(...registros);
             return { procesados: registros.length, fallidos: [] };

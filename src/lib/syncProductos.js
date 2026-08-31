@@ -39,6 +39,18 @@ const PROP_HASH = 'tango_sync_hash';
 const PROP_SYNC = 'tango_ultima_sync';
 
 /**
+ * El precio se lee de HubSpot APARTE, y hay que acordarse de pedirlo.
+ *
+ * `mapper.camposNoAutoritativos()` no lo incluye: el mapper solo conoce los
+ * campos con origen en Tango (`c.tango && c.hubspot`) y el precio tiene
+ * `tango: null` porque viene de GVA17, no de STA11. Si no se pide explicito,
+ * `price` no vuelve en la lectura, parece vacio en TODOS los productos y el
+ * sync termina pisando los precios cargados a mano — justo lo contrario de la
+ * decision del 2026-08-25.
+ */
+const PROP_PRECIO = 'price';
+
+/**
  * Deja solo los articulos pedidos.
  *
  * `soloCodigos` vacio significa "todos". Un codigo que no existe en el ERP se
@@ -151,7 +163,7 @@ async function correr({ config, log, dryRun = true, tango: tangoInyectado = null
     const noAutoritativos = m.camposNoAutoritativos();
 
     log.paso('HUBSPOT', 'leyendo products existentes...');
-    const existentes = await hs.leerTodos('products', [claveHs, PROP_HASH, ...noAutoritativos]);
+    const existentes = await hs.leerTodos('products', [...new Set([claveHs, PROP_HASH, PROP_PRECIO, ...noAutoritativos])]);
     resumen.enHubSpot = existentes.length;
 
     const estadoPorClave = new Map();
@@ -313,4 +325,4 @@ function leerConfig(env = process.env) {
     return cfg;
 }
 
-module.exports = { correr, filtrar, porPerfil, leerConfig, leerSoloCodigos, PROP_HASH, PROP_SYNC };
+module.exports = { correr, filtrar, porPerfil, leerConfig, leerSoloCodigos, PROP_HASH, PROP_SYNC, PROP_PRECIO };
