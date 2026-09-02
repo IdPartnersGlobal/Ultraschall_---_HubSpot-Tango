@@ -38,12 +38,35 @@ const lookups = require('../lib/lookups');
  */
 const TTL_LOOKUPS_MS = 30 * 60 * 1000;
 let cacheLookups = null;
+let cacheOwners = null;
 
 async function tablas(tango, log) {
     if (cacheLookups && Date.now() - cacheLookups.cuando < TTL_LOOKUPS_MS) return cacheLookups.valor;
     const valor = await lookups.cargar(tango, log);
     cacheLookups = { valor, cuando: Date.now() };
     return valor;
+}
+
+/**
+ * La tabla de owners de HubSpot, SOLO si el filtro la necesita.
+ *
+ * Con `DEAL_TO_TANGO_SOLO_OWNER` vacio o cargado con IDs —lo normal— esto no
+ * gasta una sola llamada: devuelve null y el filtro compara IDs contra IDs.
+ * Se lee unicamente cuando el filtro trae mails, que hay que resolver.
+ */
+async function tablaDeOwners(hs, filtro, log) {
+    if (!dealToTango.soloOwner.necesitaOwners(filtro)) return null;
+    if (cacheOwners && Date.now() - cacheOwners.cuando < TTL_LOOKUPS_MS) return cacheOwners.valor;
+    try {
+        const valor = await hs.owners();
+        cacheOwners = { valor, cuando: Date.now() };
+        return valor;
+    } catch (e) {
+        // Sin la tabla, un filtro por mail no resuelve y el negocio NO entra.
+        // Es el lado seguro: la prueba no corre, en vez de correr sobre todos.
+        log.aviso('DEAL', `no se pudo leer la tabla de owners: ${e.message}. El filtro por mail no va a resolver.`);
+        return null;
+    }
 }
 
 app.storageQueue('dealWorker', {
@@ -78,6 +101,8 @@ app.storageQueue('dealWorker', {
             hs, tango,
             lookups: await tablas(tango, log),
             estrategiaNumeracion: config.TANGO_NUMERACION,
+            filtroOwner: config.SOLO_OWNER,
+            owners: await tablaDeOwners(hs, config.SOLO_OWNER, log),
             log,
             dryRun: config.DRY_RUN,
         });
@@ -124,34 +149,20 @@ app.storageQueue('dealVeneno', {
             return;
         }
 
-        // ⚠️ El texto viejo decia "volver a guardar el negocio para
-        // reintentar". Es FALSO: el webhook escucha el cambio de ETAPA y nada
-        // mas (webhooks-hsmeta.json), asi que guardar el negocio no dispara
-        // nada. Y mandaba a comercial a Application Insights, donde no entra.
-        const problemas = [{
-            campo: 'Tango',
-            motivo: 'el pedido no se pudo crear despues de varios intentos: el ERP no respondio, o rechazo la operacion',
-            comoSeArregla: 'no hay nada que cargar en el negocio. Avisar a sistemas y, cuando Tango vuelva, mover el negocio a la etapa de ganado otra vez',
-        }];
         log.error('VENENO', `negocio ${m.dealId}: agotados los reintentos`);
 
         try {
             const config = dealToTango.leerConfig();
             const hs = hubspotClient.crear({ token: config.HUBSPOT_TOKEN, log });
 
-            // Hace falta la etapa actual: es lo que evita retroceder dos veces
-            // si el mismo negocio cae en veneno mas de una vez.
-            const deal = await hs.objeto('deals', m.dealId, ['dealstage']);
-
-            await dealToTango.reportarIncompleto({
+            // Toda la decision (que se anota, el freno de owner, el retroceso)
+            // vive en la lib, que si tiene tests. Aca solo queda el cableado.
+            await dealToTango.procesarVeneno({
                 hs,
                 dealId: m.dealId,
-                etapaActual: deal?.properties?.dealstage,
-                problemas,
-                tipo: 'tecnico',
+                filtroOwner: config.SOLO_OWNER,
+                owners: await tablaDeOwners(hs, config.SOLO_OWNER, log),
                 log,
-                // Se respeta el dry-run: en ese modo no se mando nada a Tango,
-                // asi que tampoco se toca el negocio. La senal queda en el log.
                 dryRun: config.DRY_RUN,
             });
         } catch (e) {

@@ -416,6 +416,8 @@
     },
     "preciosDeArticulo": {
       "process": null,
+      "cargar": false,
+      "porQueNoSeCarga": "2026-09-02: NO es un diccionario, es una tabla de datos con una fila por articulo y por lista; no entra en el modelo de `lookups` (codigo -> ID). La leen `src/lib/preciosArticulo.js` y el sync de productos por su cuenta, con Api/GetById. Sin este `cargar: false`, `lookups.cargar` intentaba `tango.get(null)`: 3 timeouts de 240 s y despues un throw que tumbaba la carga entera. Eso dejo la Fase 4 y la Fase 2 muertas desde f900722, y el sintoma era identico al del ERP caido.",
       "processNoHaceFalta": "2026-08-31: GVA17 no tiene process propio y ya no importa. Los precios se leen por Api/GetById?process=87&id=<ID_STA11>, que devuelve 157 campos contra los 141 de Api/Get e incluye el array GVA17 completo. Es la misma rareza por la que aparecieron los contactos en GVA27. Y para saber QUIEN tiene precio sin pagar 826 requests, la subconsulta de 7.7: ID_STA11 IN (SELECT ID_STA11 FROM GVA17 WHERE ID_GVA10 = N AND PRECIO > 0).",
       "tabla": "GVA17",
       "id": "ID_GVA17",

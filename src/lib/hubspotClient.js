@@ -87,6 +87,32 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
             return pedir('/account-info/v3/details');
         },
 
+        /**
+         * La tabla de owners: id -> mail, en minuscula.
+         *
+         * HubSpot guarda en los registros el ID del owner, nunca el mail, asi
+         * que para cualquier cosa que se decida por persona hay que traer esta
+         * tabla aparte. La consumen `soloOwner` (el freno de las pruebas) y
+         * `verificarEmpresa.emailDelOwner` (owner -> vendedor de Tango).
+         *
+         * Se devuelve un Map y no un array porque las dos la usan como lookup.
+         * Son 19 owners: entra en una pagina y no hace falta paginar, pero se
+         * pagina igual — el dia que sean 120 no se va a acordar nadie.
+         */
+        async owners() {
+            const tabla = new Map();
+            let despues = null;
+            do {
+                const qs = despues ? `?limit=100&after=${encodeURIComponent(despues)}` : '?limit=100';
+                const d = await pedir(`/crm/v3/owners${qs}`);
+                for (const o of d.results || []) {
+                    if (o.email) tabla.set(String(o.id), String(o.email).toLowerCase());
+                }
+                despues = d.paging?.next?.after || null;
+            } while (despues);
+            return tabla;
+        },
+
         // ------------------------------------------------------- propiedades
 
         async propiedades(objeto) {
@@ -274,6 +300,20 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
         async pipelines(objeto) {
             const d = await pedir(`/crm/v3/pipelines/${objeto}`);
             return d.results || [];
+        },
+
+        /**
+         * Busca registros con los filtros de HubSpot, una pagina por llamada.
+         *
+         * Distinto de `leerTodos`, que trae el objeto entero: aca el filtro lo
+         * aplica HubSpot. Importa para el ensayo de negocios, que tiene que
+         * poder mirar SOLO los negocios de un owner sin leer los de comercial.
+         *
+         * La paginacion queda afuera a proposito: el que llama decide si sigue,
+         * y `after` va en el cuerpo.
+         */
+        buscar(objeto, cuerpo) {
+            return pedir(`/crm/v3/objects/${objeto}/search`, { metodo: 'POST', body: cuerpo });
         },
 
         /** Lee todos los registros de un objeto con las propiedades pedidas. */

@@ -113,3 +113,30 @@ test('todos los clientes de la muestra resuelven o fallan explicitamente', () =>
         }
     }
 });
+
+// ── El catalogo tiene que ser CARGABLE, no solo estar bien escrito ───────────
+
+test('toda auxiliar del catalogo se puede cargar: process, filas estaticas, o cargar:false', () => {
+    // La red que faltaba. El 2026-08-31 se agrego `preciosDeArticulo` al
+    // catalogo como documentacion —tiene `process: null` y ninguna fila— y
+    // `cargar()` empezo a pedirle a Tango un process nulo: 3 timeouts de 240 s
+    // y despues un throw que tumbaba la carga ENTERA.
+    //
+    // Eso dejo muertas la Fase 4 (dealWorker carga las tablas en CADA negocio)
+    // y la Fase 2 (syncClientes), durante dos dias, sin que fallara un solo
+    // test: los tests arman las tablas con `desdeRegistros` y nunca llaman a
+    // `cargar()`. Y el sintoma —timeout largo -> error— es indistinguible del
+    // ERP caido, que es la trampa que mas caro sale en este repo.
+    const auxiliares = require('../config/tango.processes.json').auxiliares;
+
+    const rotas = [];
+    for (const [nombre, def] of Object.entries(auxiliares)) {
+        if (nombre.startsWith('_')) continue;
+        const cargable = def.cargar === false || Array.isArray(def.filas) || (def.process !== null && def.process !== undefined);
+        if (!cargable) rotas.push(nombre);
+    }
+
+    assert.deepStrictEqual(rotas, [],
+        `estas auxiliares no se pueden cargar y van a tumbar lookups.cargar(): ${rotas.join(', ')}. ` +
+        'Poner `cargar: false` si no es un diccionario, o `filas` si se consiguio por otro camino.');
+});

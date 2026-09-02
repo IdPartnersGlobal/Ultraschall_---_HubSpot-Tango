@@ -1869,6 +1869,58 @@ Cuando dos filas comparten descripción, la etiqueta desambigua con el código: 
 - Contra el portal real: las **141 opciones** de los cuatro desplegables resuelven a un ID de Tango. Ni una queda huérfana.
 - `crearPropiedades clientes`: `0 a crear · 0 a parchear · 0 a convertir · 0 a rehacer`, sin sobrantes.
 
+### 9.15 El freno de las pruebas: sólo los negocios propios (2026-09-02)
+
+Pedido de Matías, antes de abrir la canilla: *"quiero que hagamos todas las pruebas de negocios-pedidos sin activar sync de empresas y que tome negocios a mi nombre solamente, para probar con precaución y a los comerciales no les haga nada."*
+
+**El riesgo era real y se midió, no se supuso.** El webhook está suscripto a `dealstage` del portal entero, así que el día del `hs project upload` cualquier negocio que un comercial mueva a "Cierre ganado" entra al circuito. Y entrar no es inofensivo: un negocio incompleto recibe una nota y **vuelve una etapa atrás** (§9.9).
+
+El ensayo con `scripts/ensayoNegocios.js --todos`, en dry-run contra el portal y el ERP reales:
+
+| | |
+|---|---|
+| negocios ganados en el portal | 24 |
+| que saldrían bien | **0** |
+| que recibirían nota + retroceso de etapa | **24 de 24** |
+| por qué | 23 no tienen empresa asociada; ninguno tiene renglones |
+
+O sea: sin el freno, la primera prueba le movía el embudo a **todos** los negocios ganados de comercial. `DEAL_TO_TANGO_ENABLED` no alcanzaba porque es todo o nada.
+
+**`DEAL_TO_TANGO_SOLO_OWNER`** (`src/lib/soloOwner.js`) es el equivalente de `SYNC_PRODUCTOS_SOLO` para la Fase 4: lista de IDs de owner y/o mails, separados por coma. Vacía —el default— el circuito toma todos los negocios, que es el estado final.
+
+**Se aplica en los DOS lugares que escriben, no en uno.** Ésa fue la parte que no era obvia:
+
+| | dónde | por qué ahí |
+|---|---|---|
+| `procesarDeal` | control **4b**, apenas se lee el Deal | antes de la primera escritura, de las lecturas caras y de `reportarIncompleto` |
+| `procesarVeneno` | antes de `reportarIncompleto` | **anota y retrocede por su cuenta**, sin pasar por `procesarDeal` |
+
+La segunda era una puerta de atrás: si el ERP se cae durante la prueba, la cola de veneno le movía la etapa a todos los negocios ganados igual. Por eso la lógica del veneno **se mudó de `functions/dealWorker` a `lib/dealToTango`**: `src/functions/` no tiene tests, y esto no es cableado, es una decisión.
+
+**Decisiones:**
+
+- **Un negocio SIN owner no entra** mientras el filtro esté puesto. El filtro dice "sólo los míos" y uno sin dueño no es de nadie; dejarlo pasar sería justo el huérfano de comercial que no se quiere tocar. Con el filtro apagado sí entra: el freno no puede convertirse en una regla nueva del sistema.
+- **Si el filtro tiene mails y la tabla de owners no se puede leer, no entra nadie.** Que la prueba no corra es preferible a que corra sobre todo el portal.
+- **Con IDs no se paga red.** `necesitaOwners()` es false salvo que el filtro traiga mails; corre en el camino caliente de cada mensaje.
+- El filtro es por **owner del NEGOCIO**, no de la empresa. El negocio de prueba es de Matías (`83855505`) y su company es de Joel: igual entra.
+
+Redes, las dos **verificadas fallando** al sacar la protección: 3 tests en `procesarDeal`, 1 en `procesarVeneno`. Más uno que falla si alguien saca `hubspot_owner_id` de `PROPS_DEAL` — sin esa propiedad el owner llega `undefined` y, con el filtro puesto, **no entraría nada** y la prueba se caería sin decir por qué.
+
+#### El bug que encontró el ensayo: la Fase 4 estaba muerta desde el 31
+
+Correr el circuito de verdad —y no un test con dobles— destapó que **`lookups.cargar()` fallaba siempre**.
+
+`preciosDeArticulo` se agregó al catálogo en `f900722` como documentación: `process: null`, sin `filas` y sin `cargar: false`. `cargar()` le pedía a Tango un process nulo → **3 timeouts de 240 s y después un throw** que tumbaba la carga entera.
+
+Lo llaman `dealWorker` (en CADA negocio) y `syncClientes`. **Las Fases 4 y 2 estaban muertas hace dos días** y nadie lo vio, porque `syncProductos` no usa `lookups` y fue lo único que se corrió el 31.
+
+Y el modo de falla es el peor posible: doce minutos colgado y después un error de red. **Indistinguible del ERP caído** — la primera prueba punta a punta habría fallado pareciendo culpa de Tango, que es la trampa que más caro sale en este repo.
+
+Por qué ningún test lo veía: los tests arman las tablas con `Lookups.desdeRegistros(fixtures)` y **nunca llaman a `cargar()`**. Es la misma lección del precio (§9.12): *una protección que nunca se ejercitó no está probada*, y su gemela — **un camino que sólo se recorre en producción no está testeado por más verde que esté la suite**.
+
+Arreglado con `cargar: false` y con la red que faltaba: un test que recorre el catálogo entero y exige que **toda auxiliar sea cargable** (tenga `process`, o `filas`, o `cargar: false`). Verificado que falla si se saca el arreglo. Carga completa: de 12 minutos a **10 segundos**.
+
+
 ## 10. Seguridad
 
 ### 🔴 10.0 URGENTE — el proxy anónimo expone SQL arbitrario del ERP a internet

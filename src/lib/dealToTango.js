@@ -5,6 +5,7 @@ const etapas = require('./etapas');
 const verificarPedido = require('./verificarPedido');
 const altaCliente = require('./altaCliente');
 const notaProblema = require('./notaProblema');
+const soloOwner = require('./soloOwner');
 const { silencioso } = require('./logger');
 const procesos = require('../../config/tango.processes.json');
 const mapeoPedidos = require('../../config/mapeo.pedidos.json');
@@ -37,7 +38,7 @@ const PROP_PROBLEMA = 'tango_pedido_problema';
 const PROP_CLIENTE = 'tango_pedido_cliente';
 
 /** Lo que hace falta leer del Deal, la company y cada linea. */
-const PROPS_DEAL = ['dealname', 'dealstage', 'pipeline', 'closedate', 'hs_object_id', PROP_NRO];
+const PROPS_DEAL = ['dealname', 'dealstage', 'pipeline', 'closedate', 'hs_object_id', 'hubspot_owner_id', PROP_NRO];
 const PROPS_COMPANY = ['codigo_tango', 'tango_id_gva14', 'tango_id_gva01', 'tango_id_gva10', 'tango_id_gva23', 'tango_id_gva24', 'tango_id_gva05', 'hubspot_owner_id'];
 const PROPS_LINEA = ['name', 'quantity', 'price', 'hs_product_id', 'hs_discount_percentage'];
 const PROPS_PRODUCTO = ['name', 'hs_sku', 'tango_id_sta11'];
@@ -88,11 +89,22 @@ function admitir({ metodo, uri, cuerpoCrudo, headers, secreto, ahora = Date.now(
  *   estado: 'creado' | 'ya-tenia' | 'incompleto' | 'dry-run'
  *   avisos: cosas que el pedido lleva y hay que saber, no cosas que falten
  */
-async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, log = silencioso, dryRun = true, ahora = new Date() }) {
+async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, filtroOwner = null, owners = null, log = silencioso, dryRun = true, ahora = new Date() }) {
     // 4. Idempotencia. Es lo primero que se lee: un Deal que ya tiene pedido no
     //    justifica ninguna otra llamada.
     const deal = await hs.objeto('deals', dealId, PROPS_DEAL);
     if (!deal) return { dealId, estado: 'incompleto', motivo: 'el negocio no existe en HubSpot' };
+
+    // 4b. El freno de las pruebas (lib/soloOwner). Va ACA —despues de leer el
+    //     Deal, que es lo unico que hace falta para decidir, y antes de TODO lo
+    //     demas— porque el riesgo no es gastar red: es que un negocio ajeno e
+    //     incompleto reciba una nota y vuelva una etapa atras (§9.9). Un
+    //     negocio que no entra se descarta sin tocarlo.
+    const permitido = soloOwner.admite({ filtro: filtroOwner, ownerId: deal.properties?.hubspot_owner_id, owners });
+    if (!permitido.admite) {
+        log.paso('DEAL', `${dealId} no se toca: ${permitido.motivo}`);
+        return { dealId, estado: 'ajeno', motivo: permitido.motivo };
+    }
 
     const yaTiene = deal.properties?.[PROP_NRO];
     if (yaTiene && String(yaTiene).trim()) {
@@ -299,6 +311,50 @@ async function reportarIncompleto({ hs, dealId, etapaActual, problemas = [], tip
 }
 
 /**
+ * Un negocio que agoto los reintentos (cola de veneno, §9.9).
+ *
+ * Vive ACA y no en `functions/dealWorker` por una razon concreta: lo que hace
+ * es una decision —anotar y retroceder la etapa de un negocio— y `src/functions`
+ * no tiene tests, son envoltorios de Azure. La fuga que esto cierra es que
+ * `dealVeneno` escribe POR SU CUENTA, sin pasar por `procesarDeal`, asi que el
+ * freno de las pruebas tenia ahi una puerta de atras: la que le mueve la etapa
+ * a un negocio de comercial cuando el ERP se cae.
+ *
+ * No reintenta nada. Solo deja constancia, y solo si el negocio entra.
+ */
+async function procesarVeneno({ hs, dealId, filtroOwner = null, owners = null, log = silencioso, dryRun = true, ahora = new Date() }) {
+    // ⚠️ El texto viejo decia "volver a guardar el negocio para reintentar". Es
+    // FALSO: el webhook escucha el cambio de ETAPA y nada mas.
+    const problemas = [{
+        campo: 'Tango',
+        motivo: 'el pedido no se pudo crear despues de varios intentos: el ERP no respondio, o rechazo la operacion',
+        comoSeArregla: 'no hay nada que cargar en el negocio. Avisar a sistemas y, cuando Tango vuelva, mover el negocio a la etapa de ganado otra vez',
+    }];
+
+    // Hace falta la etapa actual: es lo que evita retroceder dos veces si el
+    // mismo negocio cae en veneno mas de una vez. Y el owner, para el freno.
+    const deal = await hs.objeto('deals', dealId, ['dealstage', 'hubspot_owner_id']);
+
+    const permitido = soloOwner.admite({ filtro: filtroOwner, ownerId: deal?.properties?.hubspot_owner_id, owners });
+    if (!permitido.admite) {
+        log.paso('VENENO', `${dealId} no se toca: ${permitido.motivo}`);
+        return { dealId, estado: 'ajeno', motivo: permitido.motivo };
+    }
+
+    const r = await reportarIncompleto({
+        hs, dealId,
+        etapaActual: deal?.properties?.dealstage,
+        problemas,
+        tipo: 'tecnico',
+        log,
+        // Se respeta el dry-run: en ese modo no se mando nada a Tango, asi que
+        // tampoco se toca el negocio. La senal queda en el log.
+        dryRun, ahora,
+    });
+    return { dealId, estado: 'reportado', ...r };
+}
+
+/**
  * El cliente se creo, el pedido salio, y hay datos que quedaron con un default
  * o vacios (§9.10). Eso NO es un error: es trabajo pendiente de comercial.
  *
@@ -361,6 +417,12 @@ function leerConfig(env = process.env) {
         // esta versionado. El entorno la puede pisar sin desplegar (§7.6).
         TANGO_NUMERACION: env.TANGO_NUMERACION || defaults.clientes.numeracion.estrategia,
         DRY_RUN: String(env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false',
+        // El freno de las pruebas. Vacio = todos los negocios, que es el estado
+        // final; puesto = solo los de esos owners (lib/soloOwner). Lo lee el
+        // WORKER y no el webhook: el evento de HubSpot no trae el owner, asi
+        // que para filtrar en la puerta habria que leer el Deal, y eso es
+        // exactamente lo que el hook no puede hacer (riesgo 5).
+        SOLO_OWNER: soloOwner.leer(env),
     };
     const faltan = ['TANGO_API_URL', 'TANGO_API_KEY', 'HUBSPOT_TOKEN', 'HUBSPOT_CLIENT_SECRET'].filter((k) => !cfg[k]);
     if (faltan.length) throw new Error(`Faltan variables de entorno: ${faltan.join(', ')}`);
@@ -368,7 +430,8 @@ function leerConfig(env = process.env) {
 }
 
 module.exports = {
-    admitir, procesarDeal, eventosGanados, numeroDePedido, reportarIncompleto, anotarACompletar, leerConfig, leerConfigWebhook,
+    admitir, procesarDeal, procesarVeneno, eventosGanados, numeroDePedido, reportarIncompleto, anotarACompletar, leerConfig, leerConfigWebhook,
+    soloOwner,
     PROP_NRO, PROP_CREADO, PROP_PROBLEMA, PROP_CLIENTE,
     PROPS_DEAL, PROPS_COMPANY, PROPS_LINEA, PROPS_PRODUCTO,
 };

@@ -850,3 +850,128 @@ test('leerConfig exige el client secret, que no es el token', () => {
     const cfg = d2t.leerConfig({ TANGO_API_URL: 'x', TANGO_API_KEY: 'x', HUBSPOT_TOKEN: 'x', HUBSPOT_CLIENT_SECRET: 'y' });
     assert.strictEqual(cfg.DRY_RUN, true, 'el dry-run es el default');
 });
+
+// ── El freno de las pruebas: solo los negocios de ciertos owners (§9.15) ─────
+
+const MI_OWNER = '83855505';       // matias.tari@idpartners.ar
+const OWNER_COMERCIAL = '90573354'; // farancibia@ultraschall.com.ar
+
+const filtroMio = () => d2t.soloOwner.leer({ DEAL_TO_TANGO_SOLO_OWNER: MI_OWNER });
+
+test('un negocio de comercial NO se toca: ni pedido, ni propiedad, ni nota, ni etapa', async () => {
+    // Es la razon de ser del freno. El caso peligroso no es el negocio ajeno
+    // completo —ese saldria bien— sino el ajeno INCOMPLETO: sin filtro recibe
+    // una nota y vuelve una etapa atras (§9.9), o sea que la prueba le mueve el
+    // embudo a alguien que no sabe que hay una prueba corriendo.
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: null });
+    const tango = tangoFalso();
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio() });
+
+    assert.strictEqual(r.estado, 'ajeno');
+    assert.strictEqual(hs.escrituras.length, 0, 'no se le escribio NADA al negocio');
+    assert.strictEqual(hs.notas.length, 0, 'no se le dejo ninguna nota a comercial');
+    assert.strictEqual(hs.etapaFinal, null, 'no se le movio la etapa');
+    assert.strictEqual(tango.creados.length, 0, 'no se toco el ERP');
+});
+
+test('un negocio propio pasa el freno y sigue el circuito de siempre', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER } });
+    const tango = tangoFalso();
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio() });
+
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(r.nroPedido, '00012345');
+});
+
+test('sin filtro, el circuito toma cualquier negocio: el freno no cambia el comportamiento final', async () => {
+    // El estado al que se vuelve cuando la prueba termina. Si esto se rompiera,
+    // el "freno de pruebas" se habria convertido en una regla permanente.
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL } });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'creado');
+});
+
+test('el freno corre ANTES de la idempotencia y de las lecturas caras', async () => {
+    // El orden importa: un negocio ajeno no puede costar ni una asociacion.
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL, tango_nro_pedido: '00099' } });
+    let leyoAsociaciones = false;
+    const original = hs.asociaciones;
+    hs.asociaciones = async (...a) => { leyoAsociaciones = true; return original(...a); };
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false, filtroOwner: filtroMio() });
+
+    assert.strictEqual(r.estado, 'ajeno', 'gana el freno, no el "ya-tenia"');
+    assert.strictEqual(leyoAsociaciones, false);
+});
+
+test('un negocio sin owner tampoco entra mientras el filtro este puesto', async () => {
+    const hs = hsFalso({ deal: {}, company: null });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false, filtroOwner: filtroMio() });
+
+    assert.strictEqual(r.estado, 'ajeno');
+    assert.strictEqual(hs.notas.length, 0);
+});
+
+test('el filtro sale del entorno y llega por leerConfig', async () => {
+    const env = {
+        TANGO_API_URL: 'http://x', TANGO_API_KEY: 'k', HUBSPOT_TOKEN: 't', HUBSPOT_CLIENT_SECRET: 's',
+        DEAL_TO_TANGO_SOLO_OWNER: MI_OWNER,
+    };
+    const cfg = d2t.leerConfig(env);
+    assert.strictEqual(cfg.SOLO_OWNER.activo, true);
+    assert.ok(cfg.SOLO_OWNER.ids.has(MI_OWNER));
+
+    // Y sin la variable, apagado: el default no puede ser "filtrar".
+    assert.strictEqual(d2t.leerConfig({ ...env, DEAL_TO_TANGO_SOLO_OWNER: undefined }).SOLO_OWNER.activo, false);
+});
+
+test('el Deal se lee pidiendo el owner: sin eso el freno no podria decidir', () => {
+    // Falla si alguien saca la propiedad de PROPS_DEAL. Sin ella el owner
+    // llega undefined y, con el filtro puesto, NADA entraria: la prueba punta a
+    // punta se caeria sin decir por que.
+    assert.ok(d2t.PROPS_DEAL.includes('hubspot_owner_id'));
+});
+
+// ── La cola de veneno, ahora testeable (antes vivia en functions/) ───────────
+
+test('veneno: un negocio ajeno no recibe la nota tecnica ni retrocede', async () => {
+    // Era la puerta de atras del freno: `dealVeneno` anota y mueve la etapa por
+    // su cuenta, sin pasar por `procesarDeal`. Si el ERP se cae durante la
+    // prueba, esto le movia el embudo a todos los negocios ganados del portal.
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL } });
+
+    const r = await d2t.procesarVeneno({ hs, dealId: '111', dryRun: false, filtroOwner: filtroMio() });
+
+    assert.strictEqual(r.estado, 'ajeno');
+    assert.strictEqual(hs.escrituras.length, 0);
+    assert.strictEqual(hs.notas.length, 0);
+    assert.strictEqual(hs.etapaFinal, null);
+});
+
+test('veneno: un negocio propio si recibe la nota y vuelve una etapa', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER } });
+
+    const r = await d2t.procesarVeneno({ hs, dealId: '111', dryRun: false, filtroOwner: filtroMio() });
+
+    assert.strictEqual(r.estado, 'reportado');
+    assert.strictEqual(hs.notas.length, 1);
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'vuelve a Negociacion, no a otra cosa');
+    // El texto es el tecnico: aca no falta ningun dato que comercial pueda cargar.
+    assert.match(hs.notas[0].cuerpo, /ERP no respondio|no se pudo crear/i);
+});
+
+test('veneno: sin filtro se comporta como siempre', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL } });
+    const r = await d2t.procesarVeneno({ hs, dealId: '111', dryRun: false });
+    assert.strictEqual(r.estado, 'reportado');
+    assert.strictEqual(hs.notas.length, 1);
+});
+
+test('veneno: en dry-run no toca el negocio', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER } });
+    await d2t.procesarVeneno({ hs, dealId: '111', dryRun: true, filtroOwner: filtroMio() });
+    assert.strictEqual(hs.escrituras.length, 0);
+    assert.strictEqual(hs.notas.length, 0);
+});
