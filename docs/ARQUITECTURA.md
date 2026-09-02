@@ -1953,6 +1953,48 @@ Verificado después contra el portal y el ERP reales: la company de prueba se da
 ⚠️ **En dry-run el circuito corta en el alta** y no llega a armar el pedido. El alta quedó verificada; el `Api/Create` del pedido sólo se ejercita en la corrida real.
 
 
+### 9.17 Un rechazo de datos del ERP no es una caída del ERP (2026-09-02)
+
+Segunda corrida real. El alta ya lee sus datos (§9.16), llega a Tango, y muere así:
+
+```
+❌ [ALTA] el alta de 007611 fallo y el codigo NO quedo tomado: no es una colision
+Exception: Tango rechazo la consulta: El campo 'LOCALIDAD' debe ser
+           menor o igual a 20 caracteres.
+Duration=113106ms
+```
+
+La company de prueba tenía `localidad = "Ciudad Autonoma de Buenos Aires"` — **31 caracteres**, y Tango admite 20.
+
+**El dato es trivial. El problema es por dónde salía.** La excepción se propagaba desde `procesarDeal`, así que:
+
+1. la **cola** la reintentaba (at-least-once), y cada vuelta cuesta **~113 s** —101 de ellos releyendo el padrón—,
+2. después de agotar los reintentos caía en veneno,
+3. y la nota le decía a comercial *"no hay nada que cargar en el negocio: avisar a sistemas"*.
+
+Las tres están mal a la vez: **reintentar lo que nunca va a andar, gastando dos minutos por vuelta, para terminar mandando a la persona equivocada a arreglar algo que no está roto.**
+
+`tangoClient` ya distinguía el error de negocio del técnico y no lo reintentaba (`esDeNegocio`, línea 98). Pero esa distinción **se perdía al salir**: para el que está arriba, un throw es un throw.
+
+**`src/lib/rechazoTango.js`** la recupera. Un rechazo de datos se traduce en un problema con el mismo formato que cualquier campo faltante y sale por el camino de §9.9: propiedad, nota y una etapa atrás. Un ERP caído se sigue propagando, y la cola lo sigue reintentando.
+
+La nota que ve comercial pasó de *"avisar a sistemas"* a:
+
+> el campo 'localidad' no entra en Tango: admite 20 caracteres. Ahora tiene 31.
+> **Cómo se arregla:** acortar 'localidad' en la empresa a 20 caracteres o menos (por ejemplo "CABA" en lugar de "Ciudad Autonoma de Buenos Aires") y volver a mover el negocio a Cierre ganado.
+
+**Dos decisiones, y las dos son de no hacer algo:**
+
+- **No se declaran los largos máximos en el catálogo.** Se midieron sobre los 5.670 clientes reales (`RAZON_SOCI` 60, `NOM_COM` 60, `DOMICILIO` 30, `LOCALIDAD` 20, `C_POSTAL` 8, `TELEFONO_1` 30, `E_MAIL` 99) pero **el máximo observado es una cota inferior, no el límite**, y un límite declarado de menos frenaría datos válidos. **El límite lo dice Tango**, en el mismo mensaje, junto con el campo. Si mañana amplía `LOCALIDAD` a 40, el aviso dice 40 sin que nadie toque nada.
+- **No se recorta el valor.** `"Ciudad Autonoma de Buenos Aires"` cortado a 20 da `"Ciudad Autonoma de B"`: el alta saldría "bien" y el domicilio quedaría mal para siempre. Mismo criterio que la opción que el ERP no resuelve (§9.14): frena, no adivina. Hay un test que falla si alguien propone el valor recortado como solución.
+
+Dato que confirma que el límite es real y viejo: en el padrón de Tango la localidad más larga es exactamente `"Ciudad de Buenos Air"` — 20 caracteres, **truncada por el propio ERP**. Ya mordió a los usuarios de Tango antes que a nosotros.
+
+⚠️ **`Api/Get process=2117` tardó 101 s** en esta corrida. Está en el camino crítico de **cada** alta, porque la numeración correlativa necesita el último código. Es lo que hace que un reintento inútil cueste dos minutos.
+
+Redes, las cinco verificadas fallando: la traducción del rechazo, que el límite salga del ERP y no del código, que una regla desconocida igual se reporte con el texto tal cual, que **el ERP caído SÍ se propague** (la otra mitad de la distinción), y que no se proponga el valor recortado.
+
+
 ## 10. Seguridad
 
 ### 🔴 10.0 URGENTE — el proxy anónimo expone SQL arbitrario del ERP a internet

@@ -10,6 +10,7 @@ const etapas = require('../src/lib/etapas');
 const notaProblema = require('../src/lib/notaProblema');
 const verificarPedido = require('../src/lib/verificarPedido');
 const firma = require('../src/lib/firmaHubSpot');
+const { TangoError } = require('../src/lib/tangoClient');
 const { Lookups } = require('../src/lib/lookups');
 const defaults = require('../config/defaults.tango.json');
 const MAPEO_PEDIDOS = require('../config/mapeo.pedidos.json');
@@ -1068,4 +1069,49 @@ test('PROPS_COMPANY pide todo lo que el alta va a leer', () => {
     const faltan = necesita.filter((p) => !d2t.PROPS_COMPANY.includes(p));
     assert.deepStrictEqual(faltan, [],
         `el alta lee estas propiedades y PROPS_COMPANY no las pide: ${faltan.join(', ')}`);
+});
+
+// ── Un rechazo de datos del ERP no es una caida del ERP (§9.17) ──────────────
+
+const RECHAZO_LOCALIDAD = "Tango rechazo la consulta: El campo 'LOCALIDAD' debe ser menor o igual a 20 caracteres.";
+
+test('si Tango rechaza el DATO del alta, se anota y retrocede: NO se propaga', async () => {
+    // Lo que paso el 2026-09-02 en la primera alta real. La excepcion salia de
+    // procesarDeal, la COLA la reintentaba —~113 s por vuelta, porque relee el
+    // padron— y terminaba en veneno con "avisar a sistemas". Es un dato que
+    // comercial arregla en diez segundos.
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER }, company: { ...COMPANY_A_CREAR, localidad: 'Ciudad Autonoma de Buenos Aires' } });
+    const tango = tangoFalso();
+    tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
+    tango.getByFilter = async () => [];
+    tango.create = async () => { throw new TangoError(RECHAZO_LOCALIDAD); };
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(),
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.strictEqual(r.estado, 'incompleto', 'sale por el camino de los datos, no por el de las fallas');
+    assert.strictEqual(hs.notas.length, 1, 'comercial se entera en el negocio');
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'y el negocio vuelve una etapa');
+    assert.match(hs.notas[0].cuerpo, /20 caracteres/, 'la nota dice el limite que puso el ERP');
+    assert.doesNotMatch(hs.notas[0].cuerpo, /avisar a sistemas/i, 'y NO manda a sistemas: no hay nada roto');
+});
+
+test('si el ERP se CAE durante el alta, si se propaga para que la cola reintente', async () => {
+    // La otra mitad. Tratar una caida como dato la dejaria sin reintento y el
+    // negocio se quedaria con una nota que culpa a comercial.
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER }, company: COMPANY_A_CREAR });
+    const tango = tangoFalso();
+    tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
+    tango.getByFilter = async () => [];
+    tango.create = async () => { throw new TangoError('fetch failed'); };
+
+    await assert.rejects(
+        () => d2t.procesarDeal({
+            dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(),
+            estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+        }),
+        /fetch failed/);
+    assert.strictEqual(hs.notas.length, 0, 'no se anota nada: el reintento puede salir bien');
 });

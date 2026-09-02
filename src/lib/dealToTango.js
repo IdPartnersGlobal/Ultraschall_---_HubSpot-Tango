@@ -7,6 +7,7 @@ const altaCliente = require('./altaCliente');
 const verificarEmpresa = require('./verificarEmpresa');
 const notaProblema = require('./notaProblema');
 const soloOwner = require('./soloOwner');
+const rechazoTango = require('./rechazoTango');
 const { silencioso } = require('./logger');
 const procesos = require('../../config/tango.processes.json');
 const mapeoPedidos = require('../../config/mapeo.pedidos.json');
@@ -166,13 +167,32 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     let avisosDelAlta = [];
     if (v.cliente.faltaAlta) {
         log.paso('DEAL', `la empresa ${company.id} no esta creada en Tango; se da de alta antes del pedido`);
-        const alta = await altaCliente.crear({
-            tango, hs, lookups,
-            companyId: company.id,
-            propiedades: companyProps,
-            estrategia: estrategiaNumeracion,
-            log, dryRun, ahora,
-        });
+
+        let alta;
+        try {
+            alta = await altaCliente.crear({
+                tango, hs, lookups,
+                companyId: company.id,
+                propiedades: companyProps,
+                estrategia: estrategiaNumeracion,
+                log, dryRun, ahora,
+            });
+        } catch (e) {
+            // Tango puede rechazar el alta por el DATO, no por estar caido
+            // (§9.17). Eso no es una falla tecnica: reintentarlo no lo va a
+            // arreglar nunca —y cada vuelta de la cola cuesta ~113 s— y la nota
+            // de la cola de veneno mandaria a "avisar a sistemas" por algo que
+            // comercial corrige en la ficha. Sale por el camino de los datos.
+            const problema = rechazoTango.comoProblema(e, companyProps || {});
+            if (!problema) throw e; // el ERP caido si se reintenta
+
+            log.error('ALTA', `${dealId}: el ERP rechazo el dato -> ${problema.motivo}`);
+            const r = await reportarIncompleto({
+                hs, dealId, etapaActual: deal.properties?.dealstage,
+                problemas: [problema], log, dryRun, ahora,
+            });
+            return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: [problema], retroceso: r.retroceso };
+        }
 
         if (!alta.creado) {
             if (dryRun) {
@@ -208,8 +228,25 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         return { dealId, estado: 'dry-run', payload: v.payload };
     }
 
-    // 6. El pedido.
-    const respuesta = await tango.create(procesos.entidades.pedidos.process, v.payload);
+    // 6. El pedido. Mismo criterio que el alta (§9.17): si el ERP rechaza el
+    //    DATO, es trabajo de comercial y no se reintenta; si se cayo, se
+    //    propaga para que la cola lo vuelva a intentar.
+    let respuesta;
+    try {
+        respuesta = await tango.create(procesos.entidades.pedidos.process, v.payload);
+    } catch (e) {
+        const problema = rechazoTango.comoProblema(e, companyProps || {});
+        if (!problema) throw e;
+
+        log.error('PEDIDO', `${dealId}: el ERP rechazo el pedido -> ${problema.motivo}`);
+        const r = await reportarIncompleto({
+            hs, dealId, etapaActual: deal.properties?.dealstage,
+            problemas: [problema], log, dryRun, ahora,
+        });
+        // ⚠️ El CLIENTE puede haber quedado creado aunque el pedido falle. La
+        // company ya tiene su COD_GVA14, asi que el reintento no lo recrea.
+        return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: [problema], retroceso: r.retroceso, cliente: cliente.codigo };
+    }
     const nroPedido = numeroDePedido(respuesta) ?? String(deal.properties.hs_object_id ?? dealId);
 
     // 7. Escritura de vuelta. Va SIEMPRE que el alta haya salido bien: es la
