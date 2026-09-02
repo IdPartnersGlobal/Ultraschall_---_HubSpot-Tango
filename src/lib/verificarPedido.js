@@ -52,7 +52,19 @@ const DEL_CLIENTE = ['ID_GVA01', 'ID_GVA10', 'ID_GVA23', 'ID_GVA24'];
  *
  * Vacio no es un problema: es el caso normal, y va el default.
  */
-const DEL_DEAL = ['ID_STA22', 'ID_GVA43_TALON_PED'];
+const DEL_DEAL = ['ID_STA22', 'ID_GVA43_TALON_PED', 'ID_GVA43_TALONARIO_FACTURA'];
+
+/**
+ * Datos del negocio que van derecho al pedido, sin tabla que resolver (§9.18).
+ *
+ * `requerido: true` en el mapeo los vuelve bloqueantes. Hoy lo es solo la fecha
+ * de entrega, por decision de Matias (2026-09-02): la tienen 5.975 de los 6.000
+ * pedidos del padron y **tambien los dos que dejo el equipo de Tango por API**,
+ * asi que no es algo que el ERP complete despues — si falta, falta.
+ *
+ * El numero y la fecha de la OC son del cliente y no siempre existen: opcionales.
+ */
+const DEL_DEAL_DIRECTO = ['FECHA_ENTREGA', 'NRO_ORDEN_COMPRA', 'FECHA_ORDEN_COMPRA'];
 
 /** Lo que queda escrito en el pedido cuando se usa el articulo de prueba. */
 const LEYENDA_PRUEBA = 'ARTICULO DE PRUEBA - integracion de productos pendiente';
@@ -287,6 +299,26 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
 
     if (idGva14 !== null) cabecera.ID_GVA14 = idGva14;
 
+    // Los datos del negocio que van derechos al pedido (§9.18). Antes no se
+    // mandaba ninguno y el pedido quedaba en Tango sin fecha de entrega ni OC,
+    // que es lo primero que se nota al abrirlo al lado de uno de comercial.
+    for (const tangoCampo of DEL_DEAL_DIRECTO) {
+        const campo = mapeoPedidos.campos.find((c) => c.tango === tangoCampo);
+        if (!campo) continue;
+        const valor = deal[campo.hubspot];
+
+        if (vacio(valor)) {
+            if (campo.requerido) {
+                problemas.push(problema(tangoCampo, `falta '${campo.label}' en el negocio`,
+                    `cargar '${campo.label}' en el negocio y volver a moverlo a Cierre ganado`));
+            }
+            continue;
+        }
+        // Las fechas van sin zona horaria: el ERP no interpreta el offset y una
+        // fecha con 'Z' se guarda corrida un dia (§9.4).
+        cabecera[tangoCampo] = campo.tipo === 'date' ? fechaTango(valor) : String(valor).trim();
+    }
+
     // Un pedido armado con el articulo de prueba tiene que ser reconocible
     // DESDE EL ERP, sin entrar a HubSpot ni a los logs. Si no, el dia que se
     // apague este modo no hay forma de saber cuales hay que dar de baja.
@@ -314,4 +346,4 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
     };
 }
 
-module.exports = { verificar, fechaTango, resolverProductoDePrueba, deDesplegable, DEL_CLIENTE, DEL_DEAL, LEYENDA_PRUEBA };
+module.exports = { verificar, fechaTango, resolverProductoDePrueba, deDesplegable, DEL_CLIENTE, DEL_DEAL, DEL_DEAL_DIRECTO, LEYENDA_PRUEBA };

@@ -1995,6 +1995,56 @@ Dato que confirma que el límite es real y viejo: en el padrón de Tango la loca
 Redes, las cinco verificadas fallando: la traducción del rechazo, que el límite salga del ERP y no del código, que una regla desconocida igual se reporte con el texto tal cual, que **el ERP caído SÍ se propague** (la otra mitad de la distinción), y que no se proponga el valor recortado.
 
 
+### 9.18 Lo que le faltaba al pedido al lado de uno de comercial (2026-09-02)
+
+Matías abrió el pedido `00001-00013597` en Tango, lo comparó con los de comercial y marcó cinco huecos: **modelo de asiento, talonario para factura, nro de O/C, fecha de O/C y fecha de entrega.**
+
+**Mi primera lectura fue equivocada y conviene que quede escrita.** Había concluido que el asiento modelo y el talonario de factura "no son nuestros, se llenan al facturar", porque los **tres** pedidos en `ESTADO = 1` —el nuestro y los dos que dejó el equipo de Tango con Postman en 2024— los tienen en `null`. Pero esa evidencia es igual de consistente con la explicación contraria: **que el payload de la API nunca los mandó, y los tres están mal del mismo modo.** No la descarté.
+
+Lo que zanja la pregunta: **el DTO de pedido tiene 48 campos y los cinco están ahí.** Se pueden mandar; simplemente no los mandábamos.
+
+| campo | qué se hizo | evidencia |
+|---|---|---|
+| `ID_ASIENTO_MODELO_GV` | **default `1`** | unánime: 5.997/6.000 con el código 1, ninguno con otro. Y acá **código == ID**, verificado — es la excepción |
+| `ID_GVA43_TALONARIO_FACTURA` | **desplegable**, lo elige comercial | no tiene default posible (abajo) |
+| `FECHA_ENTREGA` | propiedad nueva, **bloqueante** | la tienen 5.975/6.000, y también los dos pedidos por API: se manda al crear |
+| `NRO_ORDEN_COMPRA` | propiedad nueva, opcional | dato del cliente; puede no existir |
+| `FECHA_ORDEN_COMPRA` | propiedad nueva, opcional | ídem |
+
+#### El talonario de factura no se elige por mayoría
+
+Con el talonario de *pedido* (§9.7) alcanzó la moda, porque era unánime. Acá no: **74% Factura A, 25% B, 0,8% E.**
+
+La hipótesis obvia era derivarlo de la condición de IVA. **Se cruzó contra los 6.000 pedidos y se cae:**
+
+```
+Responsable monotributista >>> FACTURA ELECTRONICA A     634
+Responsable monotributista >>> FACTURA ELECTRONICA B     508
+```
+
+Casi mitad y mitad. La categoría correlaciona pero **no determina**. Un default se equivocaría en ~1 de cada 4, y es **literalmente el mismo modo de falla** que hizo sacar el default de `condicion_iva` el 28: *un default equivocado no se nota hasta que sale mal una factura*. Sólo que acá el error **es** la factura.
+
+Decisión de Matías: **lo elige comercial**. Sin elegir, el pedido va sin talonario de factura — que es lo que hace hoy y lo que hacen los pedidos de Postman.
+
+⚠️ **Y divergen los tres, del peor modo posible:**
+
+| ve comercial | guarda | va al ERP |
+|---|---|---|
+| `FACTURA ELECTRONICA A` | `'10'` | `ID 7` |
+| `FACTURA ELECTRONICA B` | `'20'` | `ID 10` |
+| `FACTURA ELECTRONICA E` | `'30'` | `ID 13` |
+
+El código **10** es Factura A, pero el **ID** 10 es Factura B. Quien leyera el código de la pantalla del ERP y lo mandara emitiría **una factura del tipo equivocado sin que nada falle**. Se resolvió cruzando las dos vistas del mismo pedido —`Api/Get` da el código, `Api/GetById` da el ID interno—, tres muestras por talonario.
+
+#### Y otra vez la misma forma, atrapada en el acto
+
+Al agregar los cuatro campos, `PROPS_DEAL` —escrita a mano— se quedó corta **al instante**: el pedido leía `tango_fecha_entrega` y nadie la pedía. **El arnés arreglado esa misma mañana (§9.16) lo detectó en la primera corrida de tests**, en vez de esperar a que fallara en producción.
+
+`PROPS_DEAL` ahora se deriva del mapeo, igual que `PROPS_COMPANY`: todo campo `hubspot->tango` se pide solo. Hay test.
+
+Las cuatro propiedades ya existen en el portal: `deals` quedó en **10 propiedades**, `0 a crear · 0 a parchear · 0 a convertir · 0 a rehacer`.
+
+
 ## 10. Seguridad
 
 ### 🔴 10.0 URGENTE — el proxy anónimo expone SQL arbitrario del ERP a internet

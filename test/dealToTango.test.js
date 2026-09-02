@@ -317,8 +317,14 @@ const SIN_ATAR = new Map([['77', { name: 'Ecografo' }]]);
 
 const PRUEBA = require('../config/defaults.tango.json').pedidos.productoDePrueba;
 
-const verificar = (over = {}) => verificarPedido.verificar({
-    deal: { hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z' },
+/** Un Deal completo. `tango_fecha_entrega` es obligatoria desde §9.18. */
+const DEAL_BASE = { hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', tango_fecha_entrega: '2026-09-07' };
+
+// El `deal` se MEZCLA en vez de reemplazarse: si no, cada override tendria que
+// acordarse de repetir los campos obligatorios, y el test fallaria por lo que
+// no esta probando.
+const verificar = ({ deal = {}, ...over } = {}) => verificarPedido.verificar({
+    deal: { ...DEAL_BASE, ...deal },
     company: COMPANY,
     lineItems: [linea()],
     productos: PRODUCTOS,
@@ -657,7 +663,7 @@ function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], producto
         async objeto(objetoTipo, id, propiedades = []) {
             // dealstage va por defecto: el webhook SOLO llega por un ganado.
             if (objetoTipo === 'deals') {
-                return { id, properties: soloLasPedidas({ hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', ...deal }, propiedades) };
+                return { id, properties: soloLasPedidas({ hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', tango_fecha_entrega: '2026-09-07', ...deal }, propiedades) };
             }
             // El alta relee la company antes de escribirle de vuelta, para no
             // pisar lo que se cargo a mano (lib/altaCliente).
@@ -1114,4 +1120,85 @@ test('si el ERP se CAE durante el alta, si se propaga para que la cola reintente
         }),
         /fetch failed/);
     assert.strictEqual(hs.notas.length, 0, 'no se anota nada: el reintento puede salir bien');
+});
+
+// ── Lo que le faltaba al pedido al lado de uno de comercial (§9.18) ──────────
+
+test('el pedido lleva fecha de entrega, nro y fecha de OC', () => {
+    const r = verificar({ deal: {
+        tango_fecha_entrega: '2026-09-07',
+        tango_nro_orden_compra: 'OC-4471',
+        tango_fecha_orden_compra: '2026-09-01',
+    } });
+
+    assert.strictEqual(r.ok, true);
+    // Sin zona horaria: el ERP no interpreta el offset y la guardaria corrida.
+    assert.strictEqual(r.payload.FECHA_ENTREGA, '2026-09-07T00:00:00');
+    assert.strictEqual(r.payload.FECHA_ORDEN_COMPRA, '2026-09-01T00:00:00');
+    assert.strictEqual(r.payload.NRO_ORDEN_COMPRA, 'OC-4471');
+});
+
+test('sin fecha de entrega el pedido FRENA (decision de Matias 2026-09-02)', () => {
+    const r = verificar({ deal: { tango_fecha_entrega: '' } });
+    assert.strictEqual(r.ok, false);
+    const p = r.problemas.find((x) => x.campo === 'FECHA_ENTREGA');
+    assert.ok(p, 'tiene que reportarse como problema, no pasar en silencio');
+    assert.match(p.comoSeArregla, /Cierre ganado/, 'dice como reintentar: mover la etapa ES el disparador');
+});
+
+test('el nro y la fecha de OC son OPCIONALES: sin ellos el pedido sale igual', () => {
+    // Es dato del cliente y no siempre existe. Frenar por eso seria pedirle a
+    // comercial que invente una orden de compra.
+    const r = verificar({ deal: { tango_nro_orden_compra: '', tango_fecha_orden_compra: '' } });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.payload.NRO_ORDEN_COMPRA, undefined);
+    assert.strictEqual(r.payload.FECHA_ORDEN_COMPRA, undefined);
+});
+
+test('el asiento modelo va siempre, por unanimidad de los 6.000 pedidos', () => {
+    assert.strictEqual(verificar().payload.ID_ASIENTO_MODELO_GV, 1);
+});
+
+test('el talonario de FACTURA lo elige comercial y guarda el codigo, no el ID', () => {
+    // La trampa mas cara de esta tabla: el codigo 10 es FACTURA A pero su ID es
+    // 7, y el ID 10 es el de FACTURA B. Mandar el codigo emitiria una factura
+    // del tipo equivocado sin que nada falle.
+    const r = verificar({ deal: { tango_talonario_factura: '10' } });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.payload.ID_GVA43_TALONARIO_FACTURA, 7, 'FACTURA A es el ID 7, no el 10');
+
+    assert.strictEqual(verificar({ deal: { tango_talonario_factura: '20' } }).payload.ID_GVA43_TALONARIO_FACTURA, 10);
+    assert.strictEqual(verificar({ deal: { tango_talonario_factura: '30' } }).payload.ID_GVA43_TALONARIO_FACTURA, 13);
+});
+
+test('el talonario de factura NO tiene default: sin elegir, el pedido va sin el', () => {
+    // NO se elige por mayoria como el talonario de PEDIDO. Sobre 6.000 pedidos,
+    // monotributista sale FACTURA A 634 veces y B 508: la categoria de IVA
+    // correlaciona pero no determina. Un default se equivocaria en ~1 de cada 4
+    // y no se notaria hasta que sale mal una factura.
+    const r = verificar();
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.payload.ID_GVA43_TALONARIO_FACTURA, undefined);
+});
+
+test('un talonario de factura que no existe FRENA el pedido, no cae al default', () => {
+    const r = verificar({ deal: { tango_talonario_factura: '99' } });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA43_TALONARIO_FACTURA'));
+});
+
+test('cada opcion del talonario de factura resuelve a un ID que existe en el ERP', () => {
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.tango === 'ID_GVA43_TALONARIO_FACTURA');
+    for (const codigo of Object.keys(campo.opciones)) {
+        const r = verificar({ deal: { tango_talonario_factura: codigo } });
+        assert.strictEqual(r.ok, true, `el talonario '${codigo}' no resolvio: ${JSON.stringify(r.problemas)}`);
+    }
+});
+
+test('PROPS_DEAL pide todo lo que el pedido va a leer del negocio', () => {
+    // La misma red que PROPS_COMPANY (§9.16), y por la misma razon: al agregar
+    // estos cuatro campos la lista escrita a mano se quedo corta al instante.
+    const necesita = MAPEO_PEDIDOS.campos.filter((c) => c.direccion === 'hubspot->tango').map((c) => c.hubspot);
+    const faltan = necesita.filter((p) => !d2t.PROPS_DEAL.includes(p));
+    assert.deepStrictEqual(faltan, [], `el pedido lee estas propiedades y PROPS_DEAL no las pide: ${faltan.join(', ')}`);
 });

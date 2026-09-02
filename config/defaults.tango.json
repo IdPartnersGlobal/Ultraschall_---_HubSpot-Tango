@@ -5,11 +5,9 @@
     "estado": "PROPUESTA — valores tomados de los payloads de ejemplo. Hay que confirmar cuales son los correctos para Ultraschall en produccion.",
     "advertencia": "Estos valores fueron tomados de ejemplos de prueba de Postman. NO se deben usar en produccion sin validacion del area administrativa."
   },
-
   "clientes": {
     "process": 2117,
     "endpoint": "Api/Create",
-
     "numeracion": {
       "_nota": "DECISION DE MATIAS 2026-08-27, despues de meses pendiente de administracion (7.6). Tango NO autoasigna el COD_GVA14: lo elige la integracion, del mismo espacio de numeros que usan las personas.",
       "estrategia": "correlativo",
@@ -17,15 +15,55 @@
       "siColisiona": "Si un operador toma el mismo numero en Tango al mismo tiempo, el alta suma uno y reintenta hasta que entre. El reintento SOLO ocurre cuando se verifico contra el ERP que el codigo esta tomado; cualquier otro rechazo se propaga sin quemar codigos.",
       "seSobreescribeCon": "TANGO_NUMERACION en las Application Settings, si alguna vez hace falta volver a reservado sin desplegar."
     },
-
     "alta": {
       "_nota": "Que exige Tango para dar de alta un cliente, y de donde sale cada cosa. Lo lee lib/verificarEmpresa ANTES de intentar el alta, para poder decir que falta en vez de comerse un rechazo del ERP. Es el riesgo 3 del circuito: 'verificar empresa' es mas que mirar si existe el COD_GVA14.",
       "_verificadoContraElERP": "2026-08-28",
       "_sondeo": {
         "metodo": "Se manda Api/Create con {} y Tango contesta 'El campo X es requerido', UNO por vez. Se agrega X y se repite. Los rechazos NO crean nada; el primer exito si. Se creo el cliente 999950 (ID_GVA14 6419) y se borro.",
         "resultado": "Tango exige 28 campos. UNO SOLO es un dato del negocio: RAZON_SOCI. El resto es parametria con default, mas el COD_GVA14 que asignamos nosotros.",
-        "exigidos": ["COD_GVA14", "RAZON_SOCI", "ID_CATEGORIA_IVA", "ID_TIPO_DOCUMENTO_GV", "ID_GVA01", "ID_GVA05", "ID_GVA18", "EXPORTA", "SOBRE_IVA", "II_D", "II_L", "SOBRE_II", "APLICA_MORA", "TYP_FEX", "TYP_NCEX", "TYP_NDEX", "RG_3572_EMPRESA_VINCULADA_CLIENTE", "INHABILITADO_NEXO_COBRANZAS", "CLAUSULA", "DESTINO_DE", "PUBLICA_WEB_CLIENTES", "COBRA_LUNES", "COBRA_MARTES", "COBRA_MIERCOLES", "COBRA_JUEVES", "COBRA_VIERNES", "COBRA_SABADO", "COBRA_DOMINGO"],
-        "NO_exigidos": ["CUIT", "DOMICILIO", "NOM_COM", "GVA133_NOM_PAIS", "LOCALIDAD", "C_POSTAL", "TELEFONO_1", "E_MAIL", "ID_GVA10", "ID_GVA23", "ID_GVA24"],
+        "exigidos": [
+          "COD_GVA14",
+          "RAZON_SOCI",
+          "ID_CATEGORIA_IVA",
+          "ID_TIPO_DOCUMENTO_GV",
+          "ID_GVA01",
+          "ID_GVA05",
+          "ID_GVA18",
+          "EXPORTA",
+          "SOBRE_IVA",
+          "II_D",
+          "II_L",
+          "SOBRE_II",
+          "APLICA_MORA",
+          "TYP_FEX",
+          "TYP_NCEX",
+          "TYP_NDEX",
+          "RG_3572_EMPRESA_VINCULADA_CLIENTE",
+          "INHABILITADO_NEXO_COBRANZAS",
+          "CLAUSULA",
+          "DESTINO_DE",
+          "PUBLICA_WEB_CLIENTES",
+          "COBRA_LUNES",
+          "COBRA_MARTES",
+          "COBRA_MIERCOLES",
+          "COBRA_JUEVES",
+          "COBRA_VIERNES",
+          "COBRA_SABADO",
+          "COBRA_DOMINGO"
+        ],
+        "NO_exigidos": [
+          "CUIT",
+          "DOMICILIO",
+          "NOM_COM",
+          "GVA133_NOM_PAIS",
+          "LOCALIDAD",
+          "C_POSTAL",
+          "TELEFONO_1",
+          "E_MAIL",
+          "ID_GVA10",
+          "ID_GVA23",
+          "ID_GVA24"
+        ],
         "loQueCambia": "Cuatro de los NO exigidos (CUIT, DOMICILIO, NOM_COM, GVA133_NOM_PAIS) estaban marcados obligatorio:true POR SUPOSICION, y frenaban altas que el ERP habria aceptado sin chistar.",
         "ojo": "El sondeo mostro 5.4 otra vez: ID_GVA05 = 9 (el CODIGO de ZONA NO DEFINIDA) fue rechazado con 'no existe el valor correspondiente en Zonas'. El ID interno es 10. El codigo no es el ID ni en una tabla de 9 filas.",
         "politica": "DECISION DE MATIAS 2026-08-28: si la empresa no tiene ID de Tango, se crea CON LO MINIMO. Lo que Tango no exige NO frena el alta: va con default o no va, y queda como AVISO para que comercial lo complete despues. La logica no se adapta a como estan los datos hoy; los datos se adaptan a la logica.",
@@ -33,25 +71,177 @@
       },
       "_comoVerificar": "Sondeo con el oraculo de clave foranea (ARQUITECTURA.md 7.6): se manda el alta incompleta y Tango contesta que falta SIN crear el registro. Hay que correrlo desde Azure (5.6). Mientras `_verificadoContraElERP` sea false, los `obligatorio` marcados con evidencia 'payload minimo' son una suposicion tomada de docs/payloads/cliente-create.json.",
       "campos": [
-        { "tango": "COD_GVA14", "origen": "numeracion", "obligatorio": true, "evidencia": "verificado 2026-08-21 (7.6): sin el, 'La codificacion automatica no esta disponible para este tipo de apertura'" },
-        { "tango": "RAZON_SOCI", "hubspot": "razon_social", "origen": "hubspot", "resolucion": "texto", "obligatorio": true, "evidencia": "EXIGIDO por Tango, sondeado 2026-08-28. Es el UNICO dato del negocio que el ERP pide: sin esto no hay alta posible, y por eso es el unico que frena." },
-        { "tango": "NOM_COM", "hubspot": "name", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "siFalta": "razon_social", "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Ademas no puede faltar: es el nombre de fantasia (7.2) y si esta vacio se cae a la razon social." },
-        { "tango": "CUIT", "hubspot": "cuit", "origen": "hubspot", "resolucion": "documento", "obligatorio": false, "avisarSiFalta": true, "evidencia": "NO exigido por Tango (sondeado 2026-08-28): estaba como obligatorio por suposicion y frenaba altas. Cuando SI viene, va como texto con guiones (verificado 2026-08-18). OJO: que el ERP acepte un cliente sin CUIT no significa que sirva sin CUIT — no se le puede facturar. Por eso no frena pero SI avisa." },
-        { "tango": "ID_TIPO_DOCUMENTO_GV", "hubspot": "tipo_de_documento", "origen": "hubspot", "resolucion": "tipoDocumento", "obligatorio": false, "tipoSiFalta": "SIN_IDENTIFICAR", "evidencia": "payload minimo. El ID sale de lib/documento, no del codigo (5.4). Si el numero esta mal tipeado NO se corrige ni se frena el alta (decision de Matias 2026-08-25): el documento viaja tal cual y el tipo va SIN_IDENTIFICAR (ID 41), que es una fila real de TIPO_DOCUMENTO_GV." },
-        { "tango": "ID_CATEGORIA_IVA", "hubspot": "condicion_iva", "origen": "hubspot", "resolucion": "opcionLookup", "lookup": "categoriasIva", "obligatorio": true, "evidencia": "EXIGIDO por Tango (sondeado 2026-08-28). IDs confirmados por falsacion el 2026-08-24 (7.7). ES LA UNICA EXCEPCION A LA POLITICA DEL ALTA MINIMA (decision de Matias 2026-08-28): todo lo demas que falta se completa con default y se avisa, pero la categoria fiscal LA ELIGE UNA PERSONA. Determina como se le factura al cliente, y un default equivocado no se nota hasta que sale mal una factura. Llego a tener codigoSiFalta RI —la moda, 2805 de 5670— y se saco a proposito." },
-        { "tango": "DOMICILIO", "hubspot": "domicilio_del_consultorio", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "avisarSiFalta": true, "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Mismo criterio que CUIT: no frena el alta, pero se avisa para que comercial lo complete." },
-        { "tango": "LOCALIDAD", "hubspot": "localidad", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "valorSiFalta": " ", "evidencia": "MEDIDO 2026-08-25: 9 de 300 lo tienen null en el ERP, incluida ULTRASCHALL S.A. como cliente. Mismo criterio que C_POSTAL." },
-        { "tango": "C_POSTAL", "hubspot": "zip", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "valorSiFalta": " ", "evidencia": "MEDIDO 2026-08-25: 137 de 300 clientes de la muestra lo tienen null o \" \" en el ERP, asi que Tango NO lo exige. Decision de Matias: no frena el alta y va un neutro. El neutro no se invento: es el valor que el propio ERP tiene en esos 137." },
-        { "tango": "ID_GVA18", "hubspot": "provincia", "origen": "hubspot", "resolucion": "opcionInversa", "obligatorio": false, "lookup": "provincias", "codigoSiFalta": "31", "evidencia": "payload minimo. El desplegable vuelve a codigo por `opcionesInversas` y de ahi a ID por la tabla viva (7.10). Si no resuelve va COD_GVA18 = 31, \"Desconocido\": es una fila propia de GVA18 (ID_GVA18 32), no un valor inventado." },
-        { "tango": "GVA133_NOM_PAIS", "hubspot": "country", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "valorSiFalta": "ARGENTINA", "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Va ARGENTINA igual: no molesta y evita un campo vacio en el ERP." },
-        { "tango": "TELEFONO_1", "hubspot": "phone", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "evidencia": "payload minimo, pero no hay razon para frenar un alta por falta de telefono" },
-        { "tango": "E_MAIL", "hubspot": "correo_electronico", "origen": "hubspot", "resolucion": "texto", "obligatorio": false, "evidencia": "payload minimo, pero no hay razon para frenar un alta por falta de mail" },
-
-        { "tango": "ID_GVA01", "hubspot": "tango_id_gva01", "origen": "default", "hubspotOpcion": "tango_condicion_venta", "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.", "lookup": "condicionesVenta", "codigoPorDefecto": "1", "descripcion": "CONTADO", "evidencia": "moda de la muestra: 270 de 300 (90%). PROVISORIO, ver _modas." },
-        { "tango": "ID_GVA10", "hubspot": "tango_id_gva10", "origen": "default", "hubspotOpcion": "tango_lista_precios", "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.", "lookup": "listasPrecios", "codigoPorDefecto": "3", "descripcion": "CON IVA EN $", "evidencia": "moda de los que TIENEN valor: 83 de 124. En la muestra 176 de 300 lo tienen vacio, o sea que la moda real es \"sin lista\" — se manda igual por decision de Matias (2026-08-25) aunque el pedido despues elija la suya (7.9). PROVISORIO, ver _modas." },
-        { "tango": "ID_GVA23", "hubspot": "tango_id_gva23", "origen": "owner", "lookup": "vendedores", "codigoPorDefecto": "10", "descripcion": "FACUNDO", "porOwner": { "mlguelerman@ultraschall.com.ar": "08", "farancibia@ultraschall.com.ar": "10", "jbutorac@ultraschall.com.ar": "24", "jgomez@ultraschall.com.ar": "25" }, "evidencia": "FACUNDO es un vendedor real (confirmado por Matias 2026-08-25) y tiene el 63% de la cartera: es el default cuando el owner no matchea. OJO: el match NO se puede hacer por el mail de Tango — GVA23.E_MAIL esta vacio en 26 de 27 vendedores. La tabla de arriba se armo cruzando NOMBRE_VEN con los 18 owners del portal, y solo 4 de 27 cerraron. Los otros 23 hay que completarlos a mano." },
-        { "tango": "ID_GVA24", "hubspot": "tango_id_gva24", "origen": "default", "hubspotOpcion": "tango_transporte", "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.", "lookup": "transportes", "codigoPorDefecto": "01", "descripcion": "RETIRA CLIENTE", "evidencia": "moda de los que TIENEN valor: 51 de 124 (176 de 300 vacios). PROVISORIO, ver _modas." },
-        { "tango": "ID_GVA05", "hubspot": "tango_id_gva05", "origen": "default", "hubspotOpcion": "tango_zona", "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.", "lookup": "zonas", "codigoPorDefecto": "09", "descripcion": "ZONA NO DEFINIDA", "evidencia": "moda de la muestra: 138 de 300 (46%). Es la propia zona neutra del ERP. PROVISORIO, ver _modas." }
+        {
+          "tango": "COD_GVA14",
+          "origen": "numeracion",
+          "obligatorio": true,
+          "evidencia": "verificado 2026-08-21 (7.6): sin el, 'La codificacion automatica no esta disponible para este tipo de apertura'"
+        },
+        {
+          "tango": "RAZON_SOCI",
+          "hubspot": "razon_social",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": true,
+          "evidencia": "EXIGIDO por Tango, sondeado 2026-08-28. Es el UNICO dato del negocio que el ERP pide: sin esto no hay alta posible, y por eso es el unico que frena."
+        },
+        {
+          "tango": "NOM_COM",
+          "hubspot": "name",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "siFalta": "razon_social",
+          "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Ademas no puede faltar: es el nombre de fantasia (7.2) y si esta vacio se cae a la razon social."
+        },
+        {
+          "tango": "CUIT",
+          "hubspot": "cuit",
+          "origen": "hubspot",
+          "resolucion": "documento",
+          "obligatorio": false,
+          "avisarSiFalta": true,
+          "evidencia": "NO exigido por Tango (sondeado 2026-08-28): estaba como obligatorio por suposicion y frenaba altas. Cuando SI viene, va como texto con guiones (verificado 2026-08-18). OJO: que el ERP acepte un cliente sin CUIT no significa que sirva sin CUIT — no se le puede facturar. Por eso no frena pero SI avisa."
+        },
+        {
+          "tango": "ID_TIPO_DOCUMENTO_GV",
+          "hubspot": "tipo_de_documento",
+          "origen": "hubspot",
+          "resolucion": "tipoDocumento",
+          "obligatorio": false,
+          "tipoSiFalta": "SIN_IDENTIFICAR",
+          "evidencia": "payload minimo. El ID sale de lib/documento, no del codigo (5.4). Si el numero esta mal tipeado NO se corrige ni se frena el alta (decision de Matias 2026-08-25): el documento viaja tal cual y el tipo va SIN_IDENTIFICAR (ID 41), que es una fila real de TIPO_DOCUMENTO_GV."
+        },
+        {
+          "tango": "ID_CATEGORIA_IVA",
+          "hubspot": "condicion_iva",
+          "origen": "hubspot",
+          "resolucion": "opcionLookup",
+          "lookup": "categoriasIva",
+          "obligatorio": true,
+          "evidencia": "EXIGIDO por Tango (sondeado 2026-08-28). IDs confirmados por falsacion el 2026-08-24 (7.7). ES LA UNICA EXCEPCION A LA POLITICA DEL ALTA MINIMA (decision de Matias 2026-08-28): todo lo demas que falta se completa con default y se avisa, pero la categoria fiscal LA ELIGE UNA PERSONA. Determina como se le factura al cliente, y un default equivocado no se nota hasta que sale mal una factura. Llego a tener codigoSiFalta RI —la moda, 2805 de 5670— y se saco a proposito."
+        },
+        {
+          "tango": "DOMICILIO",
+          "hubspot": "domicilio_del_consultorio",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "avisarSiFalta": true,
+          "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Mismo criterio que CUIT: no frena el alta, pero se avisa para que comercial lo complete."
+        },
+        {
+          "tango": "LOCALIDAD",
+          "hubspot": "localidad",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "valorSiFalta": " ",
+          "evidencia": "MEDIDO 2026-08-25: 9 de 300 lo tienen null en el ERP, incluida ULTRASCHALL S.A. como cliente. Mismo criterio que C_POSTAL."
+        },
+        {
+          "tango": "C_POSTAL",
+          "hubspot": "zip",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "valorSiFalta": " ",
+          "evidencia": "MEDIDO 2026-08-25: 137 de 300 clientes de la muestra lo tienen null o \" \" en el ERP, asi que Tango NO lo exige. Decision de Matias: no frena el alta y va un neutro. El neutro no se invento: es el valor que el propio ERP tiene en esos 137."
+        },
+        {
+          "tango": "ID_GVA18",
+          "hubspot": "provincia",
+          "origen": "hubspot",
+          "resolucion": "opcionInversa",
+          "obligatorio": false,
+          "lookup": "provincias",
+          "codigoSiFalta": "31",
+          "evidencia": "payload minimo. El desplegable vuelve a codigo por `opcionesInversas` y de ahi a ID por la tabla viva (7.10). Si no resuelve va COD_GVA18 = 31, \"Desconocido\": es una fila propia de GVA18 (ID_GVA18 32), no un valor inventado."
+        },
+        {
+          "tango": "GVA133_NOM_PAIS",
+          "hubspot": "country",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "valorSiFalta": "ARGENTINA",
+          "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Va ARGENTINA igual: no molesta y evita un campo vacio en el ERP."
+        },
+        {
+          "tango": "TELEFONO_1",
+          "hubspot": "phone",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "evidencia": "payload minimo, pero no hay razon para frenar un alta por falta de telefono"
+        },
+        {
+          "tango": "E_MAIL",
+          "hubspot": "correo_electronico",
+          "origen": "hubspot",
+          "resolucion": "texto",
+          "obligatorio": false,
+          "evidencia": "payload minimo, pero no hay razon para frenar un alta por falta de mail"
+        },
+        {
+          "tango": "ID_GVA01",
+          "hubspot": "tango_id_gva01",
+          "origen": "default",
+          "hubspotOpcion": "tango_condicion_venta",
+          "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.",
+          "lookup": "condicionesVenta",
+          "codigoPorDefecto": "1",
+          "descripcion": "CONTADO",
+          "evidencia": "moda de la muestra: 270 de 300 (90%). PROVISORIO, ver _modas."
+        },
+        {
+          "tango": "ID_GVA10",
+          "hubspot": "tango_id_gva10",
+          "origen": "default",
+          "hubspotOpcion": "tango_lista_precios",
+          "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.",
+          "lookup": "listasPrecios",
+          "codigoPorDefecto": "3",
+          "descripcion": "CON IVA EN $",
+          "evidencia": "moda de los que TIENEN valor: 83 de 124. En la muestra 176 de 300 lo tienen vacio, o sea que la moda real es \"sin lista\" — se manda igual por decision de Matias (2026-08-25) aunque el pedido despues elija la suya (7.9). PROVISORIO, ver _modas."
+        },
+        {
+          "tango": "ID_GVA23",
+          "hubspot": "tango_id_gva23",
+          "origen": "owner",
+          "lookup": "vendedores",
+          "codigoPorDefecto": "10",
+          "descripcion": "FACUNDO",
+          "porOwner": {
+            "mlguelerman@ultraschall.com.ar": "08",
+            "farancibia@ultraschall.com.ar": "10",
+            "jbutorac@ultraschall.com.ar": "24",
+            "jgomez@ultraschall.com.ar": "25"
+          },
+          "evidencia": "FACUNDO es un vendedor real (confirmado por Matias 2026-08-25) y tiene el 63% de la cartera: es el default cuando el owner no matchea. OJO: el match NO se puede hacer por el mail de Tango — GVA23.E_MAIL esta vacio en 26 de 27 vendedores. La tabla de arriba se armo cruzando NOMBRE_VEN con los 18 owners del portal, y solo 4 de 27 cerraron. Los otros 23 hay que completarlos a mano."
+        },
+        {
+          "tango": "ID_GVA24",
+          "hubspot": "tango_id_gva24",
+          "origen": "default",
+          "hubspotOpcion": "tango_transporte",
+          "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.",
+          "lookup": "transportes",
+          "codigoPorDefecto": "01",
+          "descripcion": "RETIRA CLIENTE",
+          "evidencia": "moda de los que TIENEN valor: 51 de 124 (176 de 300 vacios). PROVISORIO, ver _modas."
+        },
+        {
+          "tango": "ID_GVA05",
+          "hubspot": "tango_id_gva05",
+          "origen": "default",
+          "hubspotOpcion": "tango_zona",
+          "notaOpcion": "Desde el 2026-09-01 comercial lo puede elegir en la ficha (9.14). El desplegable guarda el CODIGO de Tango, que es lo que lookups.resolver traduce a ID interno. Si no elige nada sigue yendo codigoPorDefecto: lo que ya andaba no cambia.",
+          "lookup": "zonas",
+          "codigoPorDefecto": "09",
+          "descripcion": "ZONA NO DEFINIDA",
+          "evidencia": "moda de la muestra: 138 de 300 (46%). Es la propia zona neutra del ERP. PROVISORIO, ver _modas."
+        }
       ],
       "_modas": {
         "_nota": "Los codigoPorDefecto de origen default salen de la MODA del padron, por decision de Matias (2026-08-25): el valor que mas se repite entre los clientes que ya existen.",
@@ -64,7 +254,6 @@
         "_ojo": "El CUIT NO es clave: 142 valores se repiten en 267 clientes (placeholders como 11111111 e instituciones con varias cuentas). Un CUIT repetido es un AVISO para que decida una persona, nunca un rechazo automatico."
       }
     },
-
     "confirmar": [
       "ID_TIPO_DOCUMENTO_GV y ID_CATEGORIA_IVA deberian derivarse del cliente real, no ser fijos",
       "ID_GVA05 (vendedor) deberia venir del owner del Deal/Company en HubSpot",
@@ -102,13 +291,26 @@
       "COBRA_DOMINGO": "N"
     },
     "desdeHubSpot": [
-      "COD_GVA14", "RAZON_SOCI", "NOM_COM", "CUIT", "DOMICILIO", "LOCALIDAD",
-      "C_POSTAL", "GVA133_NOM_PAIS", "TELEFONO_1", "E_MAIL",
-      "ID_TIPO_DOCUMENTO_GV", "ID_CATEGORIA_IVA", "ID_GVA18",
-      "ID_GVA01", "ID_GVA10", "ID_GVA23", "ID_GVA24", "ID_GVA05"
+      "COD_GVA14",
+      "RAZON_SOCI",
+      "NOM_COM",
+      "CUIT",
+      "DOMICILIO",
+      "LOCALIDAD",
+      "C_POSTAL",
+      "GVA133_NOM_PAIS",
+      "TELEFONO_1",
+      "E_MAIL",
+      "ID_TIPO_DOCUMENTO_GV",
+      "ID_CATEGORIA_IVA",
+      "ID_GVA18",
+      "ID_GVA01",
+      "ID_GVA10",
+      "ID_GVA23",
+      "ID_GVA24",
+      "ID_GVA05"
     ]
   },
-
   "pedidos": {
     "process": 19845,
     "endpoint": "Api/Create",
@@ -124,7 +326,6 @@
     "confirmar": [
       "VALIDA_STOCK = true desde el 2026-08-25 (decision de Matias). El ejemplo de Postman iba en false. Es el unico default del pedido que sigue sin evidencia del ERP: si BAT250 no tiene stock, Tango rechaza el pedido y no es culpa del circuito."
     ],
-
     "productoDePrueba": {
       "_nota": "DECISION DE MATIAS 2026-08-27. Hasta que exista la integracion de productos, ningun product de HubSpot tiene tango_id_sta11: TODOS los renglones se marcaban incompletos y el pedido no salia nunca. Con esto el renglon sale igual, con la cantidad y el precio de la linea real, pero apuntando a este articulo.",
       "activo": true,
@@ -137,12 +338,11 @@
       "noSeTapaSolo": "El pedido queda MARCADO en el ERP: LEYENDA_3 en la cabecera y el articulo que correspondia en OBSERVACIONES de cada renglon. Sin eso un pedido de prueba seria indistinguible de uno real.",
       "ojo": "VALIDA_STOCK esta en true. Si BAT250 no tiene stock en Tango el ERP puede rechazar el pedido, y no va a ser culpa del circuito."
     },
-
     "_evidenciaDefaults": {
-        "_nota": "Los cuatro salen de los pedidos reales del ERP, no de un ejemplo de Postman. Ver _comoSeVerifico.",
-        "ID_MONEDA": "1 = PES 'Pesos'. VERIFICADO 2026-08-28. Los 1.065 pedidos de 2026 son PES; el unico otro ID en uso es 2 = DOL.",
-        "ID_GVA43_TALON_PED": "1 = talonario 2 'PEDIDOS'. VERIFICADO 2026-08-28. Es el UNICO talonario de pedidos en uso: 3.234 de 3.234 pedidos de 2025 y 2026. OJO: el codigo es 2 y el ID interno es 1 — otra vez codigo != ID (5.4).",
-        "ID_STA22": "1 = deposito '01' PRODUCTO TERMINADO. VERIFICADO 2026-08-28. Es la moda real: 703 de 1.065 pedidos de 2026 (66%) y 1.283 de 2.169 de 2025 (59%). Hay 16 depositos en uso; el resto se reparte sobre todo en 36 SERVICIO TECNICO, 12 EQUIPOS VETERINARIA y 40 CONGRESOS - EXPOS. Un pedido que tenga que salir de otro deposito lo va a tener que corregir una persona en el ERP: HubSpot no sabe de depositos.",
+      "_nota": "Los cuatro salen de los pedidos reales del ERP, no de un ejemplo de Postman. Ver _comoSeVerifico.",
+      "ID_MONEDA": "1 = PES 'Pesos'. VERIFICADO 2026-08-28. Los 1.065 pedidos de 2026 son PES; el unico otro ID en uso es 2 = DOL.",
+      "ID_GVA43_TALON_PED": "1 = talonario 2 'PEDIDOS'. VERIFICADO 2026-08-28. Es el UNICO talonario de pedidos en uso: 3.234 de 3.234 pedidos de 2025 y 2026. OJO: el codigo es 2 y el ID interno es 1 — otra vez codigo != ID (5.4).",
+      "ID_STA22": "1 = deposito '01' PRODUCTO TERMINADO. VERIFICADO 2026-08-28. Es la moda real: 703 de 1.065 pedidos de 2026 (66%) y 1.283 de 2.169 de 2025 (59%). Hay 16 depositos en uso; el resto se reparte sobre todo en 36 SERVICIO TECNICO, 12 EQUIPOS VETERINARIA y 40 CONGRESOS - EXPOS. Un pedido que tenga que salir de otro deposito lo va a tener que corregir una persona en el ERP: HubSpot no sabe de depositos.",
       "_dondeSeMiranLasTablas": "config/tango.processes.json -> auxiliares.talonariosPedido y auxiliares.depositos."
     },
     "defaults": {
@@ -153,30 +353,47 @@
       "CALCULA_PROMOCIONES": false,
       "APLICA_DESCUENTO_CLIENTE": false,
       "ES_CLIENTE_HABITUAL": true,
-      "PORCENTAJE_DESCUENTO_GENERAL": 0
+      "PORCENTAJE_DESCUENTO_GENERAL": 0,
+      "ID_ASIENTO_MODELO_GV": 1
     },
     "desdeHubSpot": [
-      "ID_GVA14", "ID_GVA01", "ID_GVA10", "ID_GVA23", "ID_GVA24",
-      "FECHA_PEDIDO", "FECHA_ENTREGA", "NRO_ORDEN_COMPRA", "FECHA_ORDEN_COMPRA",
-      "OBSERVACIONES", "LEYENDA_1", "LEYENDA_2", "LEYENDA_3", "LEYENDA_4", "LEYENDA_5",
-      "RENGLON_DTO[].ID_STA11", "RENGLON_DTO[].CANTIDAD_PEDIDA",
-      "RENGLON_DTO[].PRECIO", "RENGLON_DTO[].PORCENTAJE_BONIFICACION"
-    ]
+      "ID_GVA14",
+      "ID_GVA01",
+      "ID_GVA10",
+      "ID_GVA23",
+      "ID_GVA24",
+      "FECHA_PEDIDO",
+      "FECHA_ENTREGA",
+      "NRO_ORDEN_COMPRA",
+      "FECHA_ORDEN_COMPRA",
+      "OBSERVACIONES",
+      "LEYENDA_1",
+      "LEYENDA_2",
+      "LEYENDA_3",
+      "LEYENDA_4",
+      "LEYENDA_5",
+      "RENGLON_DTO[].ID_STA11",
+      "RENGLON_DTO[].CANTIDAD_PEDIDA",
+      "RENGLON_DTO[].PRECIO",
+      "RENGLON_DTO[].PORCENTAJE_BONIFICACION"
+    ],
+    "evidencia": {
+      "ID_ASIENTO_MODELO_GV": "2026-09-02: unanime, 5.997/6.000 pedidos con el codigo 1 (Facturas y Debitos de Venta) y ninguno con otro. Codigo == ID verificado cruzando Api/Get con Api/GetById; es la excepcion, no la regla."
+    }
   },
-
   "productos": {
     "process": 87,
     "endpoint": "Api/Create",
-
-    "perfilesQueSePublican": ["A", "V"],
+    "perfilesQueSePublican": [
+      "A",
+      "V"
+    ],
     "_perfilesQueSePublican": "Que articulos van al catalogo de HubSpot, por su PERFIL en Tango. A=ambos (714), V=solo ventas (62), C=solo compras (9), N=ninguno (41). Se publican los que se VENDEN: A y V. Quedan afuera 50 de 826. Evidencia independiente: de los 133 articulos con precio en la lista 2, 131 son A y 2 son V — ningun C ni N tiene precio cargado. Lista vacia = publicar todos.",
     "_perfilesQueSePublican_confirmar": "⚠️ Los 41 de perfil N incluyen cosas que suenan vendibles (BAT300 'Bateria monitor fetal BT300', cabezales). Si Ultraschall dice que alguno se vende, la correccion es en Tango —ponerle perfil A o V— o agregar 'N' a esta lista. No se borra nada: un articulo que ya este en HubSpot se queda, simplemente deja de actualizarse.",
-
     "listaPrecios": 2,
     "_listaPrecios": "NRO_DE_LIS del que salen los precios del catalogo de HubSpot. Es el numero que dice la gente, no el ID interno: lo traduce preciosArticulo.idDeLista contra el catalogo de GVA10 (5.4). PROVISORIO al 2026-08-31 — Matias dijo 'hagamos de cuenta que va a ser la lista 2', pendiente de confirmacion de Ultraschall. Se pisa con TANGO_LISTA_PRECIOS.",
     "_listaPrecios_ojo": "La lista 2 es 'SIN IVA EN U$S': los precios estan en DOLARES y sin IVA. Un mismo articulo sale 15000 en la lista 2 y 20155200 en la lista 3 (CON IVA EN $). Si el portal de HubSpot muestra los importes en pesos, el numero va a leerse como pesos sin que nada falle. Confirmar la lista ANTES de la primera corrida completa.",
     "_precios_deDonde": "Los precios NO estan en STA11: viven en GVA17, una fila por articulo y por lista. Se leen sin el process de GVA17 — ver src/lib/preciosArticulo.js y ARQUITECTURA.md 9.12.",
-
     "confirmar": [
       "ID_MEDIDA_STOCK / VENTAS / COMPRAS = 4: confirmar que unidad es",
       "ID_GVA41_COD_IVA = 5: confirmar que alicuota de IVA corresponde",
@@ -243,9 +460,17 @@
       "SINCRONIZA_NEXO_TIENDAS": false,
       "ADMITE_VENTA_FRACCIONADA": false,
       "STA_ARTICULO_UNIDAD_COMPRA": [
-        { "ID_MEDIDA_COMPRA": 4, "EQUIVALENCIA": 1, "HABITUAL": true }
+        {
+          "ID_MEDIDA_COMPRA": 4,
+          "EQUIVALENCIA": 1,
+          "HABITUAL": true
+        }
       ]
     },
-    "desdeHubSpot": ["COD_STA11", "DESCRIPCIO", "FECHA_ALTA"]
+    "desdeHubSpot": [
+      "COD_STA11",
+      "DESCRIPCIO",
+      "FECHA_ALTA"
+    ]
   }
 }

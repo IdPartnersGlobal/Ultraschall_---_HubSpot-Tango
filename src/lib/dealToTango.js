@@ -39,8 +39,16 @@ const PROP_CREADO = 'tango_pedido_creado';
 const PROP_PROBLEMA = 'tango_pedido_problema';
 const PROP_CLIENTE = 'tango_pedido_cliente';
 
-/** Lo que hace falta leer del Deal, la company y cada linea. */
-const PROPS_DEAL = ['dealname', 'dealstage', 'pipeline', 'closedate', 'hs_object_id', 'hubspot_owner_id', PROP_NRO];
+/**
+ * Lo que hace falta leer del Deal. La parte de negocio se DERIVA del mapeo
+ * (todo campo `hubspot->tango`), por el mismo motivo que `PROPS_COMPANY`: una
+ * lista escrita a mano se queda corta y el pedido sale sin el dato, o lo
+ * reporta como faltante aunque este cargado. Ver §9.16.
+ */
+const PROPS_DEAL = [...new Set([
+    'dealname', 'dealstage', 'pipeline', 'closedate', 'hs_object_id', 'hubspot_owner_id', PROP_NRO,
+    ...mapeoPedidos.campos.filter((c) => c.direccion === 'hubspot->tango' && c.hubspot).map((c) => c.hubspot),
+])];
 /**
  * Lo que hay que leer de la company. NO se escribe a mano: la parte del alta se
  * DERIVA del catalogo (`verificarEmpresa.propiedadesQueNecesita`).

@@ -421,7 +421,15 @@
       "processNoHaceFalta": "2026-08-31: GVA17 no tiene process propio y ya no importa. Los precios se leen por Api/GetById?process=87&id=<ID_STA11>, que devuelve 157 campos contra los 141 de Api/Get e incluye el array GVA17 completo. Es la misma rareza por la que aparecieron los contactos en GVA27. Y para saber QUIEN tiene precio sin pagar 826 requests, la subconsulta de 7.7: ID_STA11 IN (SELECT ID_STA11 FROM GVA17 WHERE ID_GVA10 = N AND PRECIO > 0).",
       "tabla": "GVA17",
       "id": "ID_GVA17",
-      "columnas": ["ID_GVA17", "NRO_DE_LIS", "COD_ARTICU", "ID_STA11", "ID_GVA10", "PRECIO", "BASE"],
+      "columnas": [
+        "ID_GVA17",
+        "NRO_DE_LIS",
+        "COD_ARTICU",
+        "ID_STA11",
+        "ID_GVA10",
+        "PRECIO",
+        "BASE"
+      ],
       "verificado": "2026-08-31",
       "cardinalidad": "una fila por articulo y por lista. Un articulo puede no tener ninguna.",
       "medido": "Sobre los 826 articulos: 214 tienen precio en alguna lista y 133 en la lista 2. De esos 133, 131 son de PERFIL A y 2 de V — ningun articulo de compras tiene precio.",
@@ -547,6 +555,46 @@
           "clientes": 0
         }
       ]
+    },
+    "talonariosFactura": {
+      "process": null,
+      "processNoExiste": "2026-09-02: GVA43 no tiene process y no lo va a tener (confirmado el 31 para los talonarios de PEDIDO). Los de FACTURA se resolvieron por el mismo metodo: la columna interna de GVA21 (§7.7 aplicado a pedidos).",
+      "tabla": "GVA43",
+      "id": "ID_GVA43_TALONARIO_FACTURA",
+      "codigo": "TALONARIO_FACTURA",
+      "descripcion": "DESCRIPCION_TALONARIO_FACTURA",
+      "campoEnPedido": "TALONARIO_FACTURA",
+      "estatica": true,
+      "verificado": "2026-09-02",
+      "nota": "Cruce de las DOS vistas del mismo pedido: Api/Get da el CODIGO (TALONARIO_FACTURA) y Api/GetById da el ID interno (ID_GVA43_TALONARIO_FACTURA). Tres muestras por talonario, todas coincidentes. OJO: divergen los tres, y feo — el codigo 10 (FACTURA A) tiene ID 7, y el ID 10 es el de FACTURA B. Leer el codigo de la pantalla del ERP y mandarlo emitiria una factura del tipo equivocado sin que nada falle.",
+      "porQueNoHayDefault": "NO se elige por mayoria, a diferencia del talonario de pedido. La mayoria es FACTURA A (74%) pero NO se deriva de la categoria de IVA: sobre los 6.000 pedidos, monotributista sale A 634 veces y B 508. Un default aca se equivoca en ~1 de cada 4 y no se nota hasta que sale mal una factura — el mismo motivo por el que se saco el default de condicion_iva el 2026-08-28. Lo elige comercial (decision de Matias, 2026-09-02).",
+      "filas": [
+        {
+          "ID_GVA43_TALONARIO_FACTURA": 7,
+          "TALONARIO_FACTURA": 10,
+          "DESCRIPCION_TALONARIO_FACTURA": "FACTURA ELECTRONICA A",
+          "pedidos": 4439
+        },
+        {
+          "ID_GVA43_TALONARIO_FACTURA": 10,
+          "TALONARIO_FACTURA": 20,
+          "DESCRIPCION_TALONARIO_FACTURA": "FACTURA ELECTRONICA B",
+          "pedidos": 1514
+        },
+        {
+          "ID_GVA43_TALONARIO_FACTURA": 13,
+          "TALONARIO_FACTURA": 30,
+          "DESCRIPCION_TALONARIO_FACTURA": "FACTURA ELECTRONICA E",
+          "pedidos": 46
+        }
+      ]
+    },
+    "asientosModelo": {
+      "process": null,
+      "cargar": false,
+      "tabla": "ASIENTO_MODELO_GV",
+      "verificado": "2026-09-02",
+      "nota": "No es un desplegable ni una tabla que haga falta cargar: es un default unanime. 5.997 de 6.000 pedidos usan el codigo 1 (Facturas y Debitos de Venta) y NINGUNO usa otro. Verificado ademas que aca codigo == ID (1 -> 1) cruzando Api/Get con Api/GetById, que es lo que NO pasa en casi ninguna otra tabla. Vive en defaults.tango.json -> pedidos.defaults.ID_ASIENTO_MODELO_GV."
     }
   },
   "faltantes": {

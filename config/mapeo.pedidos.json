@@ -210,6 +210,64 @@
       "hsFieldType": "text",
       "direccion": "tango->hubspot",
       "notas": "El COD_GVA14 contra el que se cargo el pedido. Queda en el Deal porque la company puede cambiar de dueno o reasignarse despues, y entonces ya no se sabria a que cliente del ERP fue a parar."
+    },
+    {
+      "tango": "ID_GVA43_TALONARIO_FACTURA",
+      "hubspot": "tango_talonario_factura",
+      "label": "Talonario de factura (Tango)",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "direccion": "hubspot->tango",
+      "notas": "Con que talonario se va a facturar el pedido. Lo elige comercial (decision de Matias 2026-09-02). NO tiene default y NO se deriva de la condicion de IVA: sobre 6.000 pedidos, monotributista sale FACTURA A 634 veces y B 508 — casi mitad y mitad. Un default se equivocaria en ~1 de cada 4 y no se notaria hasta que sale mal una factura. Guarda el CODIGO; el ID lo resuelve lookups, y aca divergen los tres: el codigo 10 (FACTURA A) tiene ID 7, y el ID 10 es el de FACTURA B.",
+      "lookupInverso": "talonariosFactura",
+      "opciones": {
+        "10": "10",
+        "20": "20",
+        "30": "30"
+      },
+      "opcionesInversas": {
+        "10": "10",
+        "20": "20",
+        "30": "30"
+      },
+      "opcionesOrden": [
+        "10",
+        "20",
+        "30"
+      ],
+      "opcionesEtiquetas": {
+        "10": "FACTURA ELECTRONICA A",
+        "20": "FACTURA ELECTRONICA B",
+        "30": "FACTURA ELECTRONICA E"
+      }
+    },
+    {
+      "tango": "FECHA_ENTREGA",
+      "hubspot": "tango_fecha_entrega",
+      "label": "Fecha de entrega (Tango)",
+      "tipo": "date",
+      "hsFieldType": "date",
+      "direccion": "hubspot->tango",
+      "requerido": true,
+      "notas": "La fecha en que se entrega el pedido. FRENA el pedido si falta (decision de Matias 2026-09-02): la cargan en el negocio y sin ella el negocio vuelve una etapa, igual que razon social o condicion de IVA. La tienen 5.975 de 6.000 pedidos del padron, y tambien los dos pedidos de prueba que dejo el equipo de Tango por API: se puede mandar al crear, no es algo que el ERP complete despues."
+    },
+    {
+      "tango": "NRO_ORDEN_COMPRA",
+      "hubspot": "tango_nro_orden_compra",
+      "label": "Nro de orden de compra (Tango)",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "direccion": "hubspot->tango",
+      "notas": "La OC del cliente. Opcional: si no esta, el pedido sale igual. Es dato del negocio, no parametria: no hay default posible."
+    },
+    {
+      "tango": "FECHA_ORDEN_COMPRA",
+      "hubspot": "tango_fecha_orden_compra",
+      "label": "Fecha de orden de compra (Tango)",
+      "tipo": "date",
+      "hsFieldType": "date",
+      "direccion": "hubspot->tango",
+      "notas": "La fecha de la OC del cliente. Opcional, igual que el numero."
     }
   ],
   "sinMapear": {
