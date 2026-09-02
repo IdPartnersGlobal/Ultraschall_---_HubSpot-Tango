@@ -131,11 +131,30 @@ test('la provincia se resuelve al ID correcto (el bug de los 4022 clientes)', ()
 });
 
 test('GVA05 mapea a zona y GVA23 a vendedor (no al reves)', () => {
-    const c = clientes.find((x) => x.GVA05_DESCRIPCION && x.GVA23_DESCRIPCION);
+    const c = clientes.find((x) => x.GVA05_CODIGO && x.GVA23_DESCRIPCION);
     assert.ok(c);
     const { propiedades } = mapper.aHubSpot(c);
-    assert.strictEqual(propiedades.tango_zona, c.GVA05_DESCRIPCION);
+    // La zona guarda el CODIGO desde el 2026-09-01 (§9.14): es un desplegable
+    // de ENTRADA, y `lookups.resolver` traduce codigo -> ID interno, no
+    // descripcion. El vendedor sigue guardando la descripcion porque quedo
+    // como espejo: lo elige el owner, no la ficha.
+    assert.strictEqual(propiedades.tango_zona, String(c.GVA05_CODIGO).trim());
     assert.strictEqual(propiedades.tango_vendedor, c.GVA23_DESCRIPCION);
+});
+
+test('lo que guarda un desplegable de entrada es lo que el ERP sabe resolver', () => {
+    // El punto de todo el cambio: el valor guardado tiene que poder volver a
+    // Tango. Con la descripcion no vuelve — resolver('zonas', 'NOA') falla y
+    // resolver('zonas', '04') da 4.
+    const c = clientes.find((x) => x.GVA05_CODIGO && x.GVA24_CODIGO && x.GVA01_COND_VTA);
+    assert.ok(c);
+    const { propiedades } = mapper.aHubSpot(c);
+    for (const [prop, tabla] of [['tango_zona', 'zonas'], ['tango_transporte', 'transportes'], ['tango_condicion_venta', 'condicionesVenta']]) {
+        const guardado = propiedades[prop];
+        assert.ok(guardado !== undefined, `${prop} no se escribio`);
+        const r = lk.resolver(tabla, guardado, prop);
+        assert.ok(r.ok, `${prop}: el ERP no sabe resolver '${guardado}' (${r.motivo})`);
+    }
 });
 
 test('un codigo que no resuelve se omite y se reporta, no se inventa', () => {
@@ -340,11 +359,22 @@ test('los 11 codigos resuelven a su ID interno para el alta', () => {
     }
 });
 
-test('el codigo de IVA sin opcion no se pierde: queda en tango_categoria_iva', () => {
+test('una categoria de IVA que no esta en la tabla se omite y se reporta, en los DOS campos', () => {
+    // Hasta el 2026-09-01 `tango_categoria_iva` era texto libre y hacia de
+    // valvula de escape: el select quedaba vacio pero la descripcion cruda
+    // se guardaba igual. Al volverlo desplegable esa valvula se cierra, y es
+    // a proposito: una categoria que no esta en la tabla significa que Tango
+    // creo una doceava, y eso tiene que aparecer como problema y no como un
+    // texto suelto en una ficha que no mira nadie. Las 11 estan verificadas
+    // contra el ERP (2026-08-24) y falsadas contra los 5670 clientes.
     const c = { ...clientes[0], COD_CATEGORIA_IVA: 'ZZ', DESC_CATEGORIA_IVA: 'Categoria que no existe' };
-    const { propiedades } = mapper.aHubSpot(c);
+    const { propiedades, problemas } = mapper.aHubSpot(c);
     assert.strictEqual(propiedades.condicion_iva, undefined, 'el select no se escribe');
-    assert.strictEqual(propiedades.tango_categoria_iva, 'Categoria que no existe', 'pero el dato queda');
+    assert.strictEqual(propiedades.tango_categoria_iva, undefined, 'el desplegable tampoco');
+    assert.ok(
+        problemas.some((p) => p.includes('tango_categoria_iva')) && problemas.some((p) => p.includes('condicion_iva')),
+        `se pierde en silencio, y eso es lo que no puede pasar: ${JSON.stringify(problemas)}`,
+    );
 });
 
 test('un codigo sin opcion definida se omite y se reporta, no se escribe', () => {

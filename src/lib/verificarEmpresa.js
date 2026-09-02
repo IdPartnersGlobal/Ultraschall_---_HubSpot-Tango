@@ -257,6 +257,41 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
             const explicito = !vacio(decidido) ? decidido : yaCargado;
             if (!vacio(explicito)) { valores[campo.tango] = Number(explicito); continue; }
 
+            // Lo que comercial ELIGIO en el desplegable de la ficha. Va despues
+            // del ID que ya trae la company (ese vino del sync, o sea de Tango)
+            // y antes del default.
+            //
+            // Existe desde el 2026-09-01. Hasta ese dia estos campos eran texto
+            // libre, el alta no los miraba, y estaba bien porque nadie los
+            // elegia. Al volverlos desplegables pasaron a INVITAR a elegir, y
+            // una eleccion que se descarta en silencio es peor que un campo que
+            // no se puede tocar: comercial elige NOA y el cliente sale con ZONA
+            // NO DEFINIDA sin que nada avise.
+            //
+            // El desplegable guarda el CODIGO justamente para esto: `porCodigo`
+            // lo traduce a ID interno contra la tabla auxiliar. Con la
+            // descripcion no habria vuelta posible (§9.14).
+            if (campo.hubspotOpcion) {
+                const elegido = propiedades[campo.hubspotOpcion];
+                if (!vacio(elegido)) {
+                    const r = porCodigo(campo, elegido, lookups);
+                    if (r) {
+                        valores[campo.tango] = r.valor;
+                        resueltos[campo.tango] = { codigo: r.codigo, elegidoEn: campo.hubspotOpcion };
+                        continue;
+                    }
+                    // Eligio algo que el ERP no resuelve. NO se cae al default:
+                    // seria mandar el cliente con otra zona, valido, sin que
+                    // nada falle. Es el mismo criterio que el deposito (§9.8).
+                    problemas.push(problema(
+                        campo,
+                        `la opcion '${elegido}' de ${campo.hubspotOpcion} no existe en ${campo.lookup}`,
+                        `elegir otra opcion de ${campo.hubspotOpcion}, o revisar la tabla ${campo.lookup} en el ERP`,
+                    ));
+                    continue;
+                }
+            }
+
             // El vendedor sale del owner de la company. El match NO puede ser
             // por el mail de Tango: GVA23.E_MAIL esta vacio en 26 de 27
             // vendedores, asi que la equivalencia vive en el catalogo.

@@ -375,3 +375,74 @@ test('la tabla de owners del catalogo apunta a vendedores que existen', () => {
     }
     assert.ok(lk.resolver('vendedores', campo.codigoPorDefecto, 'default').ok);
 });
+
+// ── Lo que comercial elige en el desplegable (2026-09-01, §9.14) ──────────
+
+test('lo que comercial elige en el desplegable llega al ERP', () => {
+    // Hasta el 2026-09-01 estos cuatro campos eran texto libre y el alta ni los
+    // miraba: siempre mandaba el default. Al volverlos desplegables pasaron a
+    // INVITAR a elegir, y una eleccion descartada en silencio es peor que un
+    // campo que no se puede tocar — comercial elige NOA y el cliente sale con
+    // ZONA NO DEFINIDA sin que nada avise.
+    const r = verificar({
+        ...COMPANY,
+        tango_zona: '04',              // NOA
+        tango_transporte: '02',        // ULTRASCHALL
+        tango_condicion_venta: '4',    // TARJETA DE CREDITO
+        tango_lista_precios: '4',      // MEDICO SIN IVA $
+    });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.valores.ID_GVA05, 4, 'la zona elegida');
+    assert.strictEqual(r.valores.ID_GVA24, 2, 'el transporte elegido');
+    assert.strictEqual(r.valores.ID_GVA01, 4, 'la condicion de venta elegida');
+    assert.strictEqual(r.valores.ID_GVA10, 4, 'la lista elegida');
+    assert.strictEqual(r.resueltos.ID_GVA05.elegidoEn, 'tango_zona');
+});
+
+test('el codigo que se guarda no es el ID: elegir la zona 04 manda ID 4, no 4 por casualidad', () => {
+    // La trampa de siempre (5.4). En transportes divergen 35 de 41: el codigo
+    // '10' es el ID 15. Si alguien mandara el codigo como ID, el cliente
+    // quedaria con OTRO transporte y nada fallaria.
+    const fila = fixture('transportes').find((x) => x.COD_GVA24 === '10');
+    assert.ok(fila && fila.ID_GVA24 !== 10, 'el fixture dejo de tener un caso donde divergen');
+    const r = verificar({ ...COMPANY, tango_transporte: '10' });
+    assert.strictEqual(r.valores.ID_GVA24, fila.ID_GVA24);
+    assert.notStrictEqual(r.valores.ID_GVA24, 10);
+});
+
+test('sin elegir nada sigue yendo el default de siempre', () => {
+    const r = verificar(COMPANY);
+    assert.strictEqual(r.valores.ID_GVA05, 10, 'ZONA NO DEFINIDA');
+    assert.strictEqual(r.valores.ID_GVA24, 1, 'RETIRA CLIENTE');
+    assert.strictEqual(r.valores.ID_GVA01, 1, 'CONTADO');
+    assert.strictEqual(r.resueltos.ID_GVA05.porDefecto, true);
+});
+
+test('una opcion que el ERP no resuelve FRENA el alta, no cae al default', () => {
+    // Caer al default seria dar de alta el cliente en otra zona: valido, sin
+    // que nada falle, y nadie se entera. Mismo criterio que el deposito (9.8).
+    const r = verificar({ ...COMPANY, tango_zona: '99' });
+    assert.strictEqual(r.ok, false);
+    assert.ok(
+        r.problemas.some((p) => p.campo === 'ID_GVA05' && /tango_zona/.test(p.motivo)),
+        `deberia frenar por la zona: ${JSON.stringify(r.problemas)}`,
+    );
+    assert.strictEqual(r.valores.ID_GVA05, undefined, 'no se manda nada');
+});
+
+test('el ID que ya trae la company le gana al desplegable', () => {
+    // Si la company vino del sync, tango_id_gva05 es el dato de Tango. El
+    // desplegable esta para las que se cargan a mano.
+    const r = verificar({ ...COMPANY, tango_id_gva05: 7, tango_zona: '04' });
+    assert.strictEqual(r.valores.ID_GVA05, 7);
+});
+
+test('el vendedor NO lo decide el desplegable: sigue saliendo del owner', () => {
+    // Decision de Matias (2026-09-01): tango_vendedor queda como espejo de
+    // Tango. Por eso es el unico de los seis que guarda la descripcion y no el
+    // codigo, y el unico sin `hubspotOpcion` en el catalogo.
+    const r = verificar({ ...COMPANY, tango_vendedor: 'DAVID' });
+    assert.strictEqual(r.valores.ID_GVA23, 10, 'FACUNDO, el default por owner');
+    const campo = verificarEmpresa.ALTA.campos.find((c) => c.tango === 'ID_GVA23');
+    assert.strictEqual(campo.hubspotOpcion, undefined);
+});

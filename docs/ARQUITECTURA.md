@@ -1705,9 +1705,169 @@ El sync ahora publica **`A` y `V`** y deja `C` y `N` afuera: 50 de 826. Es el mi
 
 **`DESC_ADIC`** iba sola y cubría el 13%. `OBSERVACIONES` cubre el 33%, y **223 artículos tienen observaciones sin descripción adicional**: mapear sólo `DESC_ADIC` dejaba a esos 223 sin ninguna descripción en HubSpot. Ahora se concatenan (41% de cobertura) y no se repite el texto cuando una es prefijo de la otra.
 
-**`tango_perfil` se dejó como texto a propósito.** Documentar sus cuatro valores como `opciones` la habría convertido en `enumeration`, y eso no se arregla con un PATCH: hay que borrar y recrear, lo que borra el valor en todos los registros. Los valores quedan en el mapeo, en `valores`. Ver la regla de [[nunca-borrar-propiedades-hubspot]].
+~~**`tango_perfil` se dejó como texto a propósito.** Documentar sus cuatro valores como `opciones` la habría convertido en `enumeration`, y eso no se arregla con un PATCH: hay que borrar y recrear, lo que borra el valor en todos los registros.~~
+
+⚠️ **Eso es falso y se corrigió el 2026-09-01: HubSpot SÍ deja pasar una propiedad de `string` a `enumeration` con un PATCH.** La premisa nunca se había probado. `tango_perfil` es desde entonces un desplegable con las cuatro opciones, sin haber borrado nada. Ver §9.13.
 
 Rederivar: `node scripts/tablaDepositos.js` no aplica acá; el sync es `SYNC_PRODUCTOS_ENABLED` + `SYNC_DRY_RUN`. Una corrida completa en dry-run contra los datos reales da hoy: **826 leídos · 50 excluidos por perfil · 749 a crear · 27 a actualizar · 133 precios · 0 problemas**.
+
+### 9.13 Once campos que pedían desplegable y eran texto libre (2026-09-01)
+
+Pedido de Matías, mirando la ficha de una empresa: *"si en Tango es un campo de opción desplegable, en HubSpot tiene que ser lo mismo; si al comercial le dejás el campo libre va a poner lo que se le cante"*.
+
+No era un campo: eran **once**. Todos declaraban `hsFieldType: "select"` en el mapeo desde el 2026-08-14, ninguno declaraba `opciones`, y `tipoHubSpot()` los **degrada a texto en silencio** cuando faltan. La degradación existe por una razón buena —HubSpot rechaza crear una `enumeration` sin `options`, así que degradar evita voltear el alta entera— pero nadie se enteraba: `planificar()` los comparaba contra la spec **ya degradada**, o sea que el informe decía `0 a rehacer` y todo parecía en orden. En `tango_categoria_iva` el mapeo hasta lo dejaba escrito: *"Generar las opciones del select desde los valores distintos del ERP"*.
+
+| objeto | propiedad | de dónde salen las opciones |
+|---|---|---|
+| companies | `tango_categoria_iva` | CATEGORIA_IVA · 11 |
+| companies | `tango_condicion_venta` | GVA01 · 86 filas → 85 opciones |
+| companies | `tango_lista_precios` | GVA10 · 5 |
+| companies | `tango_zona` | GVA05 · 9 |
+| companies | `tango_vendedor` | GVA23 · 27, **2 ocultas** |
+| companies | `tango_transporte` | GVA24 · 41 |
+| products | `tango_alicuota_iva` | GVA41 · 9 |
+| products | `tango_perfil` | A/V/N/C |
+| products | `tango_remitible` | S/N |
+| products | `tango_unidad_venta` | dominio de los 826 · 2 |
+| products | `tango_clasificacion` | dominio de los 826 · 11, **multivalor** |
+
+Los que **sí** toca comercial ya eran desplegables: `condicion_iva`, `tipo_de_documento`, `provincia`, `tango_deposito`, `tango_talonario`.
+
+⚠️ **Esta sección cuenta cómo dejaron de ser texto libre. Lo que guardan cambió el mismo día: ver §9.14.** Cuatro de estos once (`tango_zona`, `tango_transporte`, `tango_condicion_venta`, `tango_lista_precios`) pasaron a guardar el **código** de Tango en vez de la descripción, porque con la descripción la elección de comercial no podía volver al ERP.
+
+#### Lo que hizo falta sondear, porque estaba supuesto
+
+Cuatro sondeos contra el portal real, con propiedades descartables creadas y borradas. Ninguna propiedad de verdad se tocó hasta tener las cuatro respuestas.
+
+| # | pregunta | respuesta |
+|---|---|---|
+| 1 | ¿Se puede pasar `string/text` a `enumeration/select` con un PATCH? | **Sí.** 201 al crearla de texto, 200 al convertirla. `type` NO es inmutable |
+| 2 | ¿Qué pasa con un valor ya cargado que no está entre las opciones? | **Sobrevive tal cual.** No se borra ni se vacía |
+| 3 | Ya convertida, ¿se puede escribir un valor fuera de la lista? | **No.** 400 `INVALID_OPTION` |
+| 4 | Una opción con `hidden: true`, ¿se puede escribir por API? | **Sí.** No se ofrece en el desplegable y el sync la escribe igual |
+
+**El (1) es el hallazgo.** El código daba por sentado que `type` era inmutable como `hasUniqueValue`, y esa suposición —que nunca se había probado— es la razón por la que `tango_perfil` se había dejado de texto a propósito el 31 (§9.12): se creía que hacerlo desplegable exigía borrar la propiedad, y eso choca con la regla de no borrar ninguna. **No hubo que borrar nada.** `planificar()` tiene ahora un bucket nuevo, `aConvertir`, y la lista de saltos permitidos (`CONVERTIBLE`) se amplía **sondeando, no razonando**: el costo de equivocarse es borrar datos.
+
+#### Qué entra en cada lista
+
+**La tabla completa de Tango, no los valores en uso** (decisión de Matías). Los dados de baja entran igual, con `hidden: true`. La diferencia con el desplegable de depósito (§9.8), donde el de baja se saca y listo, es **quién escribe el campo**:
+
+- `tango_deposito` lo **elige comercial**. Nadie tiene ese valor guardado: sacar una fila no rompe nada.
+- estos once los **escribe el sync**. Si un cliente tiene asignado un vendedor inhabilitado y ese valor no está entre las opciones, HubSpot contesta 400 y —por el (3)— voltea la tanda de 100 entera, no el registro.
+
+El (4) es lo que permite las dos cosas a la vez: no ofrecerlo, y poder escribirlo.
+
+**Falsación sobre el padrón entero** (5.670 clientes, no `clientes-muestra.json`): cero valores fuera de las tablas en los seis campos de cliente. Sobre los 826 artículos, cero en los cinco de producto. Y los 11 campos estaban **vacíos en el portal** —el sync nunca corrió en escritura— así que la conversión no tenía ningún dato que arriesgar.
+
+#### Tres cosas que aparecieron por el camino
+
+**`opciones` no es una lista suelta: es una tabla de traducción indexada por el dato crudo de Tango** (`mapper.js:319`). Si la clave no está, el mapper omite el campo y lo reporta, en vez de escribir algo que HubSpot va a rechazar — o sea que el mecanismo de protección ya existía. Generar las claves con el ID de la tabla (`ID_GVA05`) dejó `'NEA'` sin opción y el mapper empezó a omitir la zona de todos los clientes: tres tests en rojo. La clave tiene que ser **el valor que manda Tango**, así que en estos once el mapa es identidad y funciona como lista blanca.
+
+**`checkbox` ya estaba tomado.** En el mapeo significa la casilla booleana (`mapeo.contactos` lo usa así para `DEFECTO` y `PAGADOR_HABITUAL`), y esa rama de `tipoHubSpot` corre primero. Usarlo para el multivalor hacía que `tango_clasificacion` saliera `booleancheckbox` y sus 11 opciones se reemplazaran por Sí/No. El multivalor se declara **`multiselect`** en el mapeo y sale como `enumeration/checkbox` en HubSpot. Hace falta porque Tango manda hasta tres clasificaciones en un mismo campo separadas por `;` —el mismo separador que usa HubSpot—, y con `select` los 43 artículos que tienen más de una se caen.
+
+**Bug en el PATCH de opciones.** `aParchear` reconstruía las opciones viejas con `hidden: false` fijo. Como el sync es idempotente, bastaba con que apareciera una opción nueva para que **volvieran a la lista todos los dados de baja**, sin que nada fallara. Ahora `hidden` se preserva de lo que hay en el portal salvo que el mapeo diga otra cosa, y una visibilidad distinta es por sí sola motivo de parche.
+
+#### Una válvula de escape que se cerró a propósito
+
+`tango_categoria_iva` era texto libre y hacía de red: cuando `condicion_iva` no resolvía el código, el select quedaba vacío pero la descripción cruda se guardaba igual. Al volverlo desplegable esa red desaparece, y es deliberado — una categoría fuera de la tabla significa que Tango creó una doceava, y eso tiene que aparecer como **problema reportado** y no como un texto suelto en una ficha que no mira nadie. Las 11 están verificadas contra el ERP (2026-08-24) y falsadas contra los 5.670.
+
+#### La red, y por qué no es el `if`
+
+La degradación a texto sigue siendo la salida segura y no se sacó. Lo que impide que vuelva a pasar es un **test que falla si algún mapeo declara `select` o `multiselect` sin `opciones`** — verificado que falla si se le saca las opciones a un campo. Hay además tests que fallan si un inhabilitado deja de estar oculto, si una opción no existe en la tabla de Tango de la que dice salir, si el PATCH des-oculta, y si una conversión de texto a desplegable vuelve a caer en `aRehacer`.
+
+#### Rederivable
+
+```
+node scripts/opcionesDesplegables.js                  # informe, no escribe
+node scripts/opcionesDesplegables.js --proxy <url>    # relee las tablas del ERP primero
+node scripts/opcionesDesplegables.js --aplicar        # escribe config/mapeo.*.json
+node scripts/crearPropiedades.js clientes --aplicar   # y productos
+```
+
+Estado al 2026-09-01: companies **32** propiedades, products **14**, deals **6**. En los tres objetos, `0 a crear · 0 a parchear · 0 a convertir · 0 a rehacer`, **sin haber borrado nada**.
+
+⚠️ **`GVA41` mezcla alícuotas de IVA con impuestos internos y percepciones.** `tango_alicuota_iva` ofrece las 9 filas de la tabla, así que en la lista aparecen `IMP. INTERNO NULO` y `PERCEP. INGR. BRUTOS`, que no son alícuotas de IVA. En los 826 artículos sólo se usan tres (`IVA 10,5%`, `IVA 21%`, `IVA 0%`). Si molesta, se ocultan con `opcionesOcultas` — es un renglón en el generador, no hay que borrar la propiedad.
+
+### 9.14 Que elegir sirva para algo: el desplegable llega al ERP (2026-09-01)
+
+Pregunta de Matías, apenas quedaron los desplegables de §9.13: *"¿dejaste el campo interno correctamente y el servidor los toma bien?"*.
+
+**No.** Y la prueba es corta. Una company cargada a mano, comercial elige cuatro cosas, y esto es lo que salía para Tango:
+
+| comercial eligió | debía viajar | viajaba |
+|---|---|---|
+| zona `NOA` | `ID_GVA05 = 4` | **10** — ZONA NO DEFINIDA |
+| vendedor `DAVID` | `ID_GVA23 = 2` | **10** — FACUNDO |
+| transporte `ULTRASCHALL` | `ID_GVA24 = 2` | **1** |
+| cond. de venta `TARJETA DE CREDITO` | `ID_GVA01 = 4` | **1** — CONTADO |
+
+Con `ok: true`, cero problemas y cero avisos. **Las cuatro elecciones se descartaban en silencio.**
+
+Mientras fueron texto libre eso estaba bien: nadie los completaba y el alta usaba el default. Al volverlos desplegables pasaron a **invitar** a elegir, y una elección que se descarta es peor que un campo que no se puede tocar — el cliente sale con otra zona, válido, y nadie se entera.
+
+#### Las dos causas
+
+**El alta no los miraba.** En `defaults.tango.json → clientes.alta.campos` estaban con `origen: default` (zona, transporte, condición de venta, lista) y `origen: owner` (vendedor).
+
+**El valor guardado era la descripción, y `lookups.resolver` traduce CÓDIGOS:**
+
+```
+resolver('zonas', 'NOA') -> FALLA: el codigo 'NOA' no existe en GVA05
+resolver('zonas', '04')  -> ID 4
+```
+
+Y la descripción **no siempre identifica la fila**: `CHEQUE 45 DIAS FF` está dos veces en GVA01, con códigos 13 y 68.
+
+#### La forma correcta son los tres estratos, otra vez
+
+Es exactamente lo del depósito (§9.8), aplicado ahora a las companies:
+
+| | |
+|---|---|
+| lo que ve comercial | `NOA` |
+| lo que se guarda | `'04'` (el `COD_GVA05`) |
+| lo que va al ERP | `ID_GVA05 = 4` |
+
+Para que el valor guardado **sea** el código sin ninguna traducción en el medio, el mapeo dejó de leer la columna de la descripción y pasa a leer la del código:
+
+| propiedad | antes | ahora |
+|---|---|---|
+| `tango_zona` | `GVA05_DESCRIPCION` | `GVA05_CODIGO` |
+| `tango_transporte` | `GVA24_DESCRIPCION` | `GVA24_CODIGO` |
+| `tango_condicion_venta` | `GVA01_DESC_COND` | `GVA01_COND_VTA` |
+| `tango_lista_precios` | `GVA10_NOMBRE_LIS` | `GVA10_NRO_DE_LIS` |
+
+Cuando dos filas comparten descripción, la etiqueta desambigua con el código: `CHEQUE 45 DIAS FF (13)` y `CHEQUE 45 DIAS FF (68)`. Sin eso comercial ve dos renglones idénticos y no puede saber cuál eligió.
+
+#### Los que NO pasaron a ser inputs, y por qué
+
+- **`tango_vendedor`** — decisión de Matías: lo sigue decidiendo el owner (`origen: owner`, FACUNDO de default). Queda como espejo, y por eso es el único de los seis que guarda la descripción.
+- **`tango_categoria_iva`** — `condicion_iva` ya es el input de IVA y funciona. Dos desplegables escribiendo el mismo campo del ERP es peor que uno decorativo. Queda como espejo, y de paso se aclara la ficha: una lista elige, la otra informa.
+
+#### La cadena de precedencia
+
+`verificarEmpresa` ya elegía "lo más específico que haya". El desplegable se insertó en el medio, no arriba de todo:
+
+1. `decididos` — lo que administración fijó para esa corrida
+2. **`tango_id_gvaNN`** ya cargado en la company — vino del sync, o sea de Tango
+3. **`tango_zona` / `tango_transporte` / … — lo que eligió comercial** ← nuevo
+4. `codigoPorDefecto` del catálogo
+
+**Una opción que el ERP no resuelve FRENA el alta, no cae al default.** Caer al default sería dar de alta el cliente en otra zona: válido, sin que nada falle, y nadie se entera. Mismo criterio que el depósito.
+
+#### Dos cosas que aparecieron aplicándolo
+
+**HubSpot exige que las ETIQUETAS sean únicas, no sólo los valores.** `Property option labels must be unique`. Al cambiar los valores, el parche mandaba la vieja (`CABA`/`CABA`) junto con la nueva (`01`/`CABA`) para no perder datos, y se cayó el PATCH entero en las cuatro propiedades a la vez. La vieja no se puede tirar, así que ahora se le desambigua la etiqueta: `CABA (valor anterior: CABA)`. Queda fea a propósito.
+
+**`aParchear` nunca saca una opción, a propósito** — no sabe cuántos registros la usan. Cuando un desplegable cambia de valores, el portal queda con las viejas y las nuevas conviviendo para siempre. Ahora `planificar` las informa como **`sobrantes`**, y `crearPropiedades --quitar-sobrantes` las quita **sólo después de contar el uso real contra el portal**: las que alguien usó se informan con el número y no se tocan. Quitar una opción que nadie usó no borra ningún dato; quitar una usada vacía el campo, y eso lo decide una persona. No es lo mismo que borrar una propiedad — la regla de [[nunca-borrar-propiedades-hubspot]] sigue intacta.
+
+#### Verificado
+
+- Los cuatro IDs llegan: `ID_GVA05=4`, `ID_GVA24=2`, `ID_GVA01=4`, `ID_GVA10=4`. El vendedor sigue en 10 por owner, como se decidió.
+- Sin elegir nada va el default de siempre. Con una opción que no resuelve, frena y lo dice.
+- El código no es el ID, y hay test: el transporte de código `'10'` manda `ID 15`, no 10. En GVA24 divergen 35 de 41.
+- Contra el portal real: las **141 opciones** de los cuatro desplegables resuelven a un ID de Tango. Ni una queda huérfana.
+- `crearPropiedades clientes`: `0 a crear · 0 a parchear · 0 a convertir · 0 a rehacer`, sin sobrantes.
 
 ## 10. Seguridad
 
@@ -1869,8 +2029,9 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 |---|---|
 | `docs/ARQUITECTURA.md` | Este documento. Diseño y decisiones. |
 | `docs/RUNBOOK-SCOPES.md` | Paso a paso para destrabar los scopes y dejar el portal de HubSpot listo. |
-| `src/lib/propiedades.js` | Compara el mapeo contra el portal: qué crear, qué parchear, qué rehacer. |
-| `scripts/crearPropiedades.js` | Crea el grupo y las propiedades que faltan; parchea las opciones de los desplegables. Dry-run por defecto. |
+| `src/lib/propiedades.js` | Compara el mapeo contra el portal: qué crear, qué parchear, qué convertir y qué rehacer. |
+| `scripts/crearPropiedades.js` | Crea el grupo y las propiedades que faltan; parchea las opciones y convierte de texto a desplegable. Dry-run por defecto. |
+| `scripts/opcionesDesplegables.js` | Genera las `opciones` de los desplegables desde las tablas del ERP (§9.13). Dry-run por defecto; `--proxy` relee Tango. |
 | `scripts/repararPropiedades.js` | ⚠️ Destructivo. Borra y recrea las propiedades mal definidas, con backup previo. Dry-run por defecto. |
 | `src/lib/verificarEmpresa.js` | Verificación previa del alta (§7.12): qué falta, quién lo resuelve, y el payload ya resuelto. |
 | `scripts/crearEmpresaDemo.js` | Crea UNA company de prueba completa, sin código de Tango, para ejercitar el alta al vuelo (§7.13). Dry-run por defecto. |

@@ -47,6 +47,7 @@ function leerToken() {
 (async () => {
     const entidad = process.argv[2];
     const aplicar = process.argv.includes('--aplicar');
+    const quitarSobrantes = process.argv.includes('--quitar-sobrantes');
     const def = ENTIDADES[entidad];
     if (!def) {
         console.error(`Uso: node scripts/crearPropiedades.js <${Object.keys(ENTIDADES).join('|')}> [--aplicar]`);
@@ -80,14 +81,17 @@ function leerToken() {
     console.log(`\nya existentes : ${plan.yaEstan.length}`);
     console.log(`a crear       : ${plan.aCrear.length}`);
     console.log(`a parchear    : ${plan.aParchear.length}`);
+    console.log(`a convertir   : ${plan.aConvertir.length}`);
     console.log(`a rehacer     : ${plan.aRehacer.length}\n`);
 
     for (const p of plan.aCrear) {
         const ops = p.options ? `  [${p.options.map((o) => o.value).join(' | ')}]` : '';
         console.log(`   CREAR    ${p.name.padEnd(26)} ${(p.type + '/' + p.fieldType).padEnd(18)} ${p.hasUniqueValue ? '*** UNICA ***  ' : ''}${p.label}${ops}`);
     }
-    for (const p of plan.aParchear) console.log(`   PARCHEAR ${p.name.padEnd(26)} ${p.detalle}`);
-    for (const p of plan.aRehacer) console.log(`   REHACER  ${p.name.padEnd(26)} ${p.motivo}`);
+    for (const p of plan.sobrantes) console.log(`   SOBRAN    ${p.name.padEnd(25)} ${p.valores.length} opciones que el mapeo ya no declara${quitarSobrantes ? '' : '  (--quitar-sobrantes para revisarlas)'}`);
+    for (const p of plan.aParchear) console.log(`   PARCHEAR  ${p.name.padEnd(25)} ${p.detalle}`);
+    for (const p of plan.aConvertir) console.log(`   CONVERTIR ${p.name.padEnd(25)} ${p.detalle}, con ${p.cambios.options.length} opciones`);
+    for (const p of plan.aRehacer) console.log(`   REHACER   ${p.name.padEnd(25)} ${p.motivo}`);
 
     if (plan.aRehacer.length) {
         console.log('\n⚠️  REHACER no se arregla con un PATCH: hay que borrar la propiedad y');
@@ -114,18 +118,58 @@ function leerToken() {
             console.log(`   ERROR     ${p.name}: ${e.message}`);
         }
     }
-    for (const p of plan.aParchear) {
+    // Parchear y convertir son los dos un PATCH a la misma ruta: la diferencia
+    // esta en que manda cada uno, no en como se aplica.
+    for (const p of [...plan.aParchear, ...plan.aConvertir]) {
         try {
             await hs.actualizarPropiedad(def.objeto, p.name, p.cambios);
             ok++;
-            console.log(`   PARCHEADA ${p.name}`);
+            console.log(`   ACTUALIZADA ${p.name}`);
         } catch (e) {
             errores.push({ name: p.name, error: e.message });
-            console.log(`   ERROR     ${p.name}: ${e.message}`);
+            console.log(`   ERROR       ${p.name}: ${e.message}`);
         }
     }
 
-    console.log(`\naplicados: ${ok}/${plan.aCrear.length + plan.aParchear.length}`);
+    // --- opciones sobrantes
+    //
+    // Quitar una opcion NO es borrar una propiedad, pero puede vaciar el campo
+    // en los registros que la tengan. Por eso se cuenta primero: se sacan solo
+    // las que NADIE uso, y las usadas se informan con el numero para que la
+    // decision la tome una persona. Sin este conteo, una lista que cambio de
+    // valores queda con las viejas y las nuevas conviviendo para siempre —
+    // `aParchear` nunca saca nada, a proposito.
+    if (quitarSobrantes && plan.sobrantes.length) {
+        const props = plan.sobrantes.map((s) => s.name);
+        console.log(`\ncontando uso real de las opciones sobrantes en ${def.objeto} ...`);
+        const registros = await hs.leerTodos(def.objeto, props);
+        console.log(`   ${registros.length} registros leidos`);
+
+        for (const s of plan.sobrantes) {
+            const uso = new Map();
+            for (const r of registros) {
+                const bruto = (r.properties?.[s.name] ?? '').trim();
+                if (!bruto) continue;
+                // El multivalor llega separado por ';'.
+                for (const v of bruto.split(';').map((x) => x.trim()).filter(Boolean)) uso.set(v, (uso.get(v) || 0) + 1);
+            }
+            const usadas = s.valores.filter((v) => uso.get(v));
+            if (usadas.length) {
+                console.log(`   ${s.name}: NO se toca. ${usadas.length} opciones estan en uso: ${usadas.map((v) => `'${v}' (${uso.get(v)})`).join(', ')}`);
+                continue;
+            }
+            try {
+                await hs.actualizarPropiedad(def.objeto, s.name, s.cambios);
+                ok++;
+                console.log(`   ${s.name}: quitadas ${s.valores.length} opciones sin uso -> quedan ${s.cambios.options.length}`);
+            } catch (e) {
+                errores.push({ name: s.name, error: e.message });
+                console.log(`   ERROR       ${s.name}: ${e.message}`);
+            }
+        }
+    }
+
+    console.log(`\naplicados: ${ok}/${plan.aCrear.length + plan.aParchear.length + plan.aConvertir.length}`);
     if (errores.length) {
         console.log('con error:');
         for (const e of errores) console.log(`   ${e.name}: ${e.error}`);

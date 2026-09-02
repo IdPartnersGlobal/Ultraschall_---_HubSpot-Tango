@@ -101,10 +101,36 @@
       "hubspot": "tango_clasificacion",
       "label": "Clasificacion",
       "tipo": "string",
-      "hsFieldType": "select",
+      "hsFieldType": "multiselect",
       "porcentajeCarga": 39,
       "autoritativoTango": true,
-      "notas": "Candidato para agrupar el catalogo en HubSpot (hs_folder)."
+      "notas": "Candidato para agrupar el catalogo en HubSpot (hs_folder).",
+      "opciones": {
+        "Todos/IMPORTADO/ECOGRAFOS EDAN": "Todos/IMPORTADO/ECOGRAFOS EDAN",
+        "Todos/NACIONAL/D3": "Todos/NACIONAL/D3",
+        "Todos/NACIONAL/S3": "Todos/NACIONAL/S3",
+        "Todos/IMPORTADO/VETERINARIOS KAIXIN": "Todos/IMPORTADO/VETERINARIOS KAIXIN",
+        "Todos/NACIONAL/V3": "Todos/NACIONAL/V3",
+        "Todos/IMPORTADO/MULTIPARAMETRICOS": "Todos/IMPORTADO/MULTIPARAMETRICOS",
+        "Todos/IMPORTADO/PLACAS MADRE": "Todos/IMPORTADO/PLACAS MADRE",
+        "Todos/IMPORTADO/NEUROTRAC": "Todos/IMPORTADO/NEUROTRAC",
+        "Todos/IMPORTADO/OXIMETROS": "Todos/IMPORTADO/OXIMETROS",
+        "Todos/IMPORTADO/LINEA MYHIXEL": "Todos/IMPORTADO/LINEA MYHIXEL",
+        "Todos/IMPORTADO/DETECTORES FETALES": "Todos/IMPORTADO/DETECTORES FETALES"
+      },
+      "opcionesOrden": [
+        "Todos/IMPORTADO/ECOGRAFOS EDAN",
+        "Todos/NACIONAL/D3",
+        "Todos/NACIONAL/S3",
+        "Todos/IMPORTADO/VETERINARIOS KAIXIN",
+        "Todos/NACIONAL/V3",
+        "Todos/IMPORTADO/MULTIPARAMETRICOS",
+        "Todos/IMPORTADO/PLACAS MADRE",
+        "Todos/IMPORTADO/NEUROTRAC",
+        "Todos/IMPORTADO/OXIMETROS",
+        "Todos/IMPORTADO/LINEA MYHIXEL",
+        "Todos/IMPORTADO/DETECTORES FETALES"
+      ]
     },
     {
       "tango": "MEDIDA_VENTAS_DESCRIPCION",
@@ -113,7 +139,15 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "opciones": {
+        "Unidad": "Unidad",
+        "Par": "Par"
+      },
+      "opcionesOrden": [
+        "Unidad",
+        "Par"
+      ]
     },
     {
       "tango": "GVA41_DESC_IVA",
@@ -122,7 +156,30 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 98,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "opciones": {
+        "SOBRE O SUBTASA IVA": "SOBRE O SUBTASA IVA",
+        "IMP. INTERNO NULO": "IMP. INTERNO NULO",
+        "SOB/SUBTASA IMP.INT.": "SOB/SUBTASA IMP.INT.",
+        "I.V.A. LIBERADO": "I.V.A. LIBERADO",
+        "IVA 21%": "IVA 21%",
+        "IMP. INTERNO FIJO": "IMP. INTERNO FIJO",
+        "PERCEP. INGR. BRUTOS": "PERCEP. INGR. BRUTOS",
+        "IVA 10,5%": "IVA 10,5%",
+        "IVA 0%": "IVA 0%"
+      },
+      "opcionesOrden": [
+        "SOBRE O SUBTASA IVA",
+        "IMP. INTERNO NULO",
+        "SOB/SUBTASA IMP.INT.",
+        "I.V.A. LIBERADO",
+        "IVA 21%",
+        "IMP. INTERNO FIJO",
+        "PERCEP. INGR. BRUTOS",
+        "IVA 10,5%",
+        "IVA 0%"
+      ],
+      "notasOpciones": "GVA41 mezcla alicuotas de IVA con impuestos internos y percepciones. La lista muestra las 9 filas de la tabla; en los 826 articulos solo se usan tres (IVA 10,5%, IVA 21%, IVA 0%)."
     },
     {
       "tango": "STOCK",
@@ -144,7 +201,25 @@
       "autoritativoTango": true,
       "valores": "A = ambos (compra y venta) · V = solo ventas · C = solo compras · N = ninguno",
       "_porQueNoEsUnSelect": "Los valores estan documentados aca y NO como `opciones` a proposito. La propiedad ya existe en el portal como string/text; declararle opciones la convierte en enumeration, y eso no se arregla con un PATCH: hay que borrar y recrear, que borra el valor en todos los registros. Ver [[nunca-borrar-propiedades-hubspot]]. Ademas nadie elige este campo a mano: lo escribe el sync.",
-      "notas": "RESUELTO 2026-08-31 midiendo los 826 articulos: A=714, V=62, N=41, C=9. 'N' no estaba previsto. Que son, mirando los articulos: V son servicios (Service, Reparacion, Envio a domicilio) que se venden y no se stockean; C son insumos de compra (barra de grilon, cinta de embalaje, manija); N son articulos que no participan de compras ni de ventas. Confirmacion independiente: de los 133 articulos con precio en la lista 2, 131 son A y 2 son V — ningun C ni N tiene precio. Por eso el sync publica A y V, y deja C y N afuera (ver defaults.tango.json -> productos.perfilesQueSePublican)."
+      "notas": "RESUELTO 2026-08-31 midiendo los 826 articulos: A=714, V=62, N=41, C=9. 'N' no estaba previsto. Que son, mirando los articulos: V son servicios (Service, Reparacion, Envio a domicilio) que se venden y no se stockean; C son insumos de compra (barra de grilon, cinta de embalaje, manija); N son articulos que no participan de compras ni de ventas. Confirmacion independiente: de los 133 articulos con precio en la lista 2, 131 son A y 2 son V — ningun C ni N tiene precio. Por eso el sync publica A y V, y deja C y N afuera (ver defaults.tango.json -> productos.perfilesQueSePublican).",
+      "opciones": {
+        "A": "A",
+        "V": "V",
+        "N": "N",
+        "C": "C"
+      },
+      "opcionesEtiquetas": {
+        "A": "Ambos",
+        "V": "Ventas",
+        "N": "Ninguno",
+        "C": "Compras"
+      },
+      "opcionesOrden": [
+        "A",
+        "V",
+        "N",
+        "C"
+      ]
     },
     {
       "tango": "REMITIBLE",
@@ -153,7 +228,19 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
-      "autoritativoTango": true
+      "autoritativoTango": true,
+      "opciones": {
+        "S": "S",
+        "N": "N"
+      },
+      "opcionesEtiquetas": {
+        "S": "Si",
+        "N": "No"
+      },
+      "opcionesOrden": [
+        "S",
+        "N"
+      ]
     },
     {
       "tango": "FECHA_ALTA",

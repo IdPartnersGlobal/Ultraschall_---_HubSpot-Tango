@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "origen": "Api/Get process=87 (STA11)",
+    "articulos": 826,
+    "medido": "2026-09-01"
+  },
+  "MEDIDA_VENTAS_DESCRIPCION": {
+    "Unidad": 821,
+    "Par": 5
+  },
+  "CLASIFICACION": {
+    "Todos/IMPORTADO/ECOGRAFOS EDAN": 71,
+    "Todos/NACIONAL/D3": 59,
+    "Todos/NACIONAL/S3": 54,
+    "Todos/IMPORTADO/VETERINARIOS KAIXIN": 52,
+    "Todos/NACIONAL/V3": 50,
+    "Todos/IMPORTADO/MULTIPARAMETRICOS": 46,
+    "Todos/IMPORTADO/PLACAS MADRE": 40,
+    "Todos/IMPORTADO/NEUROTRAC": 32,
+    "Todos/IMPORTADO/OXIMETROS": 12,
+    "Todos/IMPORTADO/LINEA MYHIXEL": 4,
+    "Todos/IMPORTADO/DETECTORES FETALES": 2
+  }
+}

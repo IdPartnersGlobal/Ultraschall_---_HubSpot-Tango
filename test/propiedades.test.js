@@ -156,3 +156,248 @@ test('una propiedad booleana lleva sus dos opciones o HubSpot la rechaza', () =>
     assert.strictEqual(aCrear[0].fieldType, 'booleancheckbox');
     assert.deepStrictEqual(aCrear[0].options.map((o) => o.value), ['true', 'false'], 'exactamente dos, y en ese orden');
 });
+
+// ------------------------------------------------- desplegables (2026-09-01)
+
+const mapeoProductos = require('../config/mapeo.productos.json');
+const mapeoPedidos = require('../config/mapeo.pedidos.json');
+const TODOS_LOS_MAPEOS = {
+    clientes: mapeoClientes,
+    productos: mapeoProductos,
+    pedidos: mapeoPedidos,
+    contactos: mapeoContactos,
+};
+
+test('ningun campo pide un desplegable sin declarar sus opciones', () => {
+    // ESTA es la red, no el `if` que degrada a texto en tipoHubSpot(). Once
+    // campos —tango_vendedor, tango_zona, tango_perfil y ocho mas— pidieron
+    // `select` sin `opciones` desde el 2026-08-14 y quedaron de texto libre en
+    // el portal sin que nada fallara: la degradacion es silenciosa, y
+    // planificar() los comparaba contra la spec ya degradada, o sea que
+    // informaba `0 a rehacer`. Se descubrio el 2026-09-01 mirando una ficha.
+    //
+    // Si este test falla, correr: node scripts/opcionesDesplegables.js
+    const huerfanos = [];
+    for (const [nombre, mapeo] of Object.entries(TODOS_LOS_MAPEOS)) {
+        for (const c of mapeo.campos) {
+            const t = (c.hsFieldType || '').toLowerCase();
+            if ((t === 'select' || t === 'multiselect') && !c.opciones) huerfanos.push(`${nombre}.${c.hubspot}`);
+        }
+    }
+    assert.deepStrictEqual(huerfanos, [], 'piden desplegable y no tienen opciones: quedarian de texto libre');
+});
+
+test('cada opcion de los desplegables de Tango sale de su tabla, no de la muestra', () => {
+    // La lista tiene que ser la tabla COMPLETA. Derivarla de los valores en
+    // uso deja afuera lo que todavia no uso nadie, y el dia que aparece el
+    // sync se cae con 400 INVALID_OPTION. Es el mismo error que con los
+    // depositos, donde ademas habia entrado uno dado de baja por la puerta de
+    // atras (ARQUITECTURA.md 9.11).
+    // La columna es la que el desplegable GUARDA: el CODIGO en los de
+    // entrada (§9.14), la descripcion en los que son espejo de Tango.
+    const casos = [
+        ['clientes', 'tango_zona', require('./fixtures/zonas.json'), 'COD_GVA05'],
+        ['clientes', 'tango_transporte', require('./fixtures/transportes.json'), 'COD_GVA24'],
+        ['clientes', 'tango_condicion_venta', require('./fixtures/condicionesVenta.json'), 'COND_VTA'],
+        ['clientes', 'tango_vendedor', require('./fixtures/vendedores.json'), 'NOMBRE_VEN'],
+        ['productos', 'tango_alicuota_iva', require('./fixtures/alicuotasIva.json'), 'DESCRIPCIO'],
+    ];
+    for (const [mapeo, nombre, filas, columna] of casos) {
+        const campo = TODOS_LOS_MAPEOS[mapeo].campos.find((c) => c.hubspot === nombre);
+        const enLaTabla = new Set(filas.map((f) => `${f[columna] ?? ''}`.trim()).filter(Boolean));
+        const enElMapeo = new Set(Object.values(campo.opciones));
+        for (const v of enLaTabla) assert.ok(enElMapeo.has(v), `${nombre}: falta la opcion ${v}, que si esta en la tabla`);
+        for (const v of enElMapeo) assert.ok(enLaTabla.has(v), `${nombre}: la opcion ${v} no existe en la tabla de Tango`);
+    }
+});
+
+test('un vendedor inhabilitado se oculta, pero sigue siendo una opcion', () => {
+    // No se saca de la lista: hay clientes en el padron que lo tienen
+    // asignado, y sin la opcion su escritura se cae con 400 y voltea la tanda
+    // de 100. `hidden: true` no lo ofrece en el desplegable y deja escribirlo
+    // por API — verificado contra el portal real el 2026-09-01.
+    const vendedores = require('./fixtures/vendedores.json');
+    const deBaja = vendedores.filter((v) => v.INHABILITA === true).map((v) => v.NOMBRE_VEN.trim());
+    assert.ok(deBaja.length, 'el fixture ya no tiene inhabilitados: el test dejo de probar lo que dice');
+
+    const campo = mapeoClientes.campos.find((c) => c.hubspot === 'tango_vendedor');
+    const opciones = opcionesDe(campo);
+    for (const nombre of deBaja) {
+        const o = opciones.find((x) => x.value === nombre);
+        assert.ok(o, `${nombre} tiene que seguir siendo una opcion`);
+        assert.strictEqual(o.hidden, true, `${nombre} esta de baja: no se ofrece`);
+    }
+    assert.ok(opciones.some((o) => !o.hidden), 'no se ocultaron todas');
+});
+
+test('la clasificacion es multivalor, asi que va como casillas y no como desplegable', () => {
+    // Tango manda hasta tres clasificaciones en un mismo campo, separadas por
+    // ';'. Con `select`, los 43 articulos que tienen mas de una se caen.
+    const campo = mapeoProductos.campos.find((c) => c.hubspot === 'tango_clasificacion');
+    assert.strictEqual(tipoHubSpot(campo).fieldType, 'checkbox');
+    assert.strictEqual(tipoHubSpot(campo).type, 'enumeration');
+});
+
+test('pasar de texto libre a desplegable se PARCHEA, no se rehace', () => {
+    // Verificado contra el portal el 2026-09-01: HubSpot acepta el PATCH de
+    // string a enumeration y los valores cargados sobreviven. Antes cualquier
+    // diferencia de `type` caia en aRehacer —o sea borrar la propiedad— y por
+    // eso tango_perfil se habia dejado de texto libre a proposito.
+    const enElPortalComoTexto = mapeoClientes.campos
+        .filter((c) => c.opciones && c.hsFieldType === 'select')
+        .map((c) => ({ name: c.hubspot, type: 'string', fieldType: 'text', groupName: 'tango_erp', options: [] }));
+    assert.ok(enElPortalComoTexto.length >= 6, 'el mapeo dejo de tener desplegables de cliente');
+
+    const plan = planificar(mapeoClientes, enElPortalComoTexto);
+    const convertidos = new Set(plan.aConvertir.map((p) => p.name));
+    for (const p of enElPortalComoTexto) {
+        assert.ok(convertidos.has(p.name), `${p.name} deberia convertirse con un PATCH`);
+        assert.ok(!plan.aRehacer.some((r) => r.name === p.name), `${p.name} no se rehace: rehacer borra los valores`);
+    }
+    for (const c of plan.aConvertir) {
+        assert.strictEqual(c.cambios.type, 'enumeration');
+        assert.ok(c.cambios.options.length, 'la conversion tiene que mandar las opciones');
+    }
+});
+
+test('el PATCH de opciones no des-oculta lo que estaba oculto', () => {
+    // Bug encontrado el 2026-09-01: aParchear reconstruia las opciones viejas
+    // con `hidden: false` fijo. Como el sync es idempotente, bastaba con que
+    // apareciera una opcion nueva para que volvieran a la lista todos los
+    // dados de baja, sin que nada fallara.
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{
+            tango: 'X', hubspot: 'vendedor', label: 'Vendedor', hsFieldType: 'select',
+            opciones: { ANA: 'ANA', BETO: 'BETO', CELIA: 'CELIA' },
+            opcionesOcultas: ['BETO'],
+        }],
+    };
+    const enElPortal = [{
+        name: 'vendedor', type: 'enumeration', fieldType: 'select', groupName: 'tango_erp',
+        options: [
+            { label: 'ANA', value: 'ANA', hidden: false },
+            { label: 'BETO', value: 'BETO', hidden: true },
+        ],
+    }];
+
+    const { aParchear } = planificar(mapeo, enElPortal);
+    assert.strictEqual(aParchear.length, 1, 'falta CELIA: hay que parchear');
+    const porValor = new Map(aParchear[0].cambios.options.map((o) => [o.value, o]));
+    assert.strictEqual(porValor.get('BETO').hidden, true, 'BETO estaba oculto y tiene que quedar oculto');
+    assert.strictEqual(porValor.get('ANA').hidden, false);
+    assert.strictEqual(porValor.get('CELIA').hidden, false);
+});
+
+test('una opcion que el mapeo manda ocultar y en el portal esta visible se parchea', () => {
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{
+            tango: 'X', hubspot: 'vendedor', label: 'Vendedor', hsFieldType: 'select',
+            opciones: { ANA: 'ANA', BETO: 'BETO' },
+            opcionesOcultas: ['BETO'],
+        }],
+    };
+    const enElPortal = [{
+        name: 'vendedor', type: 'enumeration', fieldType: 'select', groupName: 'tango_erp',
+        options: [
+            { label: 'ANA', value: 'ANA', hidden: false },
+            { label: 'BETO', value: 'BETO', hidden: false },
+        ],
+    }];
+    const { aParchear } = planificar(mapeo, enElPortal);
+    assert.strictEqual(aParchear.length, 1);
+    assert.match(aParchear[0].detalle, /visibilidad distinta/);
+    const beto = aParchear[0].cambios.options.find((o) => o.value === 'BETO');
+    assert.strictEqual(beto.hidden, true);
+});
+
+test('las opciones que el mapeo ya no declara se informan, pero el parche NO las saca', () => {
+    // Cuando un desplegable cambia de valores —tango_zona paso de guardar 'NOA'
+    // a guardar '04' el 2026-09-01— el portal queda con las viejas y las nuevas
+    // conviviendo, porque aParchear nunca saca nada, a proposito: no sabe
+    // cuantos registros usan cada opcion. Se informan aparte, y quitarlas es un
+    // paso explicito que primero cuenta el uso real.
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{
+            tango: 'X', hubspot: 'zona', label: 'Zona', hsFieldType: 'select',
+            opciones: { '01': '01', '04': '04' },
+            opcionesEtiquetas: { '01': 'CABA', '04': 'NOA' },
+        }],
+    };
+    const enElPortal = [{
+        name: 'zona', type: 'enumeration', fieldType: 'select', groupName: 'tango_erp',
+        options: [
+            { label: 'CABA', value: 'CABA', hidden: false },
+            { label: 'NOA', value: 'NOA', hidden: false },
+        ],
+    }];
+
+    const plan = planificar(mapeo, enElPortal);
+    assert.deepStrictEqual(plan.sobrantes.map((s) => s.name), ['zona']);
+    assert.deepStrictEqual(plan.sobrantes[0].valores, ['CABA', 'NOA']);
+
+    // El parche agrega las nuevas y conserva las viejas.
+    const delParche = plan.aParchear[0].cambios.options.map((o) => o.value);
+    assert.ok(delParche.includes('CABA'), 'el parche no puede tirar una opcion por su cuenta');
+    assert.ok(delParche.includes('04'));
+
+    // La lista limpia que propone `sobrantes` es solo lo que el mapeo declara.
+    assert.deepStrictEqual(plan.sobrantes[0].cambios.options.map((o) => o.value), ['01', '04']);
+});
+
+test('sin sobrantes no se informa nada', () => {
+    const plan = planificar(mapeoClientes, []);
+    assert.deepStrictEqual(plan.sobrantes, [], 'contra un portal vacio no sobra nada');
+});
+
+test('el parche no manda dos opciones con la misma etiqueta: HubSpot lo rechaza', () => {
+    // Caso real del 2026-09-01. tango_zona guardaba 'CABA' y paso a guardar
+    // '01', las dos con etiqueta CABA. El parche mandaba las viejas junto con
+    // las nuevas —para no perder datos— y HubSpot contesto 400 "Property
+    // option labels must be unique" en las CUATRO propiedades a la vez.
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{
+            tango: 'X', hubspot: 'zona', label: 'Zona', hsFieldType: 'select',
+            opciones: { '01': '01', '04': '04' },
+            opcionesEtiquetas: { '01': 'CABA', '04': 'NOA' },
+        }],
+    };
+    const enElPortal = [{
+        name: 'zona', type: 'enumeration', fieldType: 'select', groupName: 'tango_erp',
+        options: [{ label: 'CABA', value: 'CABA', hidden: false }],
+    }];
+
+    const { aParchear } = planificar(mapeo, enElPortal);
+    const opciones = aParchear[0].cambios.options;
+
+    const etiquetas = opciones.map((o) => o.label);
+    assert.strictEqual(new Set(etiquetas).size, etiquetas.length, `etiquetas repetidas: ${etiquetas.join(' | ')}`);
+    const valores = opciones.map((o) => o.value);
+    assert.strictEqual(new Set(valores).size, valores.length, 'valores repetidos');
+
+    // La vieja sigue estando: puede tener registros cargados.
+    const vieja = opciones.find((o) => o.value === 'CABA');
+    assert.ok(vieja, 'no se puede tirar una opcion que quiza tiene datos');
+    assert.match(vieja.label, /valor anterior/);
+    // Y la nueva conserva su etiqueta limpia.
+    assert.strictEqual(opciones.find((o) => o.value === '01').label, 'CABA');
+});
+
+test('una etiqueta vieja que no choca con ninguna nueva se deja como esta', () => {
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{
+            tango: 'X', hubspot: 'zona', label: 'Zona', hsFieldType: 'select',
+            opciones: { '01': '01' }, opcionesEtiquetas: { '01': 'CABA' },
+        }],
+    };
+    const enElPortal = [{
+        name: 'zona', type: 'enumeration', fieldType: 'select', groupName: 'tango_erp',
+        options: [{ label: 'PATAGONIA', value: 'PATAGONIA', hidden: false }],
+    }];
+    const { aParchear } = planificar(mapeo, enElPortal);
+    assert.strictEqual(aParchear[0].cambios.options.find((o) => o.value === 'PATAGONIA').label, 'PATAGONIA');
+});
