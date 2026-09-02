@@ -1921,6 +1921,38 @@ Por qué ningún test lo veía: los tests arman las tablas con `Lookups.desdeReg
 Arreglado con `cargar: false` y con la red que faltaba: un test que recorre el catálogo entero y exige que **toda auxiliar sea cargable** (tenga `process`, o `filas`, o `cargar: false`). Verificado que falla si se saca el arreglo. Carga completa: de 12 minutos a **10 segundos**.
 
 
+### 9.16 El alta que no podía leer sus propios datos (2026-09-02)
+
+Primera corrida real del circuito, con la canilla ya abierta. Matías movió a ganado un negocio con la company de prueba —que **tiene** razón social y condición de IVA cargadas— y el negocio volvió una etapa atrás igual:
+
+```
+⚠️ [ALTA] la company 57797704723 no se puede dar de alta todavia: RAZON_SOCI, ID_CATEGORIA_IVA
+▶️ [DEAL] 64576262053 vuelve a 'Negociación' hasta que este completo
+• modo : ESCRITURA REAL
+```
+
+**Los datos estaban. Nunca se pedían.**
+
+`PROPS_COMPANY` se mantenía a mano y tenía 8 propiedades: `codigo_tango`, `tango_id_gva14` y los cinco `tango_id_gvaNN` de parametría. **Ninguna de las 12 con datos del negocio.** `procesarDeal` leía la company con esa lista, se la pasaba a `altaCliente`, y `verificarEmpresa` buscaba `razon_social` y `condicion_iva` en un objeto donde nunca habían viajado.
+
+Consecuencia: **ninguna empresa podía darse de alta desde un negocio. El 100%, siempre.** Y el mensaje señalaba justo los campos que sí estaban cargados, mandando a comercial a completar lo que ya estaba completo — un error que se auto-confirma, porque el que lo lee va, mira la ficha, ve el campo lleno y no entiende nada.
+
+Es **la tercera vez** que aparece la misma forma: *pedir de menos y leer de más*. `camposNoAutoritativos` no pedía `price` (§9.12); ahora `PROPS_COMPANY` no pedía la mitad del alta.
+
+**El arreglo no es agregar dos nombres a la lista.** `verificarEmpresa.propiedadesQueNecesita()` **deriva** las propiedades del catálogo (`defaults.tango.json → clientes.alta.campos`): cada `hubspot`, cada `hubspotOpcion`, más las dos del owner. `PROPS_COMPANY` es eso más las tres del vínculo con Tango. Pasó de 8 a **26**. Agregar un campo al alta ya no puede dejar la lectura corta.
+
+**Por qué la suite entera pasaba en verde.** Dos agujeros, los dos tapados:
+
+1. **`hsFalso` devolvía la company entera sin mirar qué propiedades se le pedían.** Es *exactamente* la lección que el arnés del sync de productos aprendió el 31 con `price` — y que nunca se aplicó a este arnés. Ahora `soloLasPedidas()` filtra como filtra HubSpot.
+2. **Ningún test ejercitaba el alta DESDE un negocio.** El fixture de company traía `tango_id_gva14`, así que `faltaAlta` era siempre false y esa rama no corría jamás. Cada pieza tenía su test y el conjunto estaba roto.
+
+Redes nuevas, verificadas fallando con el bug puesto —y con el mensaje idéntico al de producción, `RAZON_SOCI: falta | ID_CATEGORIA_IVA: falta`—: un test de circuito entero que da de alta la company y comprueba que `RAZON_SOCI` **llega al payload del ERP**, y uno que compara `PROPS_COMPANY` contra lo que el catálogo declara.
+
+Verificado después contra el portal y el ERP reales: la company de prueba se daría de alta como el cliente **`007611`**.
+
+⚠️ **En dry-run el circuito corta en el alta** y no llega a armar el pedido. El alta quedó verificada; el `Api/Create` del pedido sólo se ejercita en la corrida real.
+
+
 ## 10. Seguridad
 
 ### 🔴 10.0 URGENTE — el proxy anónimo expone SQL arbitrario del ERP a internet

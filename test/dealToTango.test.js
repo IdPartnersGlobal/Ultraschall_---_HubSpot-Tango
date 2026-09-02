@@ -613,6 +613,27 @@ test('la fecha va sin zona horaria: Tango no interpreta el offset', () => {
 /** Los dos embudos REALES del portal (test/fixtures/pipelines-deals.json). */
 const PIPELINES = require('./fixtures/pipelines-deals.json').pipelines;
 
+/**
+ * HubSpot devuelve SOLO las propiedades que se le piden. El doble tiene que
+ * hacer lo mismo o esconde toda una clase de bug: la de no pedir una propiedad
+ * que despues se lee.
+ *
+ * ⚠️ Sin esto, el 2026-09-02 `PROPS_COMPANY` no pedia `razon_social` ni
+ * `condicion_iva` —el alta las veia `undefined` y NINGUN negocio podia crear su
+ * empresa— y la suite entera pasaba en verde. Es la misma leccion que el arnes
+ * del sync de productos aprendio el 31 con `price` (§9.12).
+ *
+ * Una lista vacia significa "todas", como en la API.
+ */
+function soloLasPedidas(props, propiedades = []) {
+    if (!propiedades.length) return { ...props };
+    const salida = {};
+    for (const k of propiedades) if (props[k] !== undefined) salida[k] = props[k];
+    // HubSpot siempre devuelve el id, se pida o no.
+    if (props.hs_object_id !== undefined) salida.hs_object_id = props.hs_object_id;
+    return salida;
+}
+
 /** Un HubSpot de mentira que registra lo que se le pide y lo que se le escribe. */
 function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], productos = [{ id: '77', properties: { tango_id_sta11: '394' } }], pipelines = PIPELINES } = {}) {
     const escrituras = [];
@@ -632,17 +653,24 @@ function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], producto
             return pipelines;
         },
         async crearNota(objetoTipo, id, cuerpo) { notas.push({ objetoTipo, id, cuerpo }); return { id: 'n1' }; },
-        async objeto(objetoTipo, id) {
+        async objeto(objetoTipo, id, propiedades = []) {
             // dealstage va por defecto: el webhook SOLO llega por un ganado.
-            if (objetoTipo === 'deals') return { id, properties: { hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', ...deal } };
+            if (objetoTipo === 'deals') {
+                return { id, properties: soloLasPedidas({ hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', ...deal }, propiedades) };
+            }
+            // El alta relee la company antes de escribirle de vuelta, para no
+            // pisar lo que se cargo a mano (lib/altaCliente).
+            if (objetoTipo === 'companies') {
+                return company ? { id, properties: soloLasPedidas({ hs_object_id: id, ...company }, propiedades) } : null;
+            }
             return null;
         },
         async asociaciones(_o, _id, destino) {
             if (destino === 'companies') return company ? ['555'] : [];
             return lineItems.map((l) => l.id);
         },
-        async objetos(objetoTipo, ids) {
-            if (objetoTipo === 'companies') return company ? [{ id: '555', properties: company }] : [];
+        async objetos(objetoTipo, ids, propiedades = []) {
+            if (objetoTipo === 'companies') return company ? [{ id: '555', properties: soloLasPedidas(company, propiedades) }] : [];
             if (objetoTipo === 'line_items') return lineItems;
             return productos.filter((p) => ids.includes(p.id));
         },
@@ -974,4 +1002,70 @@ test('veneno: en dry-run no toca el negocio', async () => {
     await d2t.procesarVeneno({ hs, dealId: '111', dryRun: true, filtroOwner: filtroMio() });
     assert.strictEqual(hs.escrituras.length, 0);
     assert.strictEqual(hs.notas.length, 0);
+});
+
+// ── El alta DESDE un negocio: el circuito entero, no cada pieza (§9.16) ──────
+
+/** Una company completa y SIN código de Tango: la que dispara el alta al vuelo. */
+const COMPANY_A_CREAR = {
+    name: 'CLINICA DEMO',
+    razon_social: 'CLINICA DEMO SA',
+    cuit: 30999999995,
+    condicion_iva: 'Responsable Inscripto',
+    domicilio_del_consultorio: 'Av. Corrientes 1234',
+    localidad: 'CABA',
+    zip: '1043',
+    provincia: 'caba',
+    country: 'ARGENTINA',
+    codigo_tango: '',
+    tango_id_gva14: '',
+};
+
+test('un negocio con una company completa pero sin codigo de Tango LA DA DE ALTA', async () => {
+    // El circuito entero, que es lo que ninguna prueba cubria: cada pieza tenia
+    // su test y el conjunto estaba roto.
+    //
+    // ⚠️ Esto es lo que fallo en produccion el 2026-09-02. `PROPS_COMPANY` no
+    // pedia `razon_social` ni `condicion_iva`, asi que llegaban `undefined`
+    // aunque estuvieran cargadas y el alta las reportaba como faltantes:
+    // NINGUN negocio podia crear su empresa, el 100% de las veces, y el mensaje
+    // mandaba a cargar un dato que ya estaba.
+    //
+    // Falla si alguien vuelve a escribir PROPS_COMPANY a mano y se queda corto.
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER }, company: COMPANY_A_CREAR });
+    const tango = tangoFalso();
+    // El alta pregunta por el ultimo codigo y despues crea. Le alcanza con esto.
+    tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
+    // El alta confirma contra el ERP que el cliente quedo creado antes de
+    // seguir con el pedido, asi que el doble tiene que "recordarlo".
+    const creadosEnTango = [];
+    tango.getByFilter = async (_p, filtro) => creadosEnTango.filter((c) => filtro.includes(c.COD_GVA14));
+    tango.create = async (process, payload) => {
+        tango.creados.push({ process, payload });
+        if (payload.COD_GVA14) creadosEnTango.push({ COD_GVA14: payload.COD_GVA14, ID_GVA14: 9001 });
+        return { ID_GVA14: 9001, NRO_PEDIDO: '00012345' };
+    };
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(),
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.notStrictEqual(r.estado, 'incompleto',
+        `el alta no deberia frenar; freno con: ${r.motivo}`);
+    assert.ok(tango.creados.length >= 1, 'se tiene que haber creado algo en Tango');
+
+    const alta = tango.creados[0];
+    assert.strictEqual(alta.payload.RAZON_SOCI, 'CLINICA DEMO SA',
+        'la razon social tiene que LLEGAR al ERP, no perderse por no haberla pedido');
+    assert.ok(alta.payload.ID_CATEGORIA_IVA, 'y la categoria de IVA tambien');
+});
+
+test('PROPS_COMPANY pide todo lo que el alta va a leer', () => {
+    // La red de arriba prueba el comportamiento; esta dice POR QUE fallaba, y
+    // falla en cuanto alguien agregue un campo al catalogo sin pedirlo.
+    const necesita = require('../src/lib/verificarEmpresa').propiedadesQueNecesita();
+    const faltan = necesita.filter((p) => !d2t.PROPS_COMPANY.includes(p));
+    assert.deepStrictEqual(faltan, [],
+        `el alta lee estas propiedades y PROPS_COMPANY no las pide: ${faltan.join(', ')}`);
 });

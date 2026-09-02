@@ -4,6 +4,7 @@ const firmaHubSpot = require('./firmaHubSpot');
 const etapas = require('./etapas');
 const verificarPedido = require('./verificarPedido');
 const altaCliente = require('./altaCliente');
+const verificarEmpresa = require('./verificarEmpresa');
 const notaProblema = require('./notaProblema');
 const soloOwner = require('./soloOwner');
 const { silencioso } = require('./logger');
@@ -39,7 +40,22 @@ const PROP_CLIENTE = 'tango_pedido_cliente';
 
 /** Lo que hace falta leer del Deal, la company y cada linea. */
 const PROPS_DEAL = ['dealname', 'dealstage', 'pipeline', 'closedate', 'hs_object_id', 'hubspot_owner_id', PROP_NRO];
-const PROPS_COMPANY = ['codigo_tango', 'tango_id_gva14', 'tango_id_gva01', 'tango_id_gva10', 'tango_id_gva23', 'tango_id_gva24', 'tango_id_gva05', 'hubspot_owner_id'];
+/**
+ * Lo que hay que leer de la company. NO se escribe a mano: la parte del alta se
+ * DERIVA del catalogo (`verificarEmpresa.propiedadesQueNecesita`).
+ *
+ * ⚠️ Escrita a mano, esta lista tenia 8 propiedades y ninguna de las 12 con
+ * datos del negocio. `razon_social` y `condicion_iva` llegaban `undefined`
+ * aunque estuvieran cargadas, asi que NINGUN negocio podia dar de alta su
+ * empresa — el 100% frenaba con "RAZON_SOCI: falta", apuntando a un dato que si
+ * estaba. Ver §9.16.
+ */
+const PROPS_COMPANY = [...new Set([
+    // Lo que necesita el circuito del PEDIDO: el vinculo con el cliente de Tango.
+    'codigo_tango', 'tango_codigo_cliente', 'tango_id_gva14',
+    // Lo que necesita el ALTA, derivado del catalogo para que no se desfase.
+    ...verificarEmpresa.propiedadesQueNecesita(),
+])];
 const PROPS_LINEA = ['name', 'quantity', 'price', 'hs_product_id', 'hs_discount_percentage'];
 const PROPS_PRODUCTO = ['name', 'hs_sku', 'tango_id_sta11'];
 

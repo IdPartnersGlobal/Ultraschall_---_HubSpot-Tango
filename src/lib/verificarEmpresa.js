@@ -402,4 +402,35 @@ async function buscarDuplicados({ tango, codigo, documento: doc } = {}) {
     return salida;
 }
 
-module.exports = { verificar, buscarDuplicados, literalSeguro, ALTA, COD_SEGURO, DOC_SEGURO };
+/**
+ * Las propiedades de HubSpot que `verificar` necesita leer de la company.
+ *
+ * ⚠️ Existe porque mantener esa lista A MANO fallo, y fallo del peor modo
+ * posible (2026-09-02). `dealToTango.PROPS_COMPANY` pedia 8 propiedades y
+ * NINGUNA de las 12 con datos del negocio: `razon_social` y `condicion_iva`
+ * llegaban `undefined` aunque estuvieran cargadas en el portal, y el alta las
+ * reportaba como faltantes. Es decir que **ninguna empresa se podia dar de alta
+ * desde un negocio**, el 100% de las veces, y el mensaje de error apuntaba
+ * justo a los datos que si estaban — mandando a cargar lo que ya estaba cargado.
+ *
+ * Se deriva del catalogo (`defaults.tango.json → clientes.alta.campos`), asi que
+ * agregar un campo al alta no puede volver a dejar la lectura corta.
+ *
+ * Es la misma leccion del precio (§9.12): *un fake que devuelve todo esconde el
+ * bug de no pedir una propiedad*. Ahi fue `camposNoAutoritativos`; aca fue esto.
+ */
+function propiedadesQueNecesita() {
+    const props = new Set();
+    for (const campo of ALTA.campos) {
+        if (campo.hubspot) props.add(campo.hubspot);
+        // El desplegable que elige comercial (§9.14): se lee aparte del campo
+        // donde el sync deja el ID, y los dos hacen falta.
+        if (campo.hubspotOpcion) props.add(campo.hubspotOpcion);
+    }
+    // El vendedor sale del owner, y `emailDelOwner` mira las dos.
+    props.add('hubspot_owner_id');
+    props.add('hubspot_owner_email');
+    return [...props];
+}
+
+module.exports = { verificar, buscarDuplicados, literalSeguro, propiedadesQueNecesita, ALTA, COD_SEGURO, DOC_SEGURO };
