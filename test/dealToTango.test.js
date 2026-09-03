@@ -555,7 +555,10 @@ test('el reemplazo no pasa en silencio: queda avisado y marcado en el ERP', () =
     const r = verificar({ productos: SIN_ATAR });
 
     assert.strictEqual(r.avisos.length, 1);
-    assert.match(r.avisos[0].motivo, /BAT250/);
+    // Del catalogo, no escrito a mano: el articulo de prueba cambia (BAT250 ->
+    // ZZZ el 2026-09-03, porque se quedo sin stock) y el test no tiene por que
+    // romperse ni, peor, seguir verde mirando el articulo viejo.
+    assert.ok(r.avisos[0].motivo.includes(PRUEBA.codigo), `el aviso no nombra a ${PRUEBA.codigo}: ${r.avisos[0].motivo}`);
     assert.strictEqual(r.payload.LEYENDA_3, verificarPedido.LEYENDA_PRUEBA);
     assert.match(r.payload.RENGLON_DTO[0].OBSERVACIONES, /Ecografo/, 'el articulo que correspondia viaja al ERP');
 });

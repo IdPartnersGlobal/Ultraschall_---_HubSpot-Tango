@@ -2083,6 +2083,27 @@ El mensaje dice qué owner es y dónde se arregla: `clientes.alta.campos[ID_GVA2
 
 **El renglón de prueba.** `matias.tari@idpartners.ar` no es vendedor de Ultraschall —es el implementador— pero va mapeado a FACUNDO (`10`) por pedido de Matías, para poder probar el circuito con negocios propios. Los clientes que cree una prueba suya quedan con FACUNDO de vendedor, que es lo que pasaba con **todos** antes de sacar el default; la diferencia es que ahora está declarado y se ve. Queda `porOwnerNota` en el catálogo diciendo que se saque cuando terminen las pruebas, y un test que falla el día que se saque.
 
+### 9.20 El artículo de prueba se quedó sin stock (2026-09-03)
+
+`BAT250` (`ID_STA11=187`) se quedó sin stock en el ERP. Con `VALIDA_STOCK: true` eso hace que Tango **rechace el pedido**, y el error parece del circuito — es exactamente lo que anticipaba el campo `ojo` de `productoDePrueba` desde el 2026-08-27.
+
+**Lo que no se hizo:** buscar otro artículo *que tenga stock*. Eso repite el problema el mes que viene, y la próxima vez sin nadie mirando.
+
+`STA11` tiene dos campos que deciden si un artículo puede frenar un pedido:
+
+| campo | qué significa |
+|---|---|
+| `STOCK` | si es `false`, **el artículo no lleva stock**. La validación no tiene nada que validar. |
+| `DESCARGA_NEGATIVO_STOCK` | lleva stock, pero deja descargar en negativo: tampoco frena |
+
+**Sobre los 826 artículos: 85 son vendibles (`PERFIL` A o V) y no pueden frenar un pedido por stock.** Los 85 son por `STOCK = false`; ninguno descarga en negativo.
+
+De esos 85, casi todos son **services** —usarlos ensuciaría el reporte de service— o **cuentas contables** (`REDON` Redondeos, `AJU` Ajuste Interno, `DIFCAM` Diferencia de Cambio, `BON` Bonificación), que distorsionarían reportes financieros. Quedó **`ZZZ` "Varios"** (`ID_STA11=778`, `PERFIL A`), que es el comodín del catálogo. Segunda opción: `ADP` "Adicional producto" (`618`).
+
+Rederivar la lista: `node scripts/articuloDePrueba.js --proxy <url>`. Sólo lectura; no toca la config ni el ERP.
+
+⚠️ El día que se cambie por un artículo que **sí** lleve stock, vuelve el problema. El script lo dice del artículo actual antes de listar candidatos.
+
 
 ## 10. Seguridad
 

@@ -329,14 +329,15 @@
     "productoDePrueba": {
       "_nota": "DECISION DE MATIAS 2026-08-27. Hasta que exista la integracion de productos, ningun product de HubSpot tiene tango_id_sta11: TODOS los renglones se marcaban incompletos y el pedido no salia nunca. Con esto el renglon sale igual, con la cantidad y el precio de la linea real, pero apuntando a este articulo.",
       "activo": true,
-      "codigo": "BAT250",
-      "idSta11": 187,
-      "descripcion": "Bateria detector fetal BT250",
+      "codigo": "ZZZ",
+      "idSta11": 778,
+      "descripcion": "Varios",
+      "porQueEste": "CAMBIADO EL 2026-09-03: BAT250 (ID_STA11=187) se quedo sin stock y con VALIDA_STOCK en true el ERP rechaza el pedido — el riesgo que decia el campo `ojo` de esta misma config. Elegir otro CON stock repite el problema el mes que viene; ZZZ tiene STOCK=false, o sea que NO LLEVA STOCK y la validacion no tiene nada que validar. De los 85 articulos vendibles en esa condicion (`node scripts/articuloDePrueba.js`), los demas son services —ensuciarian el reporte de service— o cuentas contables (Redondeos, Ajuste Interno, Diferencia de Cambio, Bonificacion), que distorsionarian reportes financieros. ZZZ es el comodin del catalogo. Segunda opcion: ADP `Adicional producto`, ID_STA11=618.",
       "cuandoActua": "SOLO cuando el producto de la linea no tiene tango_id_sta11. El dia que el sync de productos ate los IDs, esto deja de actuar solo, sin tocar nada.",
       "cuandoNoActua": "Una linea escrita a mano, sin producto del catalogo, se sigue frenando. Eso no es la integracion que falta: es una linea mal cargada, y el producto de prueba taparia el error.",
       "comoSeApaga": "activo: false aca, o TANGO_PRODUCTO_PRUEBA=off en las Application Settings. TANGO_PRODUCTO_PRUEBA=<numero> cambia el articulo sin desplegar.",
       "noSeTapaSolo": "El pedido queda MARCADO en el ERP: LEYENDA_3 en la cabecera y el articulo que correspondia en OBSERVACIONES de cada renglon. Sin eso un pedido de prueba seria indistinguible de uno real.",
-      "ojo": "VALIDA_STOCK esta en true. Si BAT250 no tiene stock en Tango el ERP puede rechazar el pedido, y no va a ser culpa del circuito."
+      "ojo": "VALIDA_STOCK sigue en true y sin evidencia, pero ya no muerde aca: el articulo de prueba no lleva stock. ⚠️ El dia que se cambie por uno que SI lleve stock, vuelve el problema — y el rechazo del ERP parece del circuito. Comprobarlo con `node scripts/articuloDePrueba.js --proxy <url>` antes de cambiarlo."
     },
     "_evidenciaDefaults": {
       "_nota": "Los cuatro salen de los pedidos reales del ERP, no de un ejemplo de Postman. Ver _comoSeVerifico.",
