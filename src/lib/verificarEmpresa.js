@@ -250,8 +250,20 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
     const valores = {};
     const resueltos = {};
 
-    /** Se creo igual, pero falta esto. No frena: lo lee la nota del negocio (9.9). */
-    const avisar = (campo, motivo, comoSeArregla) => avisos.push(problema(campo, motivo, comoSeArregla));
+    /**
+     * Un dato que Tango NO exige pero que igual hace falta.
+     *
+     * Con `exigirCompleta` (2026-09-03) frena como cualquier otro: el negocio
+     * retrocede y no se crea nada. Sin el, se crea igual y esto queda como
+     * aviso en una nota, que es la politica de alta minima del 2026-08-28.
+     *
+     * Lo que hizo cambiar de lado al CUIT: **no hay ningun camino que mande a
+     * Tango un dato cargado despues**. `Api/Update` nunca se uso y el sync va
+     * Tango -> HubSpot. La nota que decia "completalo despues" pedia algo que
+     * no llegaba nunca al ERP.
+     */
+    const exigirCompleta = ALTA.exigirCompleta === true;
+    const avisar = (campo, motivo, comoSeArregla) => (exigirCompleta ? problemas : avisos).push(problema(campo, motivo, comoSeArregla));
 
     for (const campo of ALTA.campos) {
         // El codigo lo elige lib/numeracion, no se verifica desde la company.
@@ -354,14 +366,16 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
                 // Tango no lo exige, asi que el cliente se crea igual — pero
                 // sin CUIT no se le puede facturar, y eso tiene que llegarle a
                 // alguien.
-                avisar(campo, 'esta vacio: el cliente se crea sin ese dato', `cargar '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' en la empresa`);
+                avisar(campo,
+                    exigirCompleta ? 'está vacío' : 'esta vacio: el cliente se crea sin ese dato',
+                    `cargar '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' en la empresa`);
             }
             continue;
         }
 
         if (r.porDefecto && campo.avisarSiFalta) {
             avisar(campo, `no estaba cargado: va '${r.codigo ?? r.valor}' por defecto`,
-                `confirmar ${campo.hubspot} en la empresa`);
+                `confirmar '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' en la empresa`);
         }
 
         valores[campo.tango] = r.valor;

@@ -16,6 +16,8 @@
       "seSobreescribeCon": "TANGO_NUMERACION en las Application Settings, si alguna vez hace falta volver a reservado sin desplegar."
     },
     "alta": {
+      "exigirCompleta": true,
+      "_exigirCompleta": "DECISION DE MATIAS 2026-09-03. Revierte para el circuito del pedido la politica de alta minima del 2026-08-28: si a la empresa le falta CUALQUIER dato, el negocio retrocede de etapa y NO se crea ni el cliente ni el pedido. El motivo no es prolijidad: NO EXISTE NINGUN CAMINO que mande a Tango un dato cargado despues. Api/Update nunca se uso y el sync de clientes va Tango -> HubSpot. O sea que la nota que decia 'completalo despues en la empresa' pedia algo que no iba a llegar nunca al ERP: el cliente quedaba sin CUIT para siempre y el negocio en Cierre ganado, con el pedido ya emitido y nadie mirando. Con esto en false vuelve el comportamiento anterior (se crea con lo minimo y lo que falta va como aviso).",
       "_nota": "Que exige Tango para dar de alta un cliente, y de donde sale cada cosa. Lo lee lib/verificarEmpresa ANTES de intentar el alta, para poder decir que falta en vez de comerse un rechazo del ERP. Es el riesgo 3 del circuito: 'verificar empresa' es mas que mirar si existe el COD_GVA14.",
       "_verificadoContraElERP": "2026-08-28",
       "_sondeo": {

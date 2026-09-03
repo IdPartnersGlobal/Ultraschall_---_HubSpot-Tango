@@ -169,6 +169,40 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     // articulo que no es el que se vendio no puede pasar en silencio.
     for (const a of v.avisos || []) log.aviso('PEDIDO', `${dealId}: ${a.motivo}`);
 
+    // 5b. TODO lo que se pueda saber, ANTES de tocar el ERP (§9.22, pedido de
+    //     Matias 2026-09-03). Si la empresa hay que crearla, se verifica aca
+    //     —sin red— y sus problemas se juntan con los del pedido.
+    //
+    //     El orden importa y antes estaba al reves: se creaba el cliente en
+    //     Tango y RECIEN DESPUES se miraba si el pedido estaba completo. Un
+    //     negocio al que le faltaba la fecha de entrega dejaba un cliente
+    //     creado en el ERP y volvia de etapa igual. Y peor: el pedido podia
+    //     salir con la empresa a medias, quedando el negocio en Cierre ganado
+    //     con un cliente sin CUIT que ya nadie iba a completar — no hay ningun
+    //     camino que mande a Tango un dato cargado despues.
+    const empresa = v.cliente.faltaAlta
+        ? altaCliente.verificar({ lookups, propiedades: companyProps, owners, ownerId: deal.properties?.hubspot_owner_id })
+        : null;
+
+    const problemasTodos = [
+        ...v.problemas,
+        ...(empresa ? empresa.problemas : []),
+        ...(empresa ? empresa.pendientes.map((p) => ({
+            campo: p.campo,
+            motivo: `falta definirlo: ${p.queFalta}`,
+            comoSeArregla: `lo define ${p.quienLoDefine}`,
+        })) : []),
+    ];
+
+    if (problemasTodos.length) {
+        const r = await reportarIncompleto({
+            hs, dealId, etapaActual: deal.properties?.dealstage,
+            problemas: problemasTodos, log, dryRun, ahora,
+        });
+        log.aviso('DEAL', `${dealId} incompleto -> ${r.motivo}`);
+        return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: problemasTodos, retroceso: r.retroceso };
+    }
+
     // El cliente todavia no existe en el ERP: se crea antes del pedido y la
     // company queda con su COD_GVA14, asi que la proxima vez ya no hace falta.
     let cliente = v.cliente;
@@ -230,15 +264,6 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         cliente = { idGva14: alta.idGva14, codigo: alta.codigo, faltaAlta: false };
         v.payload.ID_GVA14 = alta.idGva14;
         avisosDelAlta = alta.avisos || [];
-    }
-
-    if (!v.ok) {
-        const r = await reportarIncompleto({
-            hs, dealId, etapaActual: deal.properties?.dealstage,
-            problemas: v.problemas, log, dryRun, ahora,
-        });
-        log.aviso('DEAL', `${dealId} incompleto -> ${r.motivo}`);
-        return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: v.problemas, retroceso: r.retroceso };
     }
 
     if (dryRun) {

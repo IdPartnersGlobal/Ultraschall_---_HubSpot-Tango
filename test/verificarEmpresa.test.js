@@ -45,6 +45,18 @@ const COMPANY = {
  */
 const OWNER_VENDEDOR = 'jbutorac@ultraschall.com.ar'; // vendedor 24 -> ID 26
 
+/**
+ * Corre `fn` con `clientes.alta.exigirCompleta` en un valor y lo deja como
+ * estaba. El interruptor decide si a la empresa se le exige TODO antes de
+ * crear nada (2026-09-03) o si se crea con lo minimo y lo que falta queda como
+ * aviso (la politica del 2026-08-28). Los dos caminos siguen teniendo tests.
+ */
+function conExigirCompleta(valor, fn) {
+    const antes = verificarEmpresa.ALTA.exigirCompleta;
+    verificarEmpresa.ALTA.exigirCompleta = valor;
+    try { return fn(); } finally { verificarEmpresa.ALTA.exigirCompleta = antes; }
+}
+
 const verificar = (props, extra = {}) =>
     verificarEmpresa.verificar({ propiedades: props, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR, ...extra });
 
@@ -119,15 +131,30 @@ test('sin tipo de documento se infiere del numero, como en la lectura', () => {
     assert.strictEqual(r.resueltos.tipoDocumento.inferido, true, 'queda constancia de que fue inferido');
 });
 
-test('sin documento el alta SALE, con el tipo en SIN_IDENTIFICAR y un aviso', () => {
+test('con alta minima, sin documento el alta SALE y queda un aviso', () => {
     // CAMBIO 2026-08-28: el CUIT frenaba el alta por suposicion. El sondeo
     // contra el ERP mostro que Tango NO lo exige (alta._sondeo), y la politica
-    // es crear con lo minimo. Sigue avisandose: sin CUIT no se puede facturar.
+    // era crear con lo minimo. Desde el 2026-09-03 ya NO es el default —ver el
+    // test de abajo— pero el modo sigue existiendo y sigue probado.
+    conExigirCompleta(false, () => {
+        const r = verificar({ ...COMPANY, cuit: '', tipo_de_documento: '' });
+        assert.strictEqual(r.valores.ID_TIPO_DOCUMENTO_GV, 41, 'SIN_IDENTIFICAR es una fila real de TIPO_DOCUMENTO_GV');
+        assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+        assert.deepStrictEqual(r.avisos.map((a) => a.campo), ['CUIT'], 'no frena, pero no pasa en silencio');
+        assert.match(r.avisos[0].comoSeArregla, /CUIT/i);
+    });
+});
+
+test('sin CUIT el alta NO sale: no hay forma de completarlo despues', () => {
+    // DECISION DE MATIAS 2026-09-03. El aviso "completalo despues en la
+    // empresa" pedia algo imposible: no existe ningun camino que mande a Tango
+    // un dato cargado mas tarde (Api/Update nunca se uso, y el sync va
+    // Tango -> HubSpot). El cliente quedaba sin CUIT para siempre, con el
+    // pedido ya emitido y el negocio en Cierre ganado.
     const r = verificar({ ...COMPANY, cuit: '', tipo_de_documento: '' });
-    assert.strictEqual(r.valores.ID_TIPO_DOCUMENTO_GV, 41, 'SIN_IDENTIFICAR es una fila real de TIPO_DOCUMENTO_GV');
-    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
-    assert.deepStrictEqual(r.avisos.map((a) => a.campo), ['CUIT'], 'no frena, pero no pasa en silencio');
-    assert.match(r.avisos[0].comoSeArregla, /cuit/i);
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'CUIT'), JSON.stringify(r.problemas));
+    assert.deepStrictEqual(r.avisos, [], 'ya no es un aviso: frena');
 });
 
 test('telefono y mail no frenan el alta', () => {
@@ -247,15 +274,25 @@ test('lo que frena el alta es lo que Tango exige, y nada mas', () => {
 test('verificar no explota con una company vacia: informa', () => {
     // Una company COMPLETAMENTE vacia ya no frena por cinco campos: frena por
     // el unico que Tango exige de verdad y no se puede inventar.
+    conExigirCompleta(false, () => {
+        const r = verificarEmpresa.verificar({ propiedades: {}, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
+        assert.strictEqual(r.ok, false);
+        assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(), ['ID_CATEGORIA_IVA', 'RAZON_SOCI'],
+            'los dos unicos que una persona tiene que decidir');
+        assert.deepStrictEqual(
+            r.avisos.map((a) => a.campo).sort(),
+            ['CUIT', 'DOMICILIO'],
+            'lo demas se crea con default y queda para completar'
+        );
+    });
+});
+
+test('exigiendo la empresa completa, la company vacia frena por los cuatro', () => {
     const r = verificarEmpresa.verificar({ propiedades: {}, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
     assert.strictEqual(r.ok, false);
-    assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(), ['ID_CATEGORIA_IVA', 'RAZON_SOCI'],
-        'los dos unicos que una persona tiene que decidir');
-    assert.deepStrictEqual(
-        r.avisos.map((a) => a.campo).sort(),
-        ['CUIT', 'DOMICILIO'],
-        'lo demas se crea con default y queda para completar'
-    );
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(),
+        ['CUIT', 'DOMICILIO', 'ID_CATEGORIA_IVA', 'RAZON_SOCI']);
+    assert.deepStrictEqual(r.avisos, []);
 });
 
 test('sin condicion de IVA el alta NO sale: la categoria fiscal se elige', () => {
@@ -265,7 +302,7 @@ test('sin condicion de IVA el alta NO sale: la categoria fiscal se elige', () =>
     // factura. Llego a estar con RI por defecto y se saco.
     const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA' }, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
     assert.strictEqual(r.ok, false);
-    assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['ID_CATEGORIA_IVA']);
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_CATEGORIA_IVA'), JSON.stringify(r.problemas));
     assert.ok(!r.avisos.some((a) => a.campo === 'ID_CATEGORIA_IVA'), 'frena: no es un aviso');
 });
 
@@ -277,10 +314,10 @@ test('el catalogo NO declara un default para la categoria de IVA', () => {
     assert.strictEqual(campo.obligatorio, true);
 });
 
-test('con la razon social y la condicion de IVA ya se puede dar de alta', () => {
-    // Es la politica del 2026-08-28: si la empresa no tiene ID de Tango se crea
-    // con lo minimo, y comercial completa despues.
-    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' }, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
+test('con alta minima, la razon social y la condicion de IVA ya alcanzan', () => {
+    // La politica del 2026-08-28: si la empresa no tiene ID de Tango se crea
+    // con lo minimo. Ya no es el default (2026-09-03), pero el modo existe.
+    const r = conExigirCompleta(false, () => verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' }, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR }));
     assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
     assert.strictEqual(r.valores.RAZON_SOCI, 'ACME SA');
     assert.strictEqual(r.valores.NOM_COM, 'ACME SA', 'el nombre de fantasia se cae a la razon social');

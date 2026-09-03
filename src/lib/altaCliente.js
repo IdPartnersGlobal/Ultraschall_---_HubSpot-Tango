@@ -364,8 +364,22 @@ async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, o
     return { creado: true, codigo: codigoCreado, idGva14: vuelta.idGva14, companyId, problemas: vuelta.problemas, pendientes: [], avisos: v.avisos || [], dryRun: false };
 }
 
+/**
+ * ¿Se puede dar de alta esta empresa? Sin tocar la red.
+ *
+ * Es exactamente el paso 1 de `crear`, expuesto aparte para poder preguntarlo
+ * ANTES de decidir si se toca Tango (§9.22). No duplica logica: llama a lo
+ * mismo, con el mismo mapper.
+ */
+function verificar({ lookups, propiedades, owners = null, ownerId = null }) {
+    return verificarEmpresa.verificar({
+        propiedades, mapper: mapper.crear(mapeoClientes, lookups), lookups, owners, ownerId,
+    });
+}
+
 module.exports = {
     crear,
+    verificar,
     filaPorCodigo,
     esElMismoCliente,
     CANDIDATOS,

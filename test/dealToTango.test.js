@@ -246,9 +246,10 @@ test('que falle la nota de completar no tumba el pedido, que ya salio', async ()
     await d2t.anotarACompletar({ hs, dealId: '111', avisos: [{ campo: 'CUIT', motivo: 'x' }], cliente: {} });
 });
 
-test('una empresa con razon social y condicion de IVA pasa y deja los avisos', () => {
-    // Es la politica del 2026-08-28 vista desde el pedido: el alta no frena, y
-    // lo que se completo con default viaja como aviso.
+test('exigiendo la empresa completa, lo que antes era aviso ahora frena', () => {
+    // Da vuelta la politica del 2026-08-28 vista desde el pedido (§9.22): el
+    // CUIT y el domicilio ya no viajan como aviso despues de crear el pedido,
+    // porque no habia forma de que ese dato llegara nunca a Tango.
     const verificarEmpresa = require('../src/lib/verificarEmpresa');
     const mapper = require('../src/lib/mapper');
     const mapeoClientes = require('../config/mapeo.clientes.json');
@@ -258,9 +259,10 @@ test('una empresa con razon social y condicion de IVA pasa y deja los avisos', (
         lookups: lk,
         ownerId: 'farancibia@ultraschall.com.ar',
     });
-    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
-    assert.ok(r.avisos.length >= 2, 'CUIT y domicilio, por lo menos');
-    for (const a of r.avisos) assert.ok(a.comoSeArregla, `el aviso de ${a.campo} no dice que hacer`);
+    assert.strictEqual(r.ok, false, 'con la empresa a medias no se crea nada');
+    const campos = r.problemas.map((p) => p.campo).sort();
+    assert.deepStrictEqual(campos, ['CUIT', 'DOMICILIO'], JSON.stringify(r.problemas));
+    for (const p of r.problemas) assert.ok(p.comoSeArregla, `el problema de ${p.campo} no dice que hacer`);
 });
 
 test('un cambio de etapa que no es ganado se descarta con 204', () => {
@@ -1391,4 +1393,68 @@ test('un negocio de Matias SI da de alta: esta mapeado a FACUNDO para probar', a
 
     assert.notStrictEqual(r.estado, 'incompleto', `no deberia frenar: ${r.motivo}`);
     assert.strictEqual(tango.creados[0].payload.ID_GVA23, 10, 'FACUNDO');
+});
+
+// ── Nada se crea en el ERP hasta que TODO esta bien (§9.22) ─────────────────
+
+/**
+ * Pedido de Matias, 2026-09-03: "el negocio tiene que retroceder ANTES de que
+ * se cree el pedido si cualquier cosa esta mal".
+ *
+ * Antes el orden era: verificar el pedido -> CREAR EL CLIENTE -> recien ahi
+ * mirar si el pedido estaba completo. Un negocio sin fecha de entrega dejaba un
+ * cliente creado en Tango y volvia de etapa igual. Y con la empresa a medias el
+ * pedido salia lo mismo, dejando el negocio en Cierre ganado con un cliente sin
+ * CUIT que nadie iba a completar nunca.
+ */
+
+test('con la empresa incompleta no se crea NI el cliente NI el pedido', async () => {
+    const { hs, tango } = conAlta({ company: { ...COMPANY_A_CREAR, cuit: '', domicilio_del_consultorio: '' } });
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(tango.creados.length, 0, 'no se toca el ERP: ni alta ni pedido');
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'y el negocio retrocede una etapa');
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(), ['CUIT', 'DOMICILIO']);
+});
+
+test('si al PEDIDO le falta algo, tampoco se crea el cliente', async () => {
+    // El orden viejo creaba el cliente primero y despues frenaba por el pedido:
+    // quedaba un cliente en Tango para un negocio que nunca fue pedido.
+    const { hs, tango } = conAlta({ deal: { hubspot_owner_id: OWNER_COMERCIAL, tango_fecha_entrega: '' } });
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.ok(r.problemas.some((p) => p.campo === 'FECHA_ENTREGA'), JSON.stringify(r.problemas));
+    assert.strictEqual(tango.creados.length, 0, 'el cliente NO se crea para un pedido que no va a salir');
+});
+
+test('los problemas del pedido y los de la empresa llegan juntos en una nota', async () => {
+    // Si vinieran en dos vueltas, comercial cargaria un dato, lo movería a
+    // ganado, y recien ahi se enteraria del segundo.
+    const { hs, tango } = conAlta({
+        deal: { hubspot_owner_id: OWNER_COMERCIAL, tango_fecha_entrega: '' },
+        company: { ...COMPANY_A_CREAR, cuit: '' },
+    });
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    const campos = r.problemas.map((p) => p.campo);
+    assert.ok(campos.includes('FECHA_ENTREGA'), campos.join(','));
+    assert.ok(campos.includes('CUIT'), campos.join(','));
+    assert.strictEqual(hs.notas.length, 1, 'una sola nota, con las dos cosas');
 });

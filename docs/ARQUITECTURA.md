@@ -2137,6 +2137,30 @@ Lo que **no** se traduce: los logs de Azure —ahí el nombre interno es lo úti
 
 Y un tercer arreglo de redacción: un rechazo del ERP ya no se anuncia como *"Falta este dato"* (`tipo: 'rechazo'`). No falta ningún dato — hay uno que Tango no acepta, o una regla que no se cumple, y decir "falta" manda a buscar un campo vacío que no existe.
 
+### 9.22 Nada se crea en el ERP hasta que todo esté bien (2026-09-03)
+
+El negocio de prueba quedó en **Cierre ganado** con el pedido emitido y el cliente sin CUIT. El circuito hizo lo que decía la política del alta mínima (§9.10): creó con lo mínimo, dejó una nota de *"completalo después en la empresa"* y no movió la etapa, porque el pedido ya estaba en el ERP.
+
+Matías: *"no tiene sentido que se cree el pedido y después me digas que la empresa no la pude asociar… ¿cómo hace el comercial eso sin abrir Tango?"*
+
+**Tiene razón, y por un motivo más fuerte que el planteado: no existe ningún camino que mande a Tango un dato cargado después.** `Api/Update` figura en la lista de endpoints del ERP pero nunca se usó, y el sync de clientes va **Tango → HubSpot**. La nota pedía algo que no iba a llegar nunca: ese CUIT se cargaba en HubSpot y el cliente del ERP quedaba sin él para siempre, con la factura por delante.
+
+#### Dos cambios
+
+**1. El orden.** Antes era: verificar el pedido → **crear el cliente** → recién ahí mirar si el pedido estaba completo. Un negocio sin fecha de entrega dejaba un cliente creado en Tango y volvía de etapa igual — un cliente en el ERP para un pedido que nunca existió.
+
+Ahora todo lo que se puede saber sin red se sabe primero: los problemas del pedido y los de la empresa se juntan y se reportan **en una sola nota**, antes de tocar el ERP. Si vinieran en dos vueltas, comercial cargaría un dato, movería el negocio a ganado, y recién ahí se enteraría del segundo.
+
+**2. `clientes.alta.exigirCompleta: true`.** Los avisos de la empresa pasan a frenar. En la práctica son dos, `CUIT` y `DOMICILIO`, así que el alta ahora exige cuatro datos: razón social, condición de IVA, CUIT y domicilio.
+
+⚠️ **Esto revierte la política del alta mínima para el circuito del pedido**, y el costo está medido: de las 66 companies del portal, a 62 les falta el CUIT y a 64 el domicilio. **Con esto, prácticamente ningún negocio de los que hay hoy crea su empresa.** Es carga de comercial, y es la intención: el dato entra antes de la factura o no entra nunca.
+
+El interruptor sigue en el catálogo y en `false` vuelve el comportamiento anterior. Los dos modos tienen tests.
+
+#### Lo que NO frena
+
+El **artículo de prueba** (§9.6) sigue siendo un aviso. Es un modo temporal y deliberado: hoy ningún product de HubSpot tiene `tango_id_sta11`, así que hacerlo bloqueante dejaría el circuito sin poder probarse. El pedido igual queda marcado en el ERP con `LEYENDA_3`.
+
 
 ## 10. Seguridad
 
