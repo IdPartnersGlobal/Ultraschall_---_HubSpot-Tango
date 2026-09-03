@@ -95,6 +95,9 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
          * tabla aparte. La consumen `soloOwner` (el freno de las pruebas) y
          * `verificarEmpresa.emailDelOwner` (owner -> vendedor de Tango).
          *
+         * ⚠️ El worker la lee SIEMPRE, no solo cuando el filtro la necesita:
+         * sin ella no hay vendedor y el alta frena (§9.19).
+         *
          * Se devuelve un Map y no un array porque las dos la usan como lookup.
          * Son 19 owners: entra en una pagina y no hace falta paginar, pero se
          * pagina igual — el dia que sean 120 no se va a acordar nadie.

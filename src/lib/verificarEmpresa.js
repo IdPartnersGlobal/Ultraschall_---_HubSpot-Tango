@@ -199,15 +199,22 @@ function codigoDesdeEtiqueta(nombreHubSpot, etiqueta, m) {
 }
 
 /**
- * Mail del owner de la company. HubSpot guarda el ID, no el mail, asi que la
- * tabla de owners hay que leerla aparte (es una llamada de red). Se acepta
- * tambien el mail ya resuelto, para no obligar a leer owners en un test.
+ * Mail del owner que decide el vendedor.
+ *
+ * Es el owner del NEGOCIO, no el de la company (decision de Matias 2026-09-03):
+ * el vendedor es quien cerro la venta. La mayoria de las companies no tienen
+ * owner —la demo tampoco— asi que mirar ahi era mirar un campo vacio.
+ *
+ * HubSpot guarda el ID y nunca el mail, asi que la tabla de owners hay que
+ * leerla aparte (es una llamada de red). Se acepta tambien el mail ya resuelto,
+ * para no obligar a leer owners en un test.
  */
-function emailDelOwner(props, owners) {
-    if (!vacio(props.hubspot_owner_email)) return props.hubspot_owner_email;
-    const id = props.hubspot_owner_id;
-    if (vacio(id) || !owners) return null;
-    return (typeof owners.get === 'function' ? owners.get(String(id)) : owners[String(id)]) || null;
+function emailDelOwner(ownerId, owners) {
+    if (vacio(ownerId)) return null;
+    const v = String(ownerId).trim();
+    if (v.includes('@')) return v;
+    if (!owners) return null;
+    return (typeof owners.get === 'function' ? owners.get(v) : owners[v]) || null;
 }
 
 /** Etiqueta de `tipo_de_documento` -> tipo logico de lib/documento. */
@@ -226,12 +233,14 @@ function tipoLogicoDesdeEtiqueta(etiqueta, m) {
  * @param {object} [p.decididos]  valores que administracion ya definio, por
  *                                campo de Tango: { ID_GVA10: 3, ... }
  * @param {object} [p.owners]     id de owner de HubSpot -> mail, para resolver
- *                                el vendedor. Sin esto el vendedor cae al default.
+ *                                el vendedor. Sin esto el alta FRENA.
+ * @param {string} [p.ownerId]    owner del NEGOCIO (id o mail). Es lo que
+ *                                decide el vendedor de Tango.
  * @returns {{ok, problemas, pendientes, avisos, valores, resueltos}}
  *
  * Nunca lanza. Una company incompleta es un informe, no una excepcion.
  */
-function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owners = null } = {}) {
+function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owners = null, ownerId = null } = {}) {
     if (!m) throw new Error('verificarEmpresa: falta el mapper');
 
     const problemas = [];
@@ -292,11 +301,17 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
                 }
             }
 
-            // El vendedor sale del owner de la company. El match NO puede ser
-            // por el mail de Tango: GVA23.E_MAIL esta vacio en 26 de 27
-            // vendedores, asi que la equivalencia vive en el catalogo.
+            // El vendedor sale del owner del NEGOCIO. El match NO puede ser por
+            // el mail de Tango: GVA23.E_MAIL esta vacio en 26 de 27 vendedores,
+            // asi que la equivalencia vive en el catalogo (`porOwner`).
+            //
+            // ⚠️ Sin equivalencia esto FRENA el negocio (decision de Matias
+            // 2026-09-03). Antes caia en FACUNDO, que tiene el 63% de la cartera
+            // y por eso parecia razonable: el pedido del 2026-09-02 salio asi,
+            // con `ok: true` y sin un solo aviso. Un cliente que queda con el
+            // vendedor equivocado no lo descubre nadie hasta la comision.
             if (campo.origen === 'owner') {
-                const mail = String(emailDelOwner(propiedades, owners) || '').trim().toLowerCase();
+                const mail = String(emailDelOwner(ownerId, owners) || '').trim().toLowerCase();
                 const codigo = mail ? (campo.porOwner || {})[mail] : undefined;
                 const r = porCodigo(campo, codigo, lookups);
                 if (r) {
@@ -304,14 +319,16 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
                     resueltos[campo.tango] = { codigo: r.codigo, porOwner: mail };
                     continue;
                 }
-                // Owner sin equivalencia: se sigue con el default, pero queda
-                // dicho de donde salio para que no parezca un dato del owner.
-                const d = porCodigo(campo, campo.codigoPorDefecto, lookups);
-                if (d) {
-                    valores[campo.tango] = d.valor;
-                    resueltos[campo.tango] = { codigo: d.codigo, porDefecto: true, ownerSinEquivalencia: mail || null };
-                    continue;
-                }
+                problemas.push(problema(
+                    campo,
+                    mail
+                        ? `el owner del negocio (${mail}) no tiene vendedor equivalente en Tango`
+                        : 'el negocio no tiene owner, o no se pudo resolver su mail',
+                    mail
+                        ? `asignar el negocio a un owner que sea vendedor de Tango, o agregar '${mail}' a clientes.alta.campos[ID_GVA23].porOwner en config/defaults.tango.json`
+                        : 'asignar un owner al negocio en HubSpot',
+                ));
+                continue;
             } else {
                 const d = porCodigo(campo, campo.codigoPorDefecto, lookups);
                 if (d) { valores[campo.tango] = d.valor; resueltos[campo.tango] = { codigo: d.codigo, porDefecto: true }; continue; }
@@ -427,9 +444,9 @@ function propiedadesQueNecesita() {
         // donde el sync deja el ID, y los dos hacen falta.
         if (campo.hubspotOpcion) props.add(campo.hubspotOpcion);
     }
-    // El vendedor sale del owner, y `emailDelOwner` mira las dos.
-    props.add('hubspot_owner_id');
-    props.add('hubspot_owner_email');
+    // El owner NO va aca: el vendedor sale del owner del NEGOCIO, que se lee
+    // del Deal (`PROPS_DEAL`) y llega por `ownerId`. La company casi nunca
+    // tiene owner cargado, asi que pedirselo era pedir un campo vacio.
     return [...props];
 }
 

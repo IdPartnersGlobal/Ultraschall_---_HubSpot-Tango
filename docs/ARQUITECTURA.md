@@ -2044,6 +2044,45 @@ Al agregar los cuatro campos, `PROPS_DEAL` —escrita a mano— se quedó corta 
 
 Las cuatro propiedades ya existen en el portal: `deals` quedó en **10 propiedades**, `0 a crear · 0 a parchear · 0 a convertir · 0 a rehacer`.
 
+### 9.19 Los dos huecos que dejó ver el pedido que salió bien (2026-09-03)
+
+El pedido `00001-00013597` salió, y **salir bien es lo que dejó ver las dos fallas**: ninguna de las dos lanza, ninguna se ve en los logs y las dos terminan en un dato equivocado con `ok: true`.
+
+#### El número que anotaba HubSpot no era el de Tango
+
+`Api/Create` **no devolvió ningún número** al crear el pedido. `numeroDePedido()` recorre los nombres vistos (`NRO_PEDIDO`, `NRO_COMP`, `ID_GVA21`, `id`), no encontró ninguno y cayó al fallback: el ID del negocio.
+
+```
+tango_nro_pedido   64576262053    ← el ID del Deal
+NRO_PEDIDO real    00001-00013597 ← lo que administración busca en el ERP
+```
+
+**Desde HubSpot no se podía encontrar el pedido.** El fallback estaba bien elegido —`tango_nro_pedido` es *además* la guarda de idempotencia (§9.3), y quedarse sin escribirla mandaría el pedido dos veces— pero es un identificador nuestro, no del ERP.
+
+Se agregó `releerNroPedido`: si la respuesta no trae número, se relee GVA21 **después** del alta.
+
+- Se filtra por `CODIGO_CLIENTE`, la única columna de cliente que GVA21 acepta en `filtroSql` (`ID_GVA14` y `COD_GVA14` dan `Invalid column name`).
+- De las filas se elige la nuestra por **`LEYENDA_4`**, que ya llevaba el ID del Deal justamente para poder rastrear el pedido desde el ERP. Recién si eso no cierra, la última por `ID_GVA21` — y queda avisado.
+- **No lanza nunca.** El pedido ya está en el ERP: una lectura que falla no puede dejar el Deal sin marcar.
+- El código de cliente pasa por `literalSeguro`/`COD_SEGURO` antes de entrar al `filtroSql`, como toda condición armada en código (§10.0).
+
+#### El vendedor era siempre FACUNDO
+
+En el pedido real el cliente salió con **FACUNDO**, que es el `codigoPorDefecto`. No era la tabla `porOwner` incompleta: `procesarDeal` **recibía** `owners` y no se lo pasaba a `altaCliente.crear()`, así que `emailDelOwner` devolvía `null` siempre. **Ni los 4 owners que sí tienen equivalencia funcionaban.**
+
+Y aunque se lo hubiera pasado, `dealWorker` sólo leía la tabla cuando `DEAL_TO_TANGO_SOLO_OWNER` traía mails — o sea, casi nunca. Ahora se lee siempre: son 19 owners, una llamada, y se cachea con el mismo TTL que las tablas de Tango.
+
+**Dos decisiones de Matías (2026-09-03):**
+
+1. **El vendedor sale del owner del NEGOCIO, no del de la company.** Es quien cerró la venta. Casi ninguna company tiene owner cargado —la demo tampoco—, así que mirar ahí era mirar un campo vacío. `propiedadesQueNecesita()` dejó de pedir `hubspot_owner_id`/`hubspot_owner_email` de la company; el owner llega del Deal, por `ownerId`.
+2. **Sin equivalencia, el alta FRENA.** Se le sacó el `codigoPorDefecto` al campo. Antes caía en FACUNDO, y *por eso mismo* no llamaba la atención: tiene el 63% de la cartera, así que un cliente con el vendedor equivocado se ve razonable. No lo descubre nadie hasta la comisión.
+
+⚠️ **El costo, y es a propósito:** 23 de los 27 vendedores no tienen owner equivalente, porque `GVA23.E_MAIL` está vacío en 26 de 27 y la tabla se armó cruzando nombres. **Mientras `porOwner` no se complete, todo negocio de un owner sin mapear frena con nota y retroceso de etapa.**
+
+El mensaje dice qué owner es y dónde se arregla: `clientes.alta.campos[ID_GVA23].porOwner` en `config/defaults.tango.json`.
+
+**El renglón de prueba.** `matias.tari@idpartners.ar` no es vendedor de Ultraschall —es el implementador— pero va mapeado a FACUNDO (`10`) por pedido de Matías, para poder probar el circuito con negocios propios. Los clientes que cree una prueba suya quedan con FACUNDO de vendedor, que es lo que pasaba con **todos** antes de sacar el default; la diferencia es que ahora está declarado y se ve. Queda `porOwnerNota` en el catálogo diciendo que se saque cuando terminen las pruebas, y un test que falla el día que se saque.
+
 
 ## 10. Seguridad
 

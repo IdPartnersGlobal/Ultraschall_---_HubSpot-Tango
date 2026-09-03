@@ -333,9 +333,15 @@ const hsAlta = () => {
     };
 };
 
+/**
+ * El owner del NEGOCIO decide el vendedor y sin equivalencia el alta frena
+ * (2026-09-03), asi que todo alta que tenga que salir bien necesita uno.
+ */
+const OWNER_VENDEDOR = 'jbutorac@ultraschall.com.ar'; // vendedor 24
+
 const crearAlta = (tango, hs, extra = {}) => alta.crear({
     tango, hs, lookups: lk, companyId: '555', propiedades: COMPANY_OK,
-    estrategia: 'correlativo', dryRun: false, ahora: AHORA, ...extra,
+    estrategia: 'correlativo', ownerId: OWNER_VENDEDOR, dryRun: false, ahora: AHORA, ...extra,
 });
 
 test('si el codigo esta tomado por otro cliente, suma uno y sigue', async () => {

@@ -38,8 +38,15 @@ const COMPANY = {
     correo_electronico: 'contacto@prueba.com',
 };
 
+/**
+ * El owner del NEGOCIO ya no es opcional: sin vendedor equivalente el alta
+ * frena (decision de Matias 2026-09-03). Los tests que no son sobre el vendedor
+ * pasan uno valido, para poder ejercitar el resto del alta.
+ */
+const OWNER_VENDEDOR = 'jbutorac@ultraschall.com.ar'; // vendedor 24 -> ID 26
+
 const verificar = (props, extra = {}) =>
-    verificarEmpresa.verificar({ propiedades: props, mapper: m, lookups: lk, ...extra });
+    verificarEmpresa.verificar({ propiedades: props, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR, ...extra });
 
 // ── El caso feliz ────────────────────────────────────────────────────────
 
@@ -239,7 +246,7 @@ test('lo que frena el alta es lo que Tango exige, y nada mas', () => {
 test('verificar no explota con una company vacia: informa', () => {
     // Una company COMPLETAMENTE vacia ya no frena por cinco campos: frena por
     // el unico que Tango exige de verdad y no se puede inventar.
-    const r = verificarEmpresa.verificar({ propiedades: {}, mapper: m, lookups: lk });
+    const r = verificarEmpresa.verificar({ propiedades: {}, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
     assert.strictEqual(r.ok, false);
     assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(), ['ID_CATEGORIA_IVA', 'RAZON_SOCI'],
         'los dos unicos que una persona tiene que decidir');
@@ -255,7 +262,7 @@ test('sin condicion de IVA el alta NO sale: la categoria fiscal se elige', () =>
     // alta minima: todo lo demas se completa con default, pero esto determina
     // COMO SE FACTURA. Un default equivocado no se nota hasta que sale mal una
     // factura. Llego a estar con RI por defecto y se saco.
-    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA' }, mapper: m, lookups: lk });
+    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA' }, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
     assert.strictEqual(r.ok, false);
     assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['ID_CATEGORIA_IVA']);
     assert.ok(!r.avisos.some((a) => a.campo === 'ID_CATEGORIA_IVA'), 'frena: no es un aviso');
@@ -272,7 +279,7 @@ test('el catalogo NO declara un default para la categoria de IVA', () => {
 test('con la razon social y la condicion de IVA ya se puede dar de alta', () => {
     // Es la politica del 2026-08-28: si la empresa no tiene ID de Tango se crea
     // con lo minimo, y comercial completa despues.
-    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' }, mapper: m, lookups: lk });
+    const r = verificarEmpresa.verificar({ propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' }, mapper: m, lookups: lk, ownerId: OWNER_VENDEDOR });
     assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
     assert.strictEqual(r.valores.RAZON_SOCI, 'ACME SA');
     assert.strictEqual(r.valores.NOM_COM, 'ACME SA', 'el nombre de fantasia se cae a la razon social');
@@ -333,8 +340,8 @@ test('un documento sin ningun digito si es problema', () => {
 
 // ── Vendedor por owner ───────────────────────────────────────────────────
 
-test('el vendedor sale del owner de la company', () => {
-    const r = verificar({ ...COMPANY, hubspot_owner_email: 'jbutorac@ultraschall.com.ar' });
+test('el vendedor sale del owner del negocio', () => {
+    const r = verificar(COMPANY, { ownerId: 'jbutorac@ultraschall.com.ar' });
     assert.strictEqual(r.valores.ID_GVA23, 26, 'Juan Butorac es el codigo 24, que en GVA23 es el ID 26');
     assert.strictEqual(r.resueltos.ID_GVA23.codigo, '24');
     assert.strictEqual(r.resueltos.ID_GVA23.porOwner, 'jbutorac@ultraschall.com.ar');
@@ -343,29 +350,52 @@ test('el vendedor sale del owner de la company', () => {
 test('el owner se puede resolver por id contra la tabla de owners', () => {
     // HubSpot guarda el ID del owner, no el mail: la tabla se lee aparte.
     const owners = { '90573355': 'jbutorac@ultraschall.com.ar' };
-    const r = verificar({ ...COMPANY, hubspot_owner_id: '90573355' }, { owners });
+    const r = verificar(COMPANY, { ownerId: '90573355', owners });
     assert.strictEqual(r.valores.ID_GVA23, 26);
 });
 
 test('el mail del owner no distingue mayusculas', () => {
-    const r = verificar({ ...COMPANY, hubspot_owner_email: 'JButorac@Ultraschall.com.ar' });
+    const r = verificar(COMPANY, { ownerId: 'JButorac@Ultraschall.com.ar' });
     assert.strictEqual(r.valores.ID_GVA23, 26);
 });
 
-test('un owner sin vendedor en Tango cae en FACUNDO y lo deja dicho', () => {
-    // 23 de 27 vendedores no tienen owner: el match no se puede completar solo
-    // porque GVA23.E_MAIL esta vacio en 26 de 27. Hasta que se complete a mano,
-    // el default es el vendedor con el 63% de la cartera.
-    const r = verificar({ ...COMPANY, hubspot_owner_email: 'pthaler@ultraschall.com.ar' });
-    assert.strictEqual(r.valores.ID_GVA23, 10, 'FACUNDO');
-    assert.strictEqual(r.resueltos.ID_GVA23.porDefecto, true);
-    assert.strictEqual(r.resueltos.ID_GVA23.ownerSinEquivalencia, 'pthaler@ultraschall.com.ar');
+test('el owner de la COMPANY no decide nada: el vendedor sale del negocio', () => {
+    // Decision de Matias (2026-09-03). Casi ninguna company tiene owner cargado
+    // —la demo tampoco— asi que mirar ahi era mirar un campo vacio, y el
+    // vendedor terminaba siendo el default sin que nada lo dijera.
+    const r = verificar(
+        { ...COMPANY, hubspot_owner_email: 'jgomez@ultraschall.com.ar' },
+        { ownerId: 'jbutorac@ultraschall.com.ar' },
+    );
+    assert.strictEqual(r.valores.ID_GVA23, 26, 'el del negocio, no el de la company');
 });
 
-test('una company sin owner tambien cae en el default', () => {
-    const r = verificar(COMPANY);
-    assert.strictEqual(r.valores.ID_GVA23, 10);
-    assert.strictEqual(r.resueltos.ID_GVA23.ownerSinEquivalencia, null);
+test('un owner sin vendedor en Tango FRENA el alta: no cae en FACUNDO', () => {
+    // 23 de 27 owners no tienen vendedor, porque GVA23.E_MAIL esta vacio en 26
+    // de 27 y el match hay que completarlo a mano. Antes esto caia en FACUNDO
+    // —el 63% de la cartera— y el cliente quedaba con el vendedor de otro sin
+    // que nadie se enterara hasta la comision (decision de Matias 2026-09-03).
+    const r = verificar(COMPANY, { ownerId: 'pthaler@ultraschall.com.ar' });
+    assert.strictEqual(r.ok, false);
+    const p = r.problemas.find((x) => x.campo === 'ID_GVA23');
+    assert.ok(p, `tendria que frenar por el vendedor: ${JSON.stringify(r.problemas)}`);
+    assert.match(p.motivo, /pthaler@ultraschall\.com\.ar/, 'el mensaje dice QUE owner');
+    assert.match(p.comoSeArregla, /porOwner/, 'y donde se arregla');
+});
+
+test('un negocio sin owner tambien frena, y lo dice distinto', () => {
+    const r = verificar(COMPANY, { ownerId: null });
+    assert.strictEqual(r.ok, false);
+    const p = r.problemas.find((x) => x.campo === 'ID_GVA23');
+    assert.match(p.motivo, /no tiene owner/);
+});
+
+test('un owner por ID sin la tabla de owners frena: no se puede resolver el mail', () => {
+    // El estado real del worker hasta el 2026-09-03: `owners` llegaba null
+    // porque solo se leia cuando el filtro traia mails.
+    const r = verificar(COMPANY, { ownerId: '90573355', owners: null });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((x) => x.campo === 'ID_GVA23'));
 });
 
 test('la tabla de owners del catalogo apunta a vendedores que existen', () => {
@@ -373,7 +403,8 @@ test('la tabla de owners del catalogo apunta a vendedores que existen', () => {
     for (const [mail, codigo] of Object.entries(campo.porOwner)) {
         assert.ok(lk.resolver('vendedores', codigo, mail).ok, `${mail} apunta al vendedor ${codigo}, que no existe`);
     }
-    assert.ok(lk.resolver('vendedores', campo.codigoPorDefecto, 'default').ok);
+    assert.strictEqual(campo.codigoPorDefecto, undefined,
+        'el vendedor NO tiene default: sin equivalencia el alta frena (2026-09-03)');
 });
 
 // ── Lo que comercial elige en el desplegable (2026-09-01, §9.14) ──────────
@@ -442,7 +473,7 @@ test('el vendedor NO lo decide el desplegable: sigue saliendo del owner', () => 
     // Tango. Por eso es el unico de los seis que guarda la descripcion y no el
     // codigo, y el unico sin `hubspotOpcion` en el catalogo.
     const r = verificar({ ...COMPANY, tango_vendedor: 'DAVID' });
-    assert.strictEqual(r.valores.ID_GVA23, 10, 'FACUNDO, el default por owner');
+    assert.strictEqual(r.valores.ID_GVA23, 26, 'Juan Butorac, el del owner del negocio');
     const campo = verificarEmpresa.ALTA.campos.find((c) => c.tango === 'ID_GVA23');
     assert.strictEqual(campo.hubspotOpcion, undefined);
 });

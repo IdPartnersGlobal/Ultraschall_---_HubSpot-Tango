@@ -183,6 +183,16 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
                 companyId: company.id,
                 propiedades: companyProps,
                 estrategia: estrategiaNumeracion,
+                // El VENDEDOR de Tango. Son las dos mitades de lo mismo: el
+                // owner del NEGOCIO —quien cerro la venta, decision de Matias
+                // 2026-09-03— y la tabla para traducir su ID al mail, que es
+                // como el catalogo indexa la equivalencia.
+                //
+                // ⚠️ Faltando cualquiera de las dos el alta FRENA. Antes caia en
+                // FACUNDO sin decir nada: el primer pedido real (2026-09-02)
+                // salio asi, con `ok: true` y cero avisos.
+                owners,
+                ownerId: deal.properties?.hubspot_owner_id,
                 log, dryRun, ahora,
             });
         } catch (e) {
@@ -255,7 +265,9 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         // company ya tiene su COD_GVA14, asi que el reintento no lo recrea.
         return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: [problema], retroceso: r.retroceso, cliente: cliente.codigo };
     }
-    const nroPedido = numeroDePedido(respuesta) ?? String(deal.properties.hs_object_id ?? dealId);
+    const nroPedido = numeroDePedido(respuesta)
+        ?? await releerNroPedido({ tango, codigoCliente: cliente.codigo, dealId, log })
+        ?? String(deal.properties.hs_object_id ?? dealId);
 
     // 7. Escritura de vuelta. Va SIEMPRE que el alta haya salido bien: es la
     //    unica marca de que este Deal ya se mando.
@@ -279,9 +291,12 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
 
 /**
  * El numero que devuelve Tango al crear el pedido. La respuesta de Api/Create
- * no tiene una forma unica documentada, asi que se buscan los nombres vistos y
- * si no aparece ninguno se cae al ID del Deal, que ya es unico y no colisiona
- * (decision de Matias 2026-08-25).
+ * no tiene una forma unica documentada, asi que se buscan los nombres vistos.
+ *
+ * ⚠️ En el primer pedido real (2026-09-02) NO devolvio ninguno: `tango_nro_pedido`
+ * quedo con el fallback y desde HubSpot no habia forma de encontrar el pedido en
+ * el ERP. Por eso ahora, si esto da null, se relee GVA21 (`releerNroPedido`)
+ * antes de caer al ID del Deal.
  */
 function numeroDePedido(respuesta) {
     const r = respuesta?.value ?? respuesta?.resultData ?? respuesta ?? {};
@@ -289,6 +304,46 @@ function numeroDePedido(respuesta) {
         if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') return String(r[k]).trim();
     }
     return null;
+}
+
+/**
+ * El NRO_PEDIDO real, leyendolo de GVA21 despues de crear el pedido.
+ *
+ * El pedido YA existe en el ERP cuando esto corre: es una lectura para poder
+ * anotar en HubSpot el numero con el que administracion lo va a buscar
+ * (`00001-00013597`), en vez del ID del negocio.
+ *
+ * ⚠️ Nunca lanza. Si falla se devuelve null y el llamador cae al fallback: el
+ * numero es informativo, pero `tango_nro_pedido` es ADEMAS la guarda de
+ * idempotencia (9.3) y quedarse sin escribirla mandaria el pedido dos veces.
+ *
+ * Se filtra por `CODIGO_CLIENTE`, que es la unica columna de cliente que GVA21
+ * acepta en filtroSql (`ID_GVA14` y `COD_GVA14` dan Invalid column name), y de
+ * las filas se elige la nuestra por `LEYENDA_4` —que lleva el ID del Deal— y
+ * recien si eso no cierra, la ultima por `ID_GVA21`. El orden importa: un
+ * cliente con dos pedidos el mismo dia haria que "el ultimo" fuera el ajeno.
+ */
+async function releerNroPedido({ tango, codigoCliente, dealId, log = silencioso }) {
+    const cod = verificarEmpresa.literalSeguro(codigoCliente, verificarEmpresa.COD_SEGURO);
+    if (!cod) return null;
+
+    let filas;
+    try {
+        filas = await tango.getByFilter(procesos.entidades.pedidos.process, `CODIGO_CLIENTE = '${cod}'`);
+    } catch (e) {
+        log.aviso('PEDIDO', `no se pudo releer el numero de pedido del cliente ${cod}: ${e.message}`);
+        return null;
+    }
+
+    if (!Array.isArray(filas) || !filas.length) return null;
+
+    const mio = filas.find((f) => String(f?.LEYENDA_4 ?? '').includes(String(dealId)));
+    const fila = mio ?? filas.reduce((a, b) => (Number(b?.ID_GVA21 ?? 0) > Number(a?.ID_GVA21 ?? 0) ? b : a));
+    const nro = String(fila?.NRO_PEDIDO ?? '').trim();
+
+    if (!nro) return null;
+    if (!mio) log.aviso('PEDIDO', `el pedido ${nro} se eligio por ser el ultimo del cliente ${cod}: LEYENDA_4 no trajo el negocio ${dealId}`);
+    return nro;
 }
 
 /** Deja escrito en el Deal por que no se pudo, para que se vea sin logs. */
@@ -491,7 +546,7 @@ function leerConfig(env = process.env) {
 }
 
 module.exports = {
-    admitir, procesarDeal, procesarVeneno, eventosGanados, numeroDePedido, reportarIncompleto, anotarACompletar, leerConfig, leerConfigWebhook,
+    admitir, procesarDeal, procesarVeneno, eventosGanados, numeroDePedido, releerNroPedido, reportarIncompleto, anotarACompletar, leerConfig, leerConfigWebhook,
     soloOwner,
     PROP_NRO, PROP_CREADO, PROP_PROBLEMA, PROP_CLIENTE,
     PROPS_DEAL, PROPS_COMPANY, PROPS_LINEA, PROPS_PRODUCTO,

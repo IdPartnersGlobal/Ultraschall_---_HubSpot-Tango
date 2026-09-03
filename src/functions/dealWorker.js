@@ -48,23 +48,32 @@ async function tablas(tango, log) {
 }
 
 /**
- * La tabla de owners de HubSpot, SOLO si el filtro la necesita.
+ * La tabla de owners de HubSpot: id -> mail.
  *
- * Con `DEAL_TO_TANGO_SOLO_OWNER` vacio o cargado con IDs —lo normal— esto no
- * gasta una sola llamada: devuelve null y el filtro compara IDs contra IDs.
- * Se lee unicamente cuando el filtro trae mails, que hay que resolver.
+ * Se lee SIEMPRE, no solo cuando el filtro la necesita. Hace falta para dos
+ * cosas distintas y la segunda es la que se paso por alto:
+ *
+ *   1. El freno de las pruebas, cuando `DEAL_TO_TANGO_SOLO_OWNER` trae mails.
+ *   2. El VENDEDOR del cliente que se da de alta. HubSpot guarda el ID del
+ *      owner y nunca el mail, y la equivalencia owner -> vendedor de Tango vive
+ *      en el catalogo indexada por mail (`GVA23.E_MAIL` esta vacio en 26 de 27,
+ *      asi que no se puede leer del ERP).
+ *
+ * Cuando esto devolvia null —o sea, casi siempre, porque el filtro normal son
+ * IDs— el vendedor caia en FACUNDO sin que nada lo dijera. Es una llamada, son
+ * 19 owners y se cachea con el mismo TTL que las tablas de Tango.
  */
-async function tablaDeOwners(hs, filtro, log) {
-    if (!dealToTango.soloOwner.necesitaOwners(filtro)) return null;
+async function tablaDeOwners(hs, log) {
     if (cacheOwners && Date.now() - cacheOwners.cuando < TTL_LOOKUPS_MS) return cacheOwners.valor;
     try {
         const valor = await hs.owners();
         cacheOwners = { valor, cuando: Date.now() };
         return valor;
     } catch (e) {
-        // Sin la tabla, un filtro por mail no resuelve y el negocio NO entra.
-        // Es el lado seguro: la prueba no corre, en vez de correr sobre todos.
-        log.aviso('DEAL', `no se pudo leer la tabla de owners: ${e.message}. El filtro por mail no va a resolver.`);
+        // Sin la tabla pasan dos cosas, las dos del lado seguro: un filtro por
+        // mail no resuelve y el negocio NO entra —la prueba no corre, en vez de
+        // correr sobre todos— y el vendedor cae al default, que queda avisado.
+        log.aviso('DEAL', `no se pudo leer la tabla de owners: ${e.message}. El filtro por mail no va a resolver y el vendedor va a salir con el default.`);
         return null;
     }
 }
@@ -102,7 +111,7 @@ app.storageQueue('dealWorker', {
             lookups: await tablas(tango, log),
             estrategiaNumeracion: config.TANGO_NUMERACION,
             filtroOwner: config.SOLO_OWNER,
-            owners: await tablaDeOwners(hs, config.SOLO_OWNER, log),
+            owners: await tablaDeOwners(hs, log),
             log,
             dryRun: config.DRY_RUN,
         });
@@ -161,7 +170,7 @@ app.storageQueue('dealVeneno', {
                 hs,
                 dealId: m.dealId,
                 filtroOwner: config.SOLO_OWNER,
-                owners: await tablaDeOwners(hs, config.SOLO_OWNER, log),
+                owners: await tablaDeOwners(hs, log),
                 log,
                 dryRun: config.DRY_RUN,
             });

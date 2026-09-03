@@ -284,7 +284,7 @@ async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, log = s
  *
  * @returns {Promise<{creado, codigo, idGva14, companyId, problemas, pendientes, dryRun}>}
  */
-async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, owners = null, log = silencioso, dryRun = true, ahora = new Date() }) {
+async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, owners = null, ownerId = null, log = silencioso, dryRun = true, ahora = new Date() }) {
     if (!companyId) throw new Error('altaCliente.crear: falta companyId');
     if (!estrategia) {
         // Sin default a proposito: es una decision de administracion (§7.6).
@@ -292,7 +292,8 @@ async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, o
     }
 
     // 1. ¿Se puede?
-    const v = verificarEmpresa.verificar({ propiedades, mapper: mapper.crear(mapeoClientes, lookups), lookups, owners });
+    // `ownerId` es el owner del NEGOCIO: es lo que decide el vendedor de Tango.
+    const v = verificarEmpresa.verificar({ propiedades, mapper: mapper.crear(mapeoClientes, lookups), lookups, owners, ownerId });
     if (!v.ok) {
         log.aviso('ALTA', `la company ${companyId} no se puede dar de alta todavia: ${v.problemas.map((p) => p.campo).join(', ')}`);
         return { creado: false, codigo: null, idGva14: null, companyId, problemas: v.problemas, pendientes: v.pendientes, avisos: v.avisos || [], dryRun };

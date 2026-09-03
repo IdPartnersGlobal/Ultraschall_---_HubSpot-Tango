@@ -210,15 +210,15 @@
           "hubspot": "tango_id_gva23",
           "origen": "owner",
           "lookup": "vendedores",
-          "codigoPorDefecto": "10",
-          "descripcion": "FACUNDO",
           "porOwner": {
             "mlguelerman@ultraschall.com.ar": "08",
             "farancibia@ultraschall.com.ar": "10",
             "jbutorac@ultraschall.com.ar": "24",
-            "jgomez@ultraschall.com.ar": "25"
+            "jgomez@ultraschall.com.ar": "25",
+            "matias.tari@idpartners.ar": "10"
           },
-          "evidencia": "FACUNDO es un vendedor real (confirmado por Matias 2026-08-25) y tiene el 63% de la cartera: es el default cuando el owner no matchea. OJO: el match NO se puede hacer por el mail de Tango — GVA23.E_MAIL esta vacio en 26 de 27 vendedores. La tabla de arriba se armo cruzando NOMBRE_VEN con los 18 owners del portal, y solo 4 de 27 cerraron. Los otros 23 hay que completarlos a mano."
+          "porOwnerNota": "matias.tari@idpartners.ar NO es vendedor de Ultraschall: es el implementador, y va mapeado a FACUNDO (10) por pedido de Matias (2026-09-03) para poder probar el circuito con negocios propios. Los clientes que cree una prueba suya van a quedar con FACUNDO de vendedor — que es lo que pasaba con TODOS antes de que el default se sacara. Sacar este renglon el dia que las pruebas terminen.",
+          "evidencia": "SIN codigoPorDefecto A PROPOSITO (Matias, 2026-09-03): si el owner del NEGOCIO no tiene vendedor equivalente, el alta FRENA. FACUNDO es un vendedor real (confirmado 2026-08-25) y tiene el 63% de la cartera, y por eso mismo servia de default sin llamar la atencion: el primer pedido real salio con su nombre el 2026-09-02 y no lo habria notado nadie hasta la comision. OJO: el match NO se puede hacer por el mail de Tango — GVA23.E_MAIL esta vacio en 26 de 27 vendedores. La tabla de arriba se armo cruzando NOMBRE_VEN con los 18 owners del portal, y solo 4 de 27 cerraron. Los otros 23 hay que completarlos a mano."
         },
         {
           "tango": "ID_GVA24",

@@ -103,7 +103,13 @@ function lookupsDeFixtures() {
 
     // 2. Verificar ANTES de crear. Una company de prueba que no pasa la
     //    verificacion no sirve para nada: es el unico motivo por el que existe.
-    const v = verificarEmpresa.verificar({ propiedades: DEMO, lookups: lk, mapper: m });
+    // El vendedor sale del owner del NEGOCIO, que aca no existe todavia: esto
+    // crea una company, no un pedido. Se le pasa un owner que si es vendedor
+    // para que la verificacion hable de los datos de la EMPRESA, que es lo que
+    // este script tiene que probar. Sale del catalogo, no escrito a mano.
+    const campoVendedor = verificarEmpresa.ALTA.campos.find((c) => c.origen === 'owner');
+    const unVendedor = Object.keys(campoVendedor?.porOwner || {})[0] || null;
+    const v = verificarEmpresa.verificar({ propiedades: DEMO, lookups: lk, mapper: m, ownerId: unVendedor });
 
     console.log('Verificacion previa del alta (7.12):');
     console.log('  ok        :', v.ok);

@@ -255,6 +255,7 @@ test('una empresa con razon social y condicion de IVA pasa y deja los avisos', (
         propiedades: { razon_social: 'ACME SA', condicion_iva: 'Responsable Inscripto' },
         mapper: mapper.crear(mapeoClientes, lk),
         lookups: lk,
+        ownerId: 'farancibia@ultraschall.com.ar',
     });
     assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
     assert.ok(r.avisos.length >= 2, 'CUIT y domicilio, por lo menos');
@@ -892,6 +893,23 @@ const MI_OWNER = '83855505';       // matias.tari@idpartners.ar
 const OWNER_COMERCIAL = '90573354'; // farancibia@ultraschall.com.ar
 
 const filtroMio = () => d2t.soloOwner.leer({ DEAL_TO_TANGO_SOLO_OWNER: MI_OWNER });
+const filtroDe = (id) => d2t.soloOwner.leer({ DEAL_TO_TANGO_SOLO_OWNER: id });
+
+/** Un comercial de los 23 que todavia no tienen vendedor equivalente. */
+const OWNER_SIN_VENDEDOR = '90573361'; // pthaler@ultraschall.com.ar
+
+/**
+ * La tabla que devuelve `hs.owners()`. Desde el 2026-09-03 no es opcional: el
+ * vendedor sale del owner del negocio y sin ella el alta frena.
+ *
+ * `matias.tari@` esta mapeado a FACUNDO a mano para poder probar (no es
+ * vendedor); `pthaler@` es de los 23 que faltan y por eso frena.
+ */
+const OWNERS = new Map([
+    [MI_OWNER, 'matias.tari@idpartners.ar'],
+    [OWNER_COMERCIAL, 'farancibia@ultraschall.com.ar'],
+    [OWNER_SIN_VENDEDOR, 'pthaler@ultraschall.com.ar'],
+]);
 
 test('un negocio de comercial NO se toca: ni pedido, ni propiedad, ni nota, ni etapa', async () => {
     // Es la razon de ser del freno. El caso peligroso no es el negocio ajeno
@@ -1039,7 +1057,7 @@ test('un negocio con una company completa pero sin codigo de Tango LA DA DE ALTA
     // mandaba a cargar un dato que ya estaba.
     //
     // Falla si alguien vuelve a escribir PROPS_COMPANY a mano y se queda corto.
-    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER }, company: COMPANY_A_CREAR });
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: COMPANY_A_CREAR });
     const tango = tangoFalso();
     // El alta pregunta por el ultimo codigo y despues crea. Le alcanza con esto.
     tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
@@ -1054,7 +1072,8 @@ test('un negocio con una company completa pero sin codigo de Tango LA DA DE ALTA
     };
 
     const r = await d2t.procesarDeal({
-        dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(),
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
         estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
     });
 
@@ -1086,14 +1105,15 @@ test('si Tango rechaza el DATO del alta, se anota y retrocede: NO se propaga', a
     // procesarDeal, la COLA la reintentaba —~113 s por vuelta, porque relee el
     // padron— y terminaba en veneno con "avisar a sistemas". Es un dato que
     // comercial arregla en diez segundos.
-    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER }, company: { ...COMPANY_A_CREAR, localidad: 'Ciudad Autonoma de Buenos Aires' } });
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: { ...COMPANY_A_CREAR, localidad: 'Ciudad Autonoma de Buenos Aires' } });
     const tango = tangoFalso();
     tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
     tango.getByFilter = async () => [];
     tango.create = async () => { throw new TangoError(RECHAZO_LOCALIDAD); };
 
     const r = await d2t.procesarDeal({
-        dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(),
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
         estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
     });
 
@@ -1107,7 +1127,7 @@ test('si Tango rechaza el DATO del alta, se anota y retrocede: NO se propaga', a
 test('si el ERP se CAE durante el alta, si se propaga para que la cola reintente', async () => {
     // La otra mitad. Tratar una caida como dato la dejaria sin reintento y el
     // negocio se quedaria con una nota que culpa a comercial.
-    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER }, company: COMPANY_A_CREAR });
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: COMPANY_A_CREAR });
     const tango = tangoFalso();
     tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
     tango.getByFilter = async () => [];
@@ -1115,7 +1135,8 @@ test('si el ERP se CAE durante el alta, si se propaga para que la cola reintente
 
     await assert.rejects(
         () => d2t.procesarDeal({
-            dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(),
+            dealId: '111', hs, tango, lookups: lk, dryRun: false,
+            filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
             estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
         }),
         /fetch failed/);
@@ -1201,4 +1222,167 @@ test('PROPS_DEAL pide todo lo que el pedido va a leer del negocio', () => {
     const necesita = MAPEO_PEDIDOS.campos.filter((c) => c.direccion === 'hubspot->tango').map((c) => c.hubspot);
     const faltan = necesita.filter((p) => !d2t.PROPS_DEAL.includes(p));
     assert.deepStrictEqual(faltan, [], `el pedido lee estas propiedades y PROPS_DEAL no las pide: ${faltan.join(', ')}`);
+});
+
+// ── El numero de pedido tiene que ser el de TANGO (§9.19) ───────────────
+
+/**
+ * El primer pedido real (2026-09-02) salio bien y quedo inencontrable: Api/Create
+ * no devolvio numero, `tango_nro_pedido` se lleno con el ID del negocio y desde
+ * HubSpot no habia con que buscarlo en el ERP.
+ */
+const GVA21 = (filas) => async () => filas;
+
+test('si Api/Create no devuelve numero, se relee GVA21 y se anota el de Tango', async () => {
+    const hs = hsFalso();
+    const tango = tangoFalso({});          // la respuesta que dio Tango de verdad
+    tango.getByFilter = GVA21([{ ID_GVA21: 17635, NRO_PEDIDO: '00001-00013597', LEYENDA_4: 'HubSpot deal 111' }]);
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.nroPedido, '00001-00013597');
+    assert.strictEqual(hs.escrituras.at(-1).props.tango_nro_pedido, '00001-00013597');
+});
+
+test('entre varios pedidos del cliente se elige el del negocio, no el ultimo', async () => {
+    // Dos pedidos el mismo dia y "el ultimo" es el ajeno. LEYENDA_4 lleva el ID
+    // del Deal justamente para esto.
+    const hs = hsFalso();
+    const tango = tangoFalso({});
+    tango.getByFilter = GVA21([
+        { ID_GVA21: 17635, NRO_PEDIDO: '00001-00013597', LEYENDA_4: 'HubSpot deal 111' },
+        { ID_GVA21: 17640, NRO_PEDIDO: '00001-00013601', LEYENDA_4: 'HubSpot deal 999' },
+    ]);
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+    assert.strictEqual(r.nroPedido, '00001-00013597');
+});
+
+test('sin LEYENDA_4 se cae al ultimo ID_GVA21 del cliente', async () => {
+    const tango = tangoFalso({});
+    tango.getByFilter = GVA21([
+        { ID_GVA21: 17635, NRO_PEDIDO: '00001-00013597' },
+        { ID_GVA21: 17640, NRO_PEDIDO: '00001-00013601' },
+    ]);
+
+    const nro = await d2t.releerNroPedido({ tango, codigoCliente: '000123', dealId: '111' });
+    assert.strictEqual(nro, '00001-00013601');
+});
+
+test('si la relectura falla, el Deal queda marcado igual con el fallback', async () => {
+    // `tango_nro_pedido` es ADEMAS la guarda de idempotencia (9.3): quedarse sin
+    // escribirla mandaria el pedido dos veces. El pedido YA esta en el ERP.
+    const hs = hsFalso();
+    const tango = tangoFalso({});
+    tango.getByFilter = async () => { throw new Error('el ERP no contesta'); };
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(r.nroPedido, '111');
+    assert.strictEqual(hs.escrituras.at(-1).props.tango_nro_pedido, '111');
+});
+
+test('un codigo de cliente que no es seguro no se interpola en el filtroSql', async () => {
+    let consultado = false;
+    const tango = { async getByFilter() { consultado = true; return []; } };
+
+    const nro = await d2t.releerNroPedido({ tango, codigoCliente: "007611' OR '1'='1", dealId: '111' });
+
+    assert.strictEqual(nro, null);
+    assert.strictEqual(consultado, false, 'ni se llega a consultar');
+});
+
+// ── El vendedor lo decide el owner del NEGOCIO (§9.19) ──────────────────────
+
+/**
+ * El primer pedido real salio con FACUNDO, el default, y nada lo dijo. No era la
+ * tabla `porOwner` incompleta: `procesarDeal` recibia `owners` y NO se lo pasaba
+ * al alta, asi que `emailDelOwner` devolvia null siempre. Ni los 4 owners que si
+ * tienen vendedor funcionaban.
+ *
+ * Desde el 2026-09-03 son dos reglas de Matias: el vendedor sale del owner del
+ * NEGOCIO (quien cerro la venta), y sin equivalencia el alta FRENA.
+ */
+
+/** El alta contra un Tango de mentira: pregunta el ultimo codigo, crea, confirma. */
+function tangoQueDaDeAlta() {
+    const tango = tangoFalso();
+    tango.get = async () => ({ registros: [{ COD_GVA14: '007610' }] });
+    const creados = [];
+    tango.getByFilter = async (_p, filtro) => creados.filter((c) => filtro.includes(c.COD_GVA14));
+    tango.create = async (process, payload) => {
+        tango.creados.push({ process, payload });
+        if (payload.COD_GVA14) creados.push({ COD_GVA14: payload.COD_GVA14, ID_GVA14: 9001 });
+        return { ID_GVA14: 9001, NRO_PEDIDO: '00012345' };
+    };
+    return tango;
+}
+
+const conAlta = (over = {}) => ({
+    hs: hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: COMPANY_A_CREAR, ...over }),
+    tango: tangoQueDaDeAlta(),
+});
+
+test('la tabla de owners LLEGA al alta: el vendedor sale del negocio', async () => {
+    const { hs, tango } = conAlta();
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.notStrictEqual(r.estado, 'incompleto', `no deberia frenar: ${r.motivo}`);
+    // 10 es FACUNDO, y aca SI corresponde: farancibia@ es su owner. Que
+    // coincida con el viejo default es casualidad de la cartera, no la regla.
+    assert.strictEqual(tango.creados[0].payload.ID_GVA23, 10);
+});
+
+test('sin la tabla de owners el alta FRENA: no se puede resolver el vendedor', async () => {
+    // El estado real del worker hasta el 2026-09-03: `owners` llegaba null
+    // porque la tabla solo se leia cuando el filtro traia mails.
+    const { hs, tango } = conAlta();
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_COMERCIAL), owners: null,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA23'), JSON.stringify(r.problemas));
+    assert.strictEqual(tango.creados.length, 0, 'no se crea nada en el ERP');
+});
+
+test('un negocio de un owner sin vendedor frena y dice como se arregla', async () => {
+    // 23 de 27 estan asi. Antes el cliente se creaba con FACUNDO y el pedido
+    // salia igual, sin un solo aviso.
+    const { hs, tango } = conAlta({ deal: { hubspot_owner_id: OWNER_SIN_VENDEDOR } });
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroDe(OWNER_SIN_VENDEDOR), owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    const p = r.problemas.find((x) => x.campo === 'ID_GVA23');
+    assert.match(p.motivo, /pthaler@ultraschall\.com\.ar/);
+    assert.match(p.comoSeArregla, /porOwner/);
+});
+
+test('un negocio de Matias SI da de alta: esta mapeado a FACUNDO para probar', async () => {
+    // El renglon de prueba de `porOwner` (2026-09-03). Falla el dia que se saque,
+    // que es lo que se quiere: que no se saque sin darse cuenta.
+    const { hs, tango } = conAlta({ deal: { hubspot_owner_id: MI_OWNER } });
+
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun: false,
+        filtroOwner: filtroMio(), owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+
+    assert.notStrictEqual(r.estado, 'incompleto', `no deberia frenar: ${r.motivo}`);
+    assert.strictEqual(tango.creados[0].payload.ID_GVA23, 10, 'FACUNDO');
 });

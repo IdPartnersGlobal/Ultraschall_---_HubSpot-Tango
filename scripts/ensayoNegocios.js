@@ -110,7 +110,9 @@ async function main() {
     if (!ids.length) return;
 
     const tablas = await lookups.cargar(tango, log);
-    const owners = soloOwner.necesitaOwners(filtro) ? await hs.owners() : null;
+    // Siempre, como en el worker: la tabla no es solo para el filtro por mail,
+    // es de donde sale el VENDEDOR del cliente que se da de alta.
+    const owners = await hs.owners();
 
     const cuenta = new Map();
     for (const dealId of ids) {
