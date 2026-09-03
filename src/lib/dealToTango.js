@@ -346,9 +346,11 @@ function numeroDePedido(respuesta) {
  *
  * Se filtra por `CODIGO_CLIENTE`, que es la unica columna de cliente que GVA21
  * acepta en filtroSql (`ID_GVA14` y `COD_GVA14` dan Invalid column name), y de
- * las filas se elige la nuestra por `LEYENDA_4` —que lleva el ID del Deal— y
- * recien si eso no cierra, la ultima por `ID_GVA21`. El orden importa: un
- * cliente con dos pedidos el mismo dia haria que "el ultimo" fuera el ajeno.
+ * las filas se eligen las NUESTRAS por `LEYENDA_4` —que lleva el ID del Deal—
+ * y de esas, la de `ID_GVA21` mas alto. Las dos mitades importan: sin el
+ * filtro, "el ultimo" podria ser el pedido de otro negocio del mismo cliente;
+ * sin el maximo, se devuelve el pedido mas VIEJO de este negocio, que es el bug
+ * del 2026-09-03 — un mismo Deal puede tener varios pedidos.
  */
 async function releerNroPedido({ tango, codigoCliente, dealId, log = silencioso }) {
     const cod = verificarEmpresa.literalSeguro(codigoCliente, verificarEmpresa.COD_SEGURO);
@@ -364,12 +366,22 @@ async function releerNroPedido({ tango, codigoCliente, dealId, log = silencioso 
 
     if (!Array.isArray(filas) || !filas.length) return null;
 
-    const mio = filas.find((f) => String(f?.LEYENDA_4 ?? '').includes(String(dealId)));
-    const fila = mio ?? filas.reduce((a, b) => (Number(b?.ID_GVA21 ?? 0) > Number(a?.ID_GVA21 ?? 0) ? b : a));
+    // ⚠️ El MAS NUEVO de los que son de este negocio, no el primero que
+    //    aparece. `LEYENDA_4` lleva el ID del Deal, y un mismo negocio puede
+    //    haber generado varios pedidos: alcanza con que alguien le borre
+    //    `tango_nro_pedido` y lo vuelva a mover a ganado, que es exactamente lo
+    //    que pasa mientras se prueba. Con `find` se devolvia el mas viejo, asi
+    //    que HubSpot anotaba SIEMPRE el numero del primer pedido y parecia que
+    //    el circuito lo estaba reusando — cuando en realidad ya habia cinco
+    //    pedidos distintos en el ERP (2026-09-03).
+    const ultimo = (candidatas) => candidatas.reduce((a, b) => (Number(b?.ID_GVA21 ?? 0) > Number(a?.ID_GVA21 ?? 0) ? b : a));
+
+    const mias = filas.filter((f) => String(f?.LEYENDA_4 ?? '').includes(String(dealId)));
+    const fila = mias.length ? ultimo(mias) : ultimo(filas);
     const nro = String(fila?.NRO_PEDIDO ?? '').trim();
 
     if (!nro) return null;
-    if (!mio) log.aviso('PEDIDO', `el pedido ${nro} se eligio por ser el ultimo del cliente ${cod}: LEYENDA_4 no trajo el negocio ${dealId}`);
+    if (!mias.length) log.aviso('PEDIDO', `el pedido ${nro} se eligio por ser el ultimo del cliente ${cod}: LEYENDA_4 no trajo el negocio ${dealId}`);
     return nro;
 }
 

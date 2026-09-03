@@ -1458,3 +1458,54 @@ test('los problemas del pedido y los de la empresa llegan juntos en una nota', a
     assert.ok(campos.includes('CUIT'), campos.join(','));
     assert.strictEqual(hs.notas.length, 1, 'una sola nota, con las dos cosas');
 });
+
+// ── Un mismo negocio puede tener varios pedidos (2026-09-03) ────────────────
+
+/**
+ * Los cinco pedidos que el negocio de prueba 64576262053 dejo REALMENTE en
+ * Tango, leidos del ERP. Todos con el mismo LEYENDA_4, porque `LEYENDA_4` lleva
+ * el ID del Deal y el Deal es el mismo: alcanza con borrarle `tango_nro_pedido`
+ * y volver a moverlo a ganado para que salga otro.
+ */
+const CINCO_PEDIDOS = [
+    { ID_GVA21: 17635, NRO_PEDIDO: '00001-00013597', LEYENDA_4: 'HubSpot deal 64576262053' },
+    { ID_GVA21: 17636, NRO_PEDIDO: '00001-00013598', LEYENDA_4: 'HubSpot deal 64576262053' },
+    { ID_GVA21: 17637, NRO_PEDIDO: '00001-00013599', LEYENDA_4: 'HubSpot deal 64576262053' },
+    { ID_GVA21: 17638, NRO_PEDIDO: '00001-00013600', LEYENDA_4: 'HubSpot deal 64576262053' },
+    { ID_GVA21: 17639, NRO_PEDIDO: '00001-00013601', LEYENDA_4: 'HubSpot deal 64576262053' },
+];
+
+test('con varios pedidos del MISMO negocio se anota el ultimo, no el primero', async () => {
+    // El bug del 2026-09-03: `find` devolvia la primera coincidencia, o sea la
+    // mas vieja. HubSpot anotaba siempre 00001-00013597 y parecia que el
+    // circuito estaba reusando un pedido viejo, cuando en realidad acababa de
+    // crear el quinto. El test anterior no lo veia porque usaba dos negocios
+    // distintos, y ahi la primera coincidencia era la correcta por casualidad.
+    const tango = tangoFalso({});
+    tango.getByFilter = async () => CINCO_PEDIDOS;
+
+    const nro = await d2t.releerNroPedido({ tango, codigoCliente: '007611', dealId: '64576262053' });
+    assert.strictEqual(nro, '00001-00013601');
+});
+
+test('si ninguno es de este negocio, se cae al ultimo del cliente', async () => {
+    const tango = tangoFalso({});
+    tango.getByFilter = async () => CINCO_PEDIDOS;
+
+    const nro = await d2t.releerNroPedido({ tango, codigoCliente: '007611', dealId: '999' });
+    assert.strictEqual(nro, '00001-00013601');
+});
+
+test('un pedido de OTRO negocio mas nuevo no le gana al nuestro', async () => {
+    // El filtro es por cliente, asi que en la lista entran pedidos de otros
+    // negocios del mismo cliente. El ID mas alto se elige SOLO entre los
+    // nuestros.
+    const tango = tangoFalso({});
+    tango.getByFilter = async () => [
+        ...CINCO_PEDIDOS,
+        { ID_GVA21: 17700, NRO_PEDIDO: '00001-00013650', LEYENDA_4: 'HubSpot deal 99999999' },
+    ];
+
+    const nro = await d2t.releerNroPedido({ tango, codigoCliente: '007611', dealId: '64576262053' });
+    assert.strictEqual(nro, '00001-00013601', 'el ultimo NUESTRO, no el ultimo de la lista');
+});

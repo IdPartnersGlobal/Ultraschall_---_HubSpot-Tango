@@ -2161,6 +2161,32 @@ El interruptor sigue en el catálogo y en `false` vuelve el comportamiento anter
 
 El **artículo de prueba** (§9.6) sigue siendo un aviso. Es un modo temporal y deliberado: hoy ningún product de HubSpot tiene `tango_id_sta11`, así que hacerlo bloqueante dejaría el circuito sin poder probarse. El pedido igual queda marcado en el ERP con `LEYENDA_3`.
 
+### 9.23 "Siempre me da el mismo número de pedido" (2026-09-03)
+
+Matías borraba todo del negocio de prueba, lo volvía a mover a Cierre ganado, y HubSpot anotaba **siempre `00001-00013597`**. La lectura natural: el circuito está encontrando un pedido viejo y no crea uno nuevo.
+
+**Era al revés.** Los logs muestran `POST Api/Create process=19845 — 1956ms` exitoso en cada corrida, y el ERP lo confirma: el cliente `007611` tenía **cinco pedidos**.
+
+```
+17635  00001-00013597   HubSpot deal 64576262053
+17636  00001-00013598   HubSpot deal 64576262053
+17637  00001-00013599   HubSpot deal 64576262053
+17638  00001-00013600   HubSpot deal 64576262053
+17639  00001-00013601   HubSpot deal 64576262053
+```
+
+Se creaba un pedido nuevo cada vez. Lo que estaba mal era **el número que se reportaba**.
+
+`releerNroPedido` (§9.19) elegía la fila con `filas.find(...)`, o sea **la primera coincidencia**. `LEYENDA_4` lleva el ID del Deal, y el Deal es el mismo en las cinco: la primera coincidencia es el pedido **más viejo**. Ahora se filtran todas las del negocio y se toma la de `ID_GVA21` más alto.
+
+**Por qué el test no lo agarró.** El de §9.19 usaba dos filas con `LEYENDA_4` de negocios **distintos**, y ahí la primera coincidencia era la correcta *por casualidad*. El caso real es el contrario: varias filas del **mismo** negocio. El fixture nuevo son las cinco de arriba, leídas del ERP.
+
+#### Cómo se detecta que un negocio ya tenía pedido
+
+Con **una sola cosa**: `tango_nro_pedido` en el Deal (§9.3). Si tiene valor, no se manda de nuevo. No se consulta al ERP, no se busca por `LEYENDA_4`, no hay nada más.
+
+Es a propósito —es la guarda contra la re-entrega de la cola, que es *at-least-once*— pero tiene una consecuencia que conviene tener presente: **borrar `tango_nro_pedido` y volver a mover el negocio a ganado emite un pedido nuevo en el ERP.** Es lo que pasó cinco veces. El `LEYENDA_4` no es una guarda: sólo sirve para saber cuál de los pedidos es el nuestro cuando ya se creó.
+
 
 ## 10. Seguridad
 
