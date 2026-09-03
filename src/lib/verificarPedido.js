@@ -2,6 +2,7 @@
 
 const defaults = require('../../config/defaults.tango.json');
 const mapeoPedidos = require('../../config/mapeo.pedidos.json');
+const enCastellano = require('./enCastellano');
 
 /**
  * Verificacion previa del pedido, cuando un negocio se gana.
@@ -148,13 +149,13 @@ function deDesplegable(tangoCampo, deal, lookups) {
     // manda el pedido a OTRO deposito, valido, sin que nada falle. Es
     // exactamente el modo de falla silencioso de 5.4, y frena el pedido.
     if (codigo === undefined) {
-        return { problema: problema(tangoCampo, `'${elegido}' no es una opcion conocida de ${campo.label}`,
-            'revisar el desplegable del negocio, o actualizar el mapeo si Tango tiene una fila nueva') };
+        return { problema: problema(tangoCampo, `'${elegido}' no es una opcion valida de '${enCastellano.limpiar(campo.label)}'`,
+            'elegir otra opción en el negocio. Si la opción es correcta, avisar a sistemas') };
     }
     const r = lookups ? lookups.resolver(campo.lookupInverso, codigo, tangoCampo) : { ok: false, motivo: 'sin lookups' };
     if (!r.ok) {
-        return { problema: problema(tangoCampo, `${campo.label}: ${r.motivo}`,
-            'revisar config/tango.processes.json: la fila del catalogo no existe') };
+        return { problema: problema(tangoCampo, `'${enCastellano.limpiar(campo.label)}': ${r.motivo}`,
+            'avisar a sistemas: esa opción ya no existe en Tango') };
     }
     return { valor: r.id, codigo, descripcion: r.descripcion, delDeal: true };
 }
@@ -240,8 +241,8 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         if (idSta11 === null && !productoDePrueba) {
             // Es el bloqueo esperado hasta que corra el sync de productos: sin
             // el ID del articulo en Tango el renglon no se puede armar.
-            problemas.push(problema('RENGLON_DTO', `'${nombre}' no esta atado a ningun articulo de Tango (falta tango_id_sta11)`,
-                'esperar a que corra el sync de productos, o revisar ese producto'));
+            problemas.push(problema('RENGLON_DTO', `'${nombre}' todavía no está vinculado con el artículo equivalente de Tango`,
+                'no es algo que se cargue en el negocio: avisar a sistemas'));
             continue;
         }
         if (idSta11 === null) {
@@ -309,8 +310,8 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
 
         if (vacio(valor)) {
             if (campo.requerido) {
-                problemas.push(problema(tangoCampo, `falta '${campo.label}' en el negocio`,
-                    `cargar '${campo.label}' en el negocio y volver a moverlo a Cierre ganado`));
+                problemas.push(problema(tangoCampo, `falta '${enCastellano.limpiar(campo.label)}' en el negocio`,
+                    `cargar '${enCastellano.limpiar(campo.label)}' en el negocio y volver a moverlo a Cierre ganado`));
             }
             continue;
         }

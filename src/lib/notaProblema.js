@@ -1,5 +1,7 @@
 'use strict';
 
+const enCastellano = require('./enCastellano');
+
 /**
  * El texto de la nota que queda en el negocio cuando el pedido no se puede
  * crear en Tango.
@@ -31,11 +33,17 @@ function escapar(texto) {
 /**
  * Un problema en una linea. `comoSeArregla` es la mitad util: decir "falta
  * razon_social" no le sirve a nadie que no sepa que es razon_social.
+ *
+ * ⚠️ TODO lo que sale por aca pasa por `enCastellano` (pedido de Matias,
+ * 2026-09-03). Las notas mostraban `RAZON_SOCI`, `RENGLON_DTO[1]` y
+ * `cargar condicion_iva en la company`: nombres de columnas de Tango, del DTO
+ * de su API y de propiedades internas de HubSpot. La nota es para la persona
+ * que tiene que arreglarlo, y esos nombres para ella no existen.
  */
 function linea(p) {
-    const campo = escapar(p.campo || '');
-    const motivo = escapar(p.motivo || '');
-    const arreglo = p.comoSeArregla ? ` <i>&rarr; ${escapar(p.comoSeArregla)}</i>` : '';
+    const campo = escapar(enCastellano.etiqueta(p.campo, p.propiedad));
+    const motivo = escapar(enCastellano.humanizar(p.motivo || ''));
+    const arreglo = p.comoSeArregla ? ` <i>&rarr; ${escapar(enCastellano.humanizar(p.comoSeArregla))}</i>` : '';
     return `<li><b>${campo}</b>: ${motivo}${arreglo}</li>`;
 }
 
@@ -50,15 +58,20 @@ function linea(p) {
  * @param {Array}  p.problemas   [{campo, motivo, comoSeArregla}]
  * @param {object} [p.retroceso] {label} de la etapa a la que se movio, si se movio
  * @param {string} [p.etapaGanada] nombre legible de la etapa ganada, para el reintento
- * @param {'datos'|'tecnico'} [p.tipo] de que tipo es la falla
+ * @param {'datos'|'rechazo'|'tecnico'} [p.tipo] de que tipo es la falla
  * @returns {string} HTML para `hs_note_body`
  */
 function cuerpo({ problemas = [], retroceso = null, etapaGanada = 'Cierre ganado', tipo = 'datos' } = {}) {
     const partes = [];
 
-    partes.push('<b>El pedido no se pudo crear en Tango.</b>');
+    partes.push('<p><b>El pedido no se pudo crear en Tango.</b></p>');
     if (tipo === 'tecnico') {
         partes.push('<p><b>No falta ningún dato del negocio.</b> Fue un problema técnico:</p>');
+    } else if (tipo === 'rechazo') {
+        // No falta un dato: hay uno que Tango no acepta, o una regla del ERP
+        // que no se cumple. Decir "falta este dato" manda a buscar un campo
+        // vacio que no existe.
+        partes.push('<p>Tango no aceptó la operación por esto:</p>');
     } else {
         partes.push(problemas.length === 1 ? '<p>Falta este dato:</p>' : `<p>Faltan ${problemas.length} datos:</p>`);
     }
@@ -95,7 +108,7 @@ function cuerpoACompletar({ avisos = [], cliente = null } = {}) {
     const partes = [];
     const donde = cliente?.codigo ? ` como el cliente <b>${escapar(cliente.codigo)}</b>` : '';
 
-    partes.push(`<b>La empresa se creó en Tango${donde} y el pedido salió.</b>`);
+    partes.push(`<p><b>La empresa se creó en Tango${donde} y el pedido salió.</b></p>`);
     partes.push(avisos.length === 1
         ? '<p>Queda un dato por completar en la empresa:</p>'
         : `<p>Quedan ${avisos.length} datos por completar en la empresa:</p>`);
@@ -105,9 +118,14 @@ function cuerpoACompletar({ avisos = [], cliente = null } = {}) {
     return partes.join('');
 }
 
-/** Version en texto plano, para los logs y para los tests de contenido. */
+/**
+ * Version en texto plano. Va a `tango_pedido_problema`, que comercial ve en la
+ * ficha del negocio: tambien se traduce.
+ */
 function resumen({ problemas = [] } = {}) {
-    return problemas.map((p) => `${p.campo}: ${p.motivo}`).join(' | ');
+    return problemas
+        .map((p) => `${enCastellano.etiqueta(p.campo, p.propiedad)}: ${enCastellano.humanizar(p.motivo)}`)
+        .join(' | ');
 }
 
 module.exports = { cuerpo, cuerpoACompletar, resumen, escapar };

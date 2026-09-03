@@ -82,8 +82,9 @@ test('falta la razon social: es un problema, y dice donde cargarla', () => {
     assert.strictEqual(r.ok, false);
     const p = r.problemas.find((x) => x.campo === 'RAZON_SOCI');
     assert.ok(p, 'tiene que senalar RAZON_SOCI');
-    assert.strictEqual(p.propiedad, 'razon_social');
-    assert.match(p.comoSeArregla, /razon_social/);
+    assert.strictEqual(p.propiedad, 'razon_social', 'la propiedad queda, para que la nota sepa que etiqueta poner');
+    assert.match(p.comoSeArregla, /'Razon Social'/, 'el texto que lee comercial va con la etiqueta');
+    assert.ok(!/razon_social/.test(p.comoSeArregla), 'y sin el nombre interno');
 });
 
 test('sin nombre de fantasia se cae a la razon social en vez de frenar', () => {
@@ -380,14 +381,15 @@ test('un owner sin vendedor en Tango FRENA el alta: no cae en FACUNDO', () => {
     const p = r.problemas.find((x) => x.campo === 'ID_GVA23');
     assert.ok(p, `tendria que frenar por el vendedor: ${JSON.stringify(r.problemas)}`);
     assert.match(p.motivo, /pthaler@ultraschall\.com\.ar/, 'el mensaje dice QUE owner');
-    assert.match(p.comoSeArregla, /porOwner/, 'y donde se arregla');
+    assert.match(p.comoSeArregla, /avisar a sistemas/, 'y que hacer, en castellano');
+    assert.ok(!/porOwner|defaults\.tango/.test(p.comoSeArregla), 'el nombre del archivo no le sirve a comercial');
 });
 
 test('un negocio sin owner tambien frena, y lo dice distinto', () => {
     const r = verificar(COMPANY, { ownerId: null });
     assert.strictEqual(r.ok, false);
     const p = r.problemas.find((x) => x.campo === 'ID_GVA23');
-    assert.match(p.motivo, /no tiene owner/);
+    assert.match(p.motivo, /no tiene responsable/);
 });
 
 test('un owner por ID sin la tabla de owners frena: no se puede resolver el mail', () => {
@@ -455,7 +457,7 @@ test('una opcion que el ERP no resuelve FRENA el alta, no cae al default', () =>
     const r = verificar({ ...COMPANY, tango_zona: '99' });
     assert.strictEqual(r.ok, false);
     assert.ok(
-        r.problemas.some((p) => p.campo === 'ID_GVA05' && /tango_zona/.test(p.motivo)),
+        r.problemas.some((p) => p.campo === 'ID_GVA05' && /'99' no existe en Tango/.test(p.motivo)),
         `deberia frenar por la zona: ${JSON.stringify(r.problemas)}`,
     );
     assert.strictEqual(r.valores.ID_GVA05, undefined, 'no se manda nada');

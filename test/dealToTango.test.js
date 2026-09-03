@@ -156,11 +156,12 @@ test('anterior se ordena por displayOrder, no por como vengan', () => {
 
 test('la nota dice que falta, como se arregla y que hacer despues', () => {
     const html = notaProblema.cuerpo({
-        problemas: [{ campo: 'razon_social', motivo: 'esta vacio', comoSeArregla: 'cargarlo en la empresa' }],
+        problemas: [{ campo: 'RAZON_SOCI', propiedad: 'razon_social', motivo: 'esta vacio', comoSeArregla: 'cargarlo en la empresa' }],
         retroceso: { label: 'Negociación' },
         etapaGanada: 'Cierre ganado',
     });
-    assert.match(html, /razon_social/);
+    assert.match(html, /Razon Social/, 'la etiqueta, no RAZON_SOCI ni razon_social');
+    assert.ok(!/RAZON_SOCI|razon_social/.test(html), `la nota muestra el nombre interno: ${html}`);
     assert.match(html, /esta vacio/);
     assert.match(html, /cargarlo en la empresa/, 'decir que falta sin decir como no alcanza');
     assert.match(html, /Negociación/, 'donde quedo el negocio');
@@ -532,7 +533,8 @@ test('un producto que no esta atado a Tango frena el renglon, si no hay articulo
     // 2026-08-27 lo tapa el articulo de prueba (§9.6); apagado, vuelve a frenar.
     const r = verificar({ productos: SIN_ATAR, productoDePrueba: null });
     assert.strictEqual(r.ok, false);
-    assert.match(r.problemas[0].motivo, /tango_id_sta11/);
+    assert.match(r.problemas[0].motivo, /no está vinculado/);
+    assert.ok(!/tango_id_sta11/.test(r.problemas[0].motivo), 'sin nombres internos: lo lee comercial');
 });
 
 // ── El articulo de prueba (§9.6) ─────────────────────────────────────────
@@ -1372,7 +1374,8 @@ test('un negocio de un owner sin vendedor frena y dice como se arregla', async (
     assert.strictEqual(r.estado, 'incompleto');
     const p = r.problemas.find((x) => x.campo === 'ID_GVA23');
     assert.match(p.motivo, /pthaler@ultraschall\.com\.ar/);
-    assert.match(p.comoSeArregla, /porOwner/);
+    assert.match(p.comoSeArregla, /avisar a sistemas/);
+    assert.ok(!/porOwner|defaults\.tango/.test(p.comoSeArregla), 'eso es para sistemas, no para comercial');
 });
 
 test('un negocio de Matias SI da de alta: esta mapeado a FACUNDO para probar', async () => {

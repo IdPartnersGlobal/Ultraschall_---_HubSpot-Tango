@@ -1,6 +1,7 @@
 'use strict';
 
 const mapeoClientes = require('../../config/mapeo.clientes.json');
+const enCastellano = require('./enCastellano');
 
 /**
  * Traduce un rechazo de Tango a un problema que comercial pueda arreglar.
@@ -65,10 +66,17 @@ function largoExcedido(texto) {
     return m ? { campo: m[1], maximo: Number(m[2]) } : null;
 }
 
-/** De `LOCALIDAD` a la propiedad de HubSpot que comercial tiene que tocar. */
+/**
+ * De `LOCALIDAD` a la propiedad de HubSpot que comercial tiene que tocar.
+ *
+ * La etiqueta la resuelve `enCastellano`, no este modulo: la planilla de
+ * Ultraschall a veces la pone en `etiqueta` y a veces en `label`, y mirar una
+ * sola hacia que la nota dijera "el campo 'localidad'" en minuscula, o sea el
+ * nombre interno otra vez.
+ */
 function propiedadDeHubSpot(campoTango) {
     const c = (mapeoClientes.campos || []).find((x) => x.tango === campoTango);
-    return c ? { hubspot: c.hubspot, etiqueta: c.etiqueta || c.hubspot } : null;
+    return c ? { hubspot: c.hubspot, etiqueta: enCastellano.etiqueta(campoTango, c.hubspot) } : null;
 }
 
 /**
@@ -78,8 +86,16 @@ function propiedadDeHubSpot(campoTango) {
  * @returns {{campo, motivo, comoSeArregla}|null} null si NO es un problema de
  *          datos: eso se propaga como siempre y la cola lo reintenta.
  */
-function comoProblema(e, propiedades = {}) {
+function comoProblema(e, propiedades = {}, contexto = 'alta') {
     if (!esRechazoDeDatos(e)) return null;
+
+    // De que operacion se trata. Sin esto la nota decia SIEMPRE "el alta de la
+    // empresa", tambien cuando lo que fallo era el PEDIDO — y mandaba a
+    // comercial a corregir la ficha del cliente por un problema de las lineas
+    // de producto. Se vio en el negocio de prueba el 2026-09-03: el ERP decia
+    // "No hay existencias para RENGLON_DTO[1]" y la nota lo llamaba alta.
+    const queFallo = contexto === 'pedido' ? 'el pedido' : 'el alta de la empresa';
+    const donde = contexto === 'pedido' ? 'en el negocio' : 'en la empresa';
 
     const texto = motivoCrudo(e);
     const largo = largoExcedido(texto);
@@ -106,8 +122,8 @@ function comoProblema(e, propiedades = {}) {
     // sirve. El texto del ERP va tal cual — es mas util que una parafrasis.
     return {
         campo: 'Tango',
-        motivo: `el ERP rechazo el alta de la empresa: ${texto}`,
-        comoSeArregla: 'corregir en la empresa el dato que menciona el ERP y volver a mover el negocio a Cierre ganado. Si no se entiende el mensaje, avisar a sistemas',
+        motivo: `no aceptó ${queFallo}: ${texto}`,
+        comoSeArregla: `corregir ${donde} el dato que menciona el mensaje y volver a mover el negocio a Cierre ganado. Si no se entiende, avisar a sistemas`,
     };
 }
 

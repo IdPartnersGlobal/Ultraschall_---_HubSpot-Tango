@@ -2104,6 +2104,39 @@ Rederivar la lista: `node scripts/articuloDePrueba.js --proxy <url>`. Sólo lect
 
 ⚠️ El día que se cambie por un artículo que **sí** lleve stock, vuelve el problema. El script lo dice del artículo actual antes de listar candidatos.
 
+### 9.21 Las notas las lee comercial, no sistemas (2026-09-03)
+
+Matías abrió el negocio de prueba y leyó las ocho notas que el circuito había dejado. Decían esto:
+
+```
+RAZON_SOCI: falta -> cargar razon_social en la company
+ID_CATEGORIA_IVA: falta -> cargar condicion_iva en la company
+Tango: el ERP rechazo el alta de la empresa: No hay existencias para RENGLON_DTO[1].
+```
+
+`RAZON_SOCI` es una columna de `GVA14`. `RENGLON_DTO` es el nombre del campo en el DTO de la API de Tango. `condicion_iva` es el nombre interno de una propiedad de HubSpot. **Ninguna de las tres cosas existe para la persona que tiene que arreglarlo** — y la nota entera se escribió para esa persona (§9.9).
+
+`src/lib/enCastellano.js` traduce en el punto de salida. Las etiquetas **se derivan del mapeo**, no de una tabla escrita a mano: una lista paralela se desfasa el día que alguien agrega un campo, y lo que se ve es una nota que vuelve a mostrar el nombre interno.
+
+| entra | sale | de dónde |
+|---|---|---|
+| `RAZON_SOCI` | Razon Social | etiqueta de `razon_social` en `mapeo.clientes` |
+| `FECHA_ENTREGA` | Fecha de entrega | label de `mapeo.pedidos`, sin el "(Tango)" |
+| `RENGLON_DTO` | Productos del negocio | `OVERRIDES` — no es campo de nadie |
+| `RENGLON_DTO[1]` | el producto 1 del negocio | dentro de texto libre |
+| `FECHA_ORDEN_COMPRA` | 'Fecha de orden de compra' | el ERP nombra sus columnas en los rechazos |
+
+Lo que **no** se traduce: los logs de Azure —ahí el nombre interno es lo útil— y las columnas del ERP que no están en ningún mapeo (`FECHA_PEDIDO` sí, `COLUMNA_RARA_GV` no). Inventarle un nombre a un mensaje del ERP que no entendemos es peor que citarlo (§9.17).
+
+**La red:** `test/enCastellano.test.js` arma las notas con los problemas reales y falla si aparece **cualquier** nombre interno de los catálogos. La lista de nombres prohibidos también se deriva, así que un campo nuevo entra solo.
+
+#### Dos bugs que sólo se vieron leyendo las notas de verdad
+
+1. 🔴 **Un rechazo del PEDIDO se reportaba como "el alta de la empresa".** `rechazoTango.comoProblema` tenía el texto fijo, y se usa en los dos caminos. Con el ERP diciendo `No hay existencias para RENGLON_DTO[1]` —un problema de las líneas de producto— la nota mandaba a corregir la ficha del cliente. Ahora toma `contexto` (`'alta'` \| `'pedido'`) y lo dice bien.
+2. **Faltaba un `<p>`**: la nota abría con `El pedido no se pudo crear en Tango.Faltan 2 datos:`, pegado.
+
+Y un tercer arreglo de redacción: un rechazo del ERP ya no se anuncia como *"Falta este dato"* (`tipo: 'rechazo'`). No falta ningún dato — hay uno que Tango no acepta, o una regla que no se cumple, y decir "falta" manda a buscar un campo vacío que no existe.
+
 
 ## 10. Seguridad
 

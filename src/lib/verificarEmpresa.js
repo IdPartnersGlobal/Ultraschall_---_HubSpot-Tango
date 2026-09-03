@@ -1,6 +1,7 @@
 'use strict';
 
 const documento = require('./documento');
+const enCastellano = require('./enCastellano');
 const defaults = require('../../config/defaults.tango.json');
 
 /**
@@ -90,7 +91,7 @@ function resolverCampo(campo, props, m, lookups) {
             // ⚠️ Va en la direccion contraria a `transforms.documentoConGuiones`,
             // que SI normaliza — pero esa corre en la lectura, donde el dato ya
             // es de Tango. Aca el dato lo tipeo una persona hace un minuto.
-            if (!digitos) return { motivo: `'${texto}' no tiene ningun digito`, comoSeArregla: 'cargar el CUIT o documento en la company' };
+            if (!digitos) return { motivo: `'${texto}' no tiene ningun digito`, comoSeArregla: 'cargar el CUIT o documento en la empresa' };
 
             // Un DNI de 7 u 8 digitos es normal y no hay nada que revisar. Lo
             // que se marca es lo que no cierra como ningun documento: 10
@@ -108,7 +109,7 @@ function resolverCampo(campo, props, m, lookups) {
             if (tipo) {
                 const id = documento.TIPO_A_ID[tipo];
                 if (id) return { valor: id, tipo };
-                return { motivo: `no se conoce el ID_TIPO_DOCUMENTO_GV para '${tipo}'`, comoSeArregla: 'agregar el tipo a lib/documento' };
+                return { motivo: `Tango no reconoce el tipo de documento '${tipo}'`, comoSeArregla: 'avisar a sistemas' };
             }
             // Sin tipo elegido se infiere del numero, igual que en la lectura.
             const r = documento.idParaAlta({ COD_TIPO_DOCUMENTO_GV: 0, CUIT: props.cuit });
@@ -124,7 +125,7 @@ function resolverCampo(campo, props, m, lookups) {
             }
             return {
                 motivo: vacio(crudo) ? 'sin tipo de documento, y no se pudo inferir del numero' : `tipo de documento '${crudo}' desconocido`,
-                comoSeArregla: 'elegir el tipo de documento en la company, o corregir el CUIT',
+                comoSeArregla: 'elegir el tipo de documento en la empresa, o corregir el CUIT',
             };
         }
 
@@ -140,7 +141,7 @@ function resolverCampo(campo, props, m, lookups) {
             if (alterno) return { ...alterno, porDefecto: true };
             return {
                 motivo: vacio(crudo) ? 'sin valor' : `la opcion '${crudo}' no tiene equivalencia en Tango`,
-                comoSeArregla: `elegir una opcion de ${campo.hubspot} que exista en Tango`,
+                comoSeArregla: `elegir una opcion de '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' que exista en Tango`,
             };
         }
 
@@ -161,10 +162,10 @@ function resolverCampo(campo, props, m, lookups) {
                 return {};
             }
             const codigo = codigoDesdeEtiqueta(campo.hubspot, crudo, m);
-            if (!codigo) return { motivo: `la opcion '${crudo}' no tiene equivalencia en Tango`, comoSeArregla: `revisar las opciones de ${campo.hubspot} en el mapeo` };
+            if (!codigo) return { motivo: `la opcion '${crudo}' no tiene equivalencia en Tango`, comoSeArregla: `avisar a sistemas: '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' tiene una opcion que Tango no reconoce` };
             const r = lookups.resolver(campo.lookup, codigo, campo.hubspot);
             if (r.ok) return { valor: r.id, codigo };
-            return { motivo: r.motivo, comoSeArregla: `revisar la tabla ${campo.lookup} en el ERP` };
+            return { motivo: r.motivo, comoSeArregla: 'avisar a sistemas: ese valor no existe en Tango' };
         }
 
         default:
@@ -294,8 +295,8 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
                     // nada falle. Es el mismo criterio que el deposito (§9.8).
                     problemas.push(problema(
                         campo,
-                        `la opcion '${elegido}' de ${campo.hubspotOpcion} no existe en ${campo.lookup}`,
-                        `elegir otra opcion de ${campo.hubspotOpcion}, o revisar la tabla ${campo.lookup} en el ERP`,
+                        `la opcion '${elegido}' no existe en Tango`,
+                        `elegir otra opcion de '${enCastellano.etiqueta(campo.tango, campo.hubspotOpcion)}' en la empresa. Si la opcion es correcta, avisar a sistemas`,
                     ));
                     continue;
                 }
@@ -322,11 +323,11 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
                 problemas.push(problema(
                     campo,
                     mail
-                        ? `el owner del negocio (${mail}) no tiene vendedor equivalente en Tango`
-                        : 'el negocio no tiene owner, o no se pudo resolver su mail',
+                        ? `el responsable del negocio (${mail}) no es un vendedor de Tango`
+                        : 'el negocio no tiene responsable asignado',
                     mail
-                        ? `asignar el negocio a un owner que sea vendedor de Tango, o agregar '${mail}' a clientes.alta.campos[ID_GVA23].porOwner en config/defaults.tango.json`
-                        : 'asignar un owner al negocio en HubSpot',
+                        ? 'asignar el negocio a un responsable que sea vendedor en Tango. Si el responsable es correcto, avisar a sistemas para que lo den de alta como vendedor'
+                        : 'asignar un responsable al negocio en HubSpot',
                 ));
                 continue;
             } else {
@@ -348,12 +349,12 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
         }
         if (r.valor === undefined) {
             if (campo.obligatorio) {
-                problemas.push(problema(campo, 'falta', `cargar ${campo.hubspot} en la company`));
+                problemas.push(problema(campo, 'falta', `cargar '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' en la empresa`));
             } else if (campo.avisarSiFalta) {
                 // Tango no lo exige, asi que el cliente se crea igual — pero
                 // sin CUIT no se le puede facturar, y eso tiene que llegarle a
                 // alguien.
-                avisar(campo, 'esta vacio: el cliente se crea sin ese dato', `cargar ${campo.hubspot} en la empresa`);
+                avisar(campo, 'esta vacio: el cliente se crea sin ese dato', `cargar '${enCastellano.etiqueta(campo.tango, campo.hubspot)}' en la empresa`);
             }
             continue;
         }

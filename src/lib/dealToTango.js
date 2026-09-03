@@ -201,13 +201,13 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
             // arreglar nunca —y cada vuelta de la cola cuesta ~113 s— y la nota
             // de la cola de veneno mandaria a "avisar a sistemas" por algo que
             // comercial corrige en la ficha. Sale por el camino de los datos.
-            const problema = rechazoTango.comoProblema(e, companyProps || {});
+            const problema = rechazoTango.comoProblema(e, companyProps || {}, 'alta');
             if (!problema) throw e; // el ERP caido si se reintenta
 
             log.error('ALTA', `${dealId}: el ERP rechazo el dato -> ${problema.motivo}`);
             const r = await reportarIncompleto({
                 hs, dealId, etapaActual: deal.properties?.dealstage,
-                problemas: [problema], log, dryRun, ahora,
+                problemas: [problema], tipo: 'rechazo', log, dryRun, ahora,
             });
             return { dealId, estado: 'incompleto', motivo: r.motivo, problemas: [problema], retroceso: r.retroceso };
         }
@@ -253,13 +253,15 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     try {
         respuesta = await tango.create(procesos.entidades.pedidos.process, v.payload);
     } catch (e) {
-        const problema = rechazoTango.comoProblema(e, companyProps || {});
+        // 'pedido': la nota tiene que decir que fallo el PEDIDO y no el alta,
+        // o manda a corregir la ficha del cliente por un problema de las lineas.
+        const problema = rechazoTango.comoProblema(e, companyProps || {}, 'pedido');
         if (!problema) throw e;
 
         log.error('PEDIDO', `${dealId}: el ERP rechazo el pedido -> ${problema.motivo}`);
         const r = await reportarIncompleto({
             hs, dealId, etapaActual: deal.properties?.dealstage,
-            problemas: [problema], log, dryRun, ahora,
+            problemas: [problema], tipo: 'rechazo', log, dryRun, ahora,
         });
         // ⚠️ El CLIENTE puede haber quedado creado aunque el pedido falle. La
         // company ya tiene su COD_GVA14, asi que el reintento no lo recrea.
