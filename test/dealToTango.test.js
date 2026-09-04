@@ -1622,7 +1622,7 @@ test("'ARG' no es el peso argentino: el codigo es ARS", () => {
     const r = verificar({ deal: { deal_currency_code: 'ARG' } });
     assert.strictEqual(r.ok, false, 'ARG no existe: HubSpot manda ARS');
     assert.strictEqual(MONEDAS.porCodigoDeHubSpot.ARG, undefined);
-    assert.strictEqual(MONEDAS.porCodigoDeHubSpot.ARS, 1);
+    assert.strictEqual(MONEDAS.porCodigoDeHubSpot.ARS.idMoneda, 1);
 });
 
 test('la moneda no distingue mayusculas ni espacios', () => {
@@ -1634,9 +1634,59 @@ test('cada moneda de la tabla apunta a un ID que el ERP ya uso', () => {
     // 1 = PES y 2 = DOL son los unicos ID_MONEDA en uso en el padron de pedidos
     // (verificado 2026-08-28, §9.7). Si alguien agrega una tercera hay que
     // verificarla contra GVA21 antes.
-    for (const [codigo, id] of Object.entries(MONEDAS.porCodigoDeHubSpot)) {
-        assert.ok([1, 2].includes(id), `${codigo} apunta al ID ${id}, que no esta verificado contra GVA21`);
-        assert.ok(MONEDAS.descripciones[String(id)], `el ID ${id} no tiene descripcion en el catalogo`);
+    for (const [codigo, fila] of Object.entries(MONEDAS.porCodigoDeHubSpot)) {
+        assert.ok([1, 2].includes(fila.idMoneda), `${codigo} apunta al ID ${fila.idMoneda}, que no esta verificado contra GVA21`);
+        assert.ok(MONEDAS.descripciones[String(fila.idMoneda)], `el ID ${fila.idMoneda} no tiene descripcion`);
+        // La lista tiene que existir en la tabla de GVA10 del catalogo.
+        const listas = CATALOGO.auxiliares.listasPrecios.filas.map((f) => f.ID_GVA10);
+        assert.ok(listas.includes(fila.idListaPrecios), `${codigo} apunta a la lista ${fila.idListaPrecios}, que no existe en GVA10`);
+    }
+});
+
+// ── La lista de precios va con la moneda (2026-09-04) ───────────────────────
+
+/**
+ * Un pedido en dolares con una lista en pesos es plata mal calculada, y era lo
+ * que pasaba: `ID_GVA10` se heredaba del cliente y `ID_MONEDA` era fijo en
+ * pesos, asi que los dos campos no se miraban nunca entre si. Se vio al
+ * previsualizar la nota del pedido creado: "Moneda: Dolares · Lista: CON IVA EN $".
+ */
+
+test('un negocio en pesos usa la lista 1 (SIN IVA EN $)', () => {
+    const r = verificar({ deal: { deal_currency_code: 'ARS' } });
+    assert.strictEqual(r.payload.ID_MONEDA, 1);
+    assert.strictEqual(r.payload.ID_GVA10, 1);
+});
+
+test('un negocio en dolares usa la lista 2 (SIN IVA EN U$S)', () => {
+    const r = verificar({ deal: { deal_currency_code: 'USD' } });
+    assert.strictEqual(r.payload.ID_MONEDA, 2);
+    assert.strictEqual(r.payload.ID_GVA10, 2);
+});
+
+test('la lista de la moneda PISA la que tiene cargada el cliente', () => {
+    // Hay 7 clientes con CON IVA EN U$S (lista 5). Un negocio suyo en dolares
+    // sale con la 2, no con la 5. Es lo que se pidio.
+    const r = verificar({
+        company: { ...COMPANY, tango_id_gva10: '5' },
+        deal: { deal_currency_code: 'USD' },
+    });
+    assert.strictEqual(r.payload.ID_GVA10, 2, 'gana la de la moneda');
+});
+
+test('sin moneda en el negocio la lista se sigue heredando del cliente', () => {
+    // El camino de antes queda intacto para el negocio que no trae moneda.
+    const r = verificar({ company: { ...COMPANY, tango_id_gva10: '5' }, deal: {} });
+    assert.strictEqual(r.payload.ID_GVA10, 5);
+});
+
+test('moneda y lista nunca salen desparejas', () => {
+    // La red: cualquier moneda configurada tiene que dar un par consistente.
+    for (const codigo of Object.keys(MONEDAS.porCodigoDeHubSpot)) {
+        const r = verificar({ company: { ...COMPANY, tango_id_gva10: '3' }, deal: { deal_currency_code: codigo } });
+        const esperado = MONEDAS.porCodigoDeHubSpot[codigo];
+        assert.strictEqual(r.payload.ID_MONEDA, esperado.idMoneda, codigo);
+        assert.strictEqual(r.payload.ID_GVA10, esperado.idListaPrecios, codigo);
     }
 });
 

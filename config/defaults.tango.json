@@ -333,9 +333,16 @@
       "_nota": "DECISION DE MATIAS 2026-09-04: la moneda del pedido sale del NEGOCIO. Antes ID_MONEDA era un valor fijo en 1 (Pesos) y `deal_currency_code` ni se leia, asi que un negocio en USD entraba a Tango como pesos con los importes en dolares — un equipo de USD 3.000 quedaba como 3.000 pesos, sin que nada fallara. Medido el 2026-09-04: 4 de los 151 negocios del portal estan en USD.",
       "_porQueNoEsUnLookup": "Tango no tiene `process` para la tabla de monedas y no se relevo: es la unica auxiliar que falta. Los dos IDs estan verificados contra GVA21 (ARQUITECTURA 9.7): 1 = PES y 2 = DOL son los unicos en uso en el padron de pedidos. Si aparece una tercera moneda hay que agregarla aca.",
       "_siNoEstaEnLaTabla": "FRENA el pedido, no cae al default. Mismo criterio que el deposito y el talonario (9.14): una moneda equivocada no falla, se guarda mal y el importe queda por un factor de mil.",
+      "_laListaVaCONLaMoneda": "DECISION DE MATIAS 2026-09-04: la moneda del negocio decide TAMBIEN la lista de precios. ARS -> lista 1 (SIN IVA EN $), USD -> lista 2 (SIN IVA EN U$S). Las dos son sin IVA y la 2 es de la que el sync de productos lee los precios, asi que el pedido queda consistente consigo mismo. Van juntas a proposito: un pedido en dolares con una lista en pesos es plata mal calculada, y era lo que pasaba — ID_GVA10 se heredaba del cliente y ID_MONEDA era fijo.",
+      "_pisaLoDelCliente": "⚠️ La lista derivada de la moneda GANA sobre la que tenga cargada el cliente. Hay 7 clientes con CON IVA EN U$S (lista 5): un negocio suyo en dolares ahora sale con la lista 2, no con la 5. Es lo que se pidio; si alguna vez tiene que ganar el cliente, es sacar ID_GVA10 de este bloque.",
+      "_ojoElDefaultAnterior": "Hasta el 2026-09-04 la lista salia del cliente y, si no tenia, del default 3 (CON IVA EN $) — la moda real, 573 de los 1.065 pedidos de 2026. El cambio a la 1 para pesos cambia el tratamiento de IVA del pedido: es correcto si los precios de HubSpot estan cargados SIN IVA.",
       "porCodigoDeHubSpot": {
-        "ARS": 1,
-        "USD": 2
+        "ARS": { "idMoneda": 1, "idListaPrecios": 1 },
+        "USD": { "idMoneda": 2, "idListaPrecios": 2 }
+      },
+      "listas": {
+        "1": "SIN IVA EN $",
+        "2": "SIN IVA EN U$S"
       },
       "descripciones": {
         "1": "Pesos",

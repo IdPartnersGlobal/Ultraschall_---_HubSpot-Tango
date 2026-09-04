@@ -2285,6 +2285,34 @@ Una cosa a tener en cuenta:
 
 De paso, el aviso del artículo de prueba dejó de nombrar `ID_STA11`: el artículo se busca por su código (`ZZZ`), no por su ID interno.
 
+### 9.27 La lista de precios va con la moneda (2026-09-04)
+
+Al previsualizar la nota de §9.26 quedó a la vista lo que §9.25 no había arreglado:
+
+```
+Moneda: Dólares
+Lista de precios: CON IVA EN $
+```
+
+Los dos campos nunca se miraban entre sí: `ID_GVA10` se heredaba del cliente y `ID_MONEDA` era fijo en pesos. Un pedido en dólares con una lista en pesos es **plata mal calculada**.
+
+Decisión de Matías: **la moneda del negocio decide también la lista.**
+
+| moneda | `ID_MONEDA` | `ID_GVA10` | nombre |
+|---|---|---|---|
+| `ARS` | 1 (PES) | **1** | SIN IVA EN $ |
+| `USD` | 2 (DOL) | **2** | SIN IVA EN U$S |
+
+Las dos son **sin IVA**, y la 2 es de la que el sync de productos lee los precios (§9.12), así que el pedido queda consistente consigo mismo.
+
+En `GVA10` el código coincide con el ID en las 5 filas, pero eso es **suerte estructural** de una tabla chica y temprana, igual que `GVA05`: si Ultraschall crea una sexta lista hay que re-verificar. La tabla está en el catálogo con esa advertencia desde el 2026-08-24.
+
+⚠️ **La lista derivada de la moneda pisa la del cliente**, a propósito. Hay 7 clientes con `CON IVA EN U$S` (lista 5): un negocio suyo en dólares ahora sale con la **2**, no con la 5. Es lo que se pidió; si alguna vez tiene que ganar el cliente, es sacar `ID_GVA10` de ese bloque. Va por `elegido`, que se aplica **después** de `heredado` — ese orden es lo que hace que gane, y es el mismo mecanismo que la condición de venta (§9.24). **No tocar ese orden.**
+
+⚠️ **Cambia el tratamiento de IVA de los pedidos en pesos.** Hasta ahora, sin lista en el cliente, iba el default **3 (CON IVA EN $)** — la moda real, 573 de los 1.065 pedidos de 2026. Ahora va la **1 (SIN IVA EN $)**. Es correcto **si** los precios cargados a mano en HubSpot están sin IVA; si estuvieran con IVA, el pedido saldría con el neto inflado. No es algo que el circuito pueda verificar solo.
+
+**Sin moneda en el negocio, la lista se sigue heredando del cliente**, igual que antes. El camino viejo queda intacto para lo que no trae moneda.
+
 
 ## 10. Seguridad
 

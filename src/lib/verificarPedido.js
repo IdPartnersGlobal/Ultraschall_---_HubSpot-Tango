@@ -105,6 +105,14 @@ function resolverProductoDePrueba(env = process.env) {
 
 const vacio = (v) => v === null || v === undefined || String(v).trim() === '';
 
+/** 'ARS' -> 'Pesos', para los mensajes. Cae al codigo si no esta en la tabla. */
+function codigoLegible(codigo) {
+    const t = (PEDIDOS.monedas || {}).porCodigoDeHubSpot || {};
+    const d = (PEDIDOS.monedas || {}).descripciones || {};
+    const fila = t[codigo];
+    return (fila && d[String(fila.idMoneda)]) || codigo;
+}
+
 function problema(campo, motivo, comoSeArregla) {
     return { campo, motivo, comoSeArregla };
 }
@@ -190,14 +198,14 @@ function monedaDelNegocio(deal) {
 
     if (!codigo) return null; // va el default: es lo que hacia hasta el 2026-09-04
 
-    const id = tabla[codigo];
-    if (id === undefined) {
+    const fila = tabla[codigo];
+    if (fila === undefined) {
         return {
             problema: problema('ID_MONEDA', `el negocio esta en '${codigo}' y esa moneda no esta configurada para Tango`,
                 `pasar el negocio a una de las monedas configuradas (${Object.keys(tabla).join(', ')}), o avisar a sistemas para que agreguen '${codigo}'`),
         };
     }
-    return { valor: id, codigo };
+    return { valor: fila.idMoneda, codigo, idListaPrecios: fila.idListaPrecios };
 }
 
 /**
@@ -300,8 +308,24 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
     // La moneda no sale de una tabla de Tango —no hay `process` para monedas—
     // asi que no pasa por `deDesplegable`, pero el criterio es el mismo.
     const moneda = monedaDelNegocio(deal);
-    if (moneda && moneda.problema) problemas.push(moneda.problema);
-    else if (moneda) elegido.ID_MONEDA = moneda;
+    if (moneda && moneda.problema) {
+        problemas.push(moneda.problema);
+    } else if (moneda) {
+        elegido.ID_MONEDA = moneda;
+        // La lista de precios VA CON LA MONEDA (decision de Matias 2026-09-04):
+        // ARS -> lista 1 (SIN IVA EN $), USD -> lista 2 (SIN IVA EN U$S).
+        //
+        // ⚠️ Pisa la lista que tenga cargada el cliente, a proposito. Un pedido
+        // en dolares con una lista en pesos es plata mal calculada, y era lo que
+        // pasaba: `ID_GVA10` se heredaba del cliente y `ID_MONEDA` era fijo en
+        // pesos, asi que los dos campos no se miraban nunca entre si.
+        //
+        // Va por `elegido`, que se aplica DESPUES de `heredado`: ese orden es lo
+        // que hace que gane. No tocarlo.
+        if (moneda.idListaPrecios !== undefined) {
+            elegido.ID_GVA10 = { valor: moneda.idListaPrecios, porLaMoneda: codigoLegible(moneda.codigo) };
+        }
+    }
 
     // -------------------------------------------------------- los renglones
     const renglones = [];
