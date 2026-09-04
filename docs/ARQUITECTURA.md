@@ -2313,6 +2313,30 @@ En `GVA10` el código coincide con el ID en las 5 filas, pero eso es **suerte es
 
 **Sin moneda en el negocio, la lista se sigue heredando del cliente**, igual que antes. El camino viejo queda intacto para lo que no trae moneda.
 
+### 9.28 El transporte también lo elige comercial (2026-09-04)
+
+Pregunta de Matías: *"falta agregar Transporte en toda la ecuación, ¿ahora mismo está fijo?"*.
+
+**Fijo no, pero del cliente.** `ID_GVA24` salía sólo de la empresa (`tango_id_gva24`), y si la empresa no tenía, del default `01` = RETIRA CLIENTE. Comercial ya lo podía elegir **en la ficha de la empresa** desde §9.14, pero no por pedido.
+
+Cómo se entrega es una decisión **de la venta**: este pedido lo retira el cliente aunque a ese cliente normalmente se le mande por expreso. Así que se sumó al negocio, con el mismo patrón que la condición de venta (§9.24).
+
+`tango_transporte` en **deals** — la del mismo nombre en **companies** es otra cosa: aquella es el transporte habitual del cliente y la escribe el sync.
+
+⚠️ **En `GVA24` el código diverge del ID en las 41 filas**, sin una sola excepción: el código `07` es el **ID 8**, el `08` es el **ID 9**. Es la divergencia más completa de todas las auxiliares. Mandar el código como ID mandaría la mercadería **por otro transporte** sin que nada falle. Por eso el desplegable guarda el código y `lookups` resuelve el ID (§5.4).
+
+Los 41 nombres son únicos hoy, así que no hizo falta desempatar etiquetas — pero el generador lo hace solo si algún día se repiten, porque HubSpot rechaza el PATCH entero cuando dos opciones comparten etiqueta (§9.13).
+
+#### La regla que ya son cuatro campos
+
+`ID_GVA01`, `ID_GVA10`, `ID_GVA23` e `ID_GVA24` están en `DEL_CLIENTE`; `ID_GVA01` e `ID_GVA24` están **además** en `DEL_DEAL`. No es una duplicación: es la precedencia.
+
+```
+default del catálogo  <  lo que tiene el cliente  <  lo que eligió comercial
+```
+
+Lo resuelve el orden en que se arma la cabecera —`heredado` primero, `elegido` después— y **no hay que tocar ese orden**. Los dos que no están en `DEL_DEAL` es a propósito: la lista de precios la decide la moneda (§9.27) y el vendedor lo decide el owner (§9.19), no un desplegable.
+
 
 ## 10. Seguridad
 

@@ -1764,3 +1764,62 @@ test('en dry-run no se anota nada', async () => {
     await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: true });
     assert.strictEqual(hs.notas.length, 0);
 });
+
+// ── El transporte lo elige comercial en el negocio (2026-09-04) ─────────────
+
+/**
+ * Hasta ahora `ID_GVA24` salia SOLO del cliente: la empresa tiene su transporte
+ * habitual y el pedido lo heredaba, sin forma de cambiarlo por venta. Pero como
+ * se entrega es una decision de la venta — este pedido lo retira el cliente
+ * aunque al cliente normalmente se le mande por expreso.
+ *
+ * ⚠️ En GVA24 el codigo diverge del ID en las 41 filas: el codigo '07' es el
+ * ID 8. Mandar el codigo como ID mandaria la mercaderia por otro transporte sin
+ * que nada falle.
+ */
+
+test('el transporte que elige comercial llega al ERP como ID', () => {
+    const r = verificar({ deal: { tango_transporte: '07' } });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_GVA24, lk.resolver('transportes', '07').id);
+    assert.notStrictEqual(r.payload.ID_GVA24, 7, 'el codigo 07 NO es el ID 7');
+});
+
+test('el transporte del negocio GANA sobre el de la empresa', () => {
+    const r = verificar({
+        company: { ...COMPANY, tango_id_gva24: '5' },
+        deal: { tango_transporte: '01' },
+    });
+    assert.strictEqual(r.payload.ID_GVA24, lk.resolver('transportes', '01').id, 'RETIRA CLIENTE');
+});
+
+test('sin elegir nada se sigue heredando el transporte de la empresa', () => {
+    const r = verificar({ company: { ...COMPANY, tango_id_gva24: '5' }, deal: {} });
+    assert.strictEqual(r.payload.ID_GVA24, 5);
+});
+
+test('un transporte que no existe FRENA el pedido, no cae al default', () => {
+    const r = verificar({ deal: { tango_transporte: '99999' } });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA24'), JSON.stringify(r.problemas));
+});
+
+test('cada opcion de transporte resuelve a un ID que existe en el ERP', () => {
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.tango === 'ID_GVA24');
+    assert.strictEqual(Object.keys(campo.opciones).length, 41, 'la tabla GVA24 entera');
+    for (const codigo of Object.keys(campo.opciones)) {
+        const r = verificar({ deal: { tango_transporte: codigo } });
+        assert.strictEqual(r.ok, true, `el transporte '${codigo}' no resolvio: ${JSON.stringify(r.problemas)}`);
+    }
+});
+
+test('las etiquetas del transporte son unicas: HubSpot lo exige', () => {
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.tango === 'ID_GVA24');
+    const etiquetas = Object.values(campo.opcionesEtiquetas);
+    assert.strictEqual(etiquetas.length, new Set(etiquetas).size);
+});
+
+test('el transporte elegido sale en la nota del pedido creado', () => {
+    const r = verificar({ deal: { tango_transporte: '02' } });
+    assert.strictEqual(r.resumen.transporte, 'ULTRASCHALL');
+});

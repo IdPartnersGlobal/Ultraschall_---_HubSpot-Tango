@@ -53,14 +53,16 @@ const DEL_CLIENTE = ['ID_GVA01', 'ID_GVA10', 'ID_GVA23', 'ID_GVA24'];
  *
  * Vacio no es un problema: es el caso normal, y va el default.
  *
- * ⚠️ `ID_GVA01` (condicion de venta) esta en las DOS listas, y no es un error:
- * se hereda del cliente, pero si comercial eligio una en el negocio, esa gana.
- * La condicion se negocia por venta —un anticipo, tres cheques— y no es un
- * atributo fijo de la empresa (decision de Matias, 2026-09-04). El orden en que
- * se arma la cabecera es lo que lo resuelve: `heredado` primero, `elegido`
- * despues. No tocar ese orden.
+ * ⚠️ `ID_GVA01` (condicion de venta) e `ID_GVA24` (transporte) estan en las DOS
+ * listas, y no es un error: se heredan del cliente, pero si comercial eligio en
+ * el negocio, esa eleccion gana. Las dos son decisiones DE LA VENTA —un
+ * anticipo y tres cheques, o que este pedido lo retire el cliente aunque al
+ * cliente normalmente se le mande por expreso— y no atributos fijos de la
+ * empresa (decisiones de Matias, 2026-09-04). El orden en que se arma la
+ * cabecera es lo que lo resuelve: `heredado` primero, `elegido` despues. No
+ * tocar ese orden.
  */
-const DEL_DEAL = ['ID_STA22', 'ID_GVA43_TALON_PED', 'ID_GVA43_TALONARIO_FACTURA', 'ID_GVA01'];
+const DEL_DEAL = ['ID_STA22', 'ID_GVA43_TALON_PED', 'ID_GVA43_TALONARIO_FACTURA', 'ID_GVA01', 'ID_GVA24'];
 
 /**
  * Datos del negocio que van derecho al pedido, sin tabla que resolver (§9.18).
