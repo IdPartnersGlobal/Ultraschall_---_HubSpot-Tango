@@ -201,6 +201,33 @@ function planificar(mapeo, existentes, { grupo = GRUPO.name } = {}) {
 
         yaEstan.push(campo.hubspot);
 
+        // El GRUPO y la ETIQUETA. Se comparan aparte de las opciones porque una
+        // propiedad puede estar perfecta de tipo y valores y aun asi vivir en el
+        // lugar equivocado — y ahi comercial no la encuentra, o peor, la
+        // encuentra con un nombre que no dice de que es.
+        //
+        // Descubierto el 2026-09-04 con `condiciones_de_pago`: ya existia, en
+        // "Informacion del negocio" y con la etiqueta de la planilla vieja. El
+        // planificador la daba por buena porque solo miraba tipo y opciones.
+        //
+        // ⚠️ El NOMBRE INTERNO no se puede cambiar en HubSpot, ni aca ni a mano:
+        // una propiedad se llama para siempre como se creo. Por eso esto mueve y
+        // renombra lo que se ve, y el `name` queda como esta.
+        const mudanza = {};
+        if (actual.groupName !== grupo) mudanza.groupName = grupo;
+        if (campo.label && actual.label !== campo.label) mudanza.label = campo.label;
+        const detalleMudanza = [
+            mudanza.groupName ? `esta en el grupo '${actual.groupName}' y va en '${grupo}'` : null,
+            mudanza.label ? `se llama '${actual.label}' y el mapeo dice '${campo.label}'` : null,
+        ].filter(Boolean).join(' · ');
+
+        /** Un solo PATCH por propiedad: la mudanza viaja con lo que haya. */
+        const parchear = (detalle, cambios) => aParchear.push({
+            name: campo.hubspot,
+            detalle: [detalle, detalleMudanza].filter(Boolean).join(' · '),
+            cambios: { ...mudanza, ...cambios },
+        });
+
         if (debeSerUnica && !actual.hasUniqueValue) {
             aRehacer.push({
                 name: campo.hubspot,
@@ -291,17 +318,21 @@ function planificar(mapeo, existentes, { grupo = GRUPO.name } = {}) {
                     visibilidadMal.length ? `visibilidad distinta: ${visibilidadMal.map((o) => `'${o.value}'->${o.hidden ? 'oculta' : 'visible'}`).join(', ')}` : null,
                 ].filter(Boolean).join(' · ');
 
-                aParchear.push({
-                    name: campo.hubspot,
-                    detalle,
-                    cambios: {
-                        options: [
-                            ...viejas,
-                            ...faltan.map((o, i) => ({ ...o, displayOrder: viejas.length + i })),
-                        ],
-                    },
+                parchear(detalle, {
+                    options: [
+                        ...viejas,
+                        ...faltan.map((o, i) => ({ ...o, displayOrder: viejas.length + i })),
+                    ],
                 });
+                continue;
             }
+        }
+
+        // Nada que tocar en las opciones, pero la propiedad esta en el grupo
+        // equivocado o con otra etiqueta.
+        if (Object.keys(mudanza).length) parchear(null, {});
+        continue;
+        {
         }
     }
 

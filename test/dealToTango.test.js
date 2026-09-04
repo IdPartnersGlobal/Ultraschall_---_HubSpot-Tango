@@ -1509,3 +1509,68 @@ test('un pedido de OTRO negocio mas nuevo no le gana al nuestro', async () => {
     const nro = await d2t.releerNroPedido({ tango, codigoCliente: '007611', dealId: '64576262053' });
     assert.strictEqual(nro, '00001-00013601', 'el ultimo NUESTRO, no el ultimo de la lista');
 });
+
+// ── La condicion de venta la elige comercial en el negocio (2026-09-04) ─────
+
+/**
+ * `condiciones_de_pago` ya existia en el portal, en "Informacion del negocio",
+ * con 83 opciones que guardaban la DESCRIPCION. No servia: `CHEQUE 45 DIAS FF`
+ * esta DOS veces en GVA01 (cod 13 / id 13 y cod 68 / id 1069), asi que la
+ * descripcion no identifica la fila; y le faltaba CONTADO —el 54% de la
+ * cartera— porque decia "Contado" y en Tango es "CONTADO".
+ */
+
+test('la condicion de venta que elige comercial llega al ERP como ID', () => {
+    // El codigo 5 es MERCADOPAGO. Se manda el ID, no el codigo.
+    const r = verificar({ deal: { condiciones_de_pago: '5' } });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_GVA01, lk.resolver('condicionesVenta', '5').id);
+});
+
+test('lo que elige comercial GANA sobre la condicion del cliente', () => {
+    // La condicion se negocia por venta; no es un atributo fijo de la empresa.
+    const r = verificar({
+        company: { ...COMPANY, tango_id_gva01: '1' },
+        deal: { condiciones_de_pago: '5' },
+    });
+    assert.strictEqual(r.payload.ID_GVA01, lk.resolver('condicionesVenta', '5').id);
+});
+
+test('sin elegir nada se sigue heredando la del cliente', () => {
+    const r = verificar({ company: { ...COMPANY, tango_id_gva01: '7' } });
+    assert.strictEqual(r.payload.ID_GVA01, 7, 'el ID que ya trae la company');
+});
+
+test('una condicion de venta que no existe FRENA el pedido, no cae al default', () => {
+    const r = verificar({ deal: { condiciones_de_pago: '9999' } });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA01'), JSON.stringify(r.problemas));
+});
+
+test('cada opcion de la condicion de venta resuelve a un ID que existe', () => {
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.tango === 'ID_GVA01');
+    assert.strictEqual(Object.keys(campo.opciones).length, 86, 'la tabla GVA01 entera');
+    for (const codigo of Object.keys(campo.opciones)) {
+        const r = verificar({ deal: { condiciones_de_pago: codigo } });
+        assert.strictEqual(r.ok, true, `la condicion '${codigo}' no resolvio: ${JSON.stringify(r.problemas)}`);
+    }
+});
+
+test('las etiquetas del desplegable son unicas: HubSpot lo exige', () => {
+    // `CHEQUE 45 DIAS FF` esta dos veces en GVA01. Sin desempatar, el PATCH de
+    // la propiedad falla entero con "Property option labels must be unique".
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.tango === 'ID_GVA01');
+    const etiquetas = Object.values(campo.opcionesEtiquetas);
+    assert.strictEqual(etiquetas.length, new Set(etiquetas).size,
+        'hay etiquetas repetidas: HubSpot rechaza el PATCH entero');
+    assert.match(campo.opcionesEtiquetas['13'], /\(13\)$/, 'el duplicado se desempata con el codigo');
+});
+
+test('el duplicado sin uso queda oculto, no borrado', () => {
+    // cod 68 lo usan 0 clientes contra 3 del cod 13 (medido sobre los 5.671).
+    // Ocultar y no borrar es la regla: si alguien lo tuviera asignado, sacarlo
+    // de las opciones rompe la escritura.
+    const campo = MAPEO_PEDIDOS.campos.find((c) => c.tango === 'ID_GVA01');
+    assert.deepStrictEqual(campo.opcionesOcultas, ['68']);
+    assert.ok(campo.opciones['68'], 'sigue existiendo como opcion');
+});

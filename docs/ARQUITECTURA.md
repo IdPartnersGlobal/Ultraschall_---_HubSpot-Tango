@@ -2187,6 +2187,38 @@ Con **una sola cosa**: `tango_nro_pedido` en el Deal (§9.3). Si tiene valor, no
 
 Es a propósito —es la guarda contra la re-entrega de la cola, que es *at-least-once*— pero tiene una consecuencia que conviene tener presente: **borrar `tango_nro_pedido` y volver a mover el negocio a ganado emite un pedido nuevo en el ERP.** Es lo que pasó cinco veces. El `LEYENDA_4` no es una guarda: sólo sirve para saber cuál de los pedidos es el nuestro cuando ya se creó.
 
+### 9.24 La condición de venta la elige comercial en el negocio (2026-09-04)
+
+El pedido heredaba `ID_GVA01` del cliente. Pero la condición de venta **se negocia por venta** —un anticipo, tres cheques— y no es un atributo fijo de la empresa. Matías: *"no estamos tomando la condición de venta, tiene otro nombre, es condición de pago y está en información de negocio"*.
+
+La propiedad ya existía: `condiciones_de_pago`, con **83 opciones**. Antes de reusarla se comparó contra `GVA01`, y no servía como estaba:
+
+| problema | detalle |
+|---|---|
+| Guardaba la **descripción**, no el código | Contra la regla del 2026-09-01 (§9.14) |
+| 🔴 Una opción **irresoluble** | `CHEQUE 45 DIAS FF` está **dos veces**: cod 13 / id 13 y cod 68 / id **1069** |
+| 🔴 Faltaba `CONTADO` | La opción decía `"Contado"`; en Tango es `"CONTADO"`. Es **el 54% de la cartera** (3.079 de 5.671) |
+| Faltaban 2 filas | `ANT + 12 CHEQUES` (cod 71) y `Anticipo + 12 Cheques` (cod 91) |
+| El código **no** es el ID | Divergen en **72 de 86** |
+
+Rehacerla no costó nada: de **151 negocios, 1 solo** la tenía cargada. Lo que estaba completo era la lista de opciones, no los datos.
+
+**Qué se hizo.** Se reusó la propiedad —no se creó otra ni se borró ninguna— con las 86 opciones de `GVA01` guardando el **código**. El duplicado se desempata en la etiqueta (`CHEQUE 45 DIAS FF (13)` / `(68)`) porque **HubSpot exige etiquetas únicas**, y el cod 68 va `hidden: true`: lo usan **0 clientes** contra 3 del cod 13. El único negocio cargado se migró de `"MERCADOPAGO"` a `"5"`.
+
+⚠️ **El nombre interno de una propiedad de HubSpot no se puede cambiar.** Sigue llamándose `condiciones_de_pago`; lo que se movió es el grupo y la etiqueta, que es lo que ve comercial.
+
+#### Elegir gana sobre heredar
+
+`ID_GVA01` quedó en **las dos listas** de `verificarPedido`: se hereda del cliente, y si comercial eligió una en el negocio, esa gana. Lo resuelve el orden en que se arma la cabecera —`heredado` primero, `elegido` después—, así que **no tocar ese orden**. Sin elegir nada sigue heredándose, y sin cliente cargado va el default.
+
+#### Y el planificador no miraba dónde vivía la propiedad
+
+`propiedades.planificar` comparaba tipo y opciones, pero **no el grupo ni la etiqueta**. `condiciones_de_pago` estaba perfecta de tipo y el plan la daba por buena — mientras seguía en "Información del negocio", donde comercial no la asocia con Tango.
+
+Ahora se comparan las tres cosas y **viajan en un solo PATCH**: dos PATCH sobre la misma propiedad son una llamada de más y una oportunidad de que la segunda falle y quede a medias.
+
+El fixture del test de idempotencia no traía `label` —HubSpot lo devuelve siempre— y por eso el hueco pasaba desapercibido. Es la misma lección de siempre: *un doble al que le falta un campo que el código lee esconde justo la clase de bug que se busca*.
+
 
 ## 10. Seguridad
 

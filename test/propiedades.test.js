@@ -133,8 +133,11 @@ test('las propiedades estandar de HubSpot no se crean', () => {
 test('planificar es idempotente: contra su propio resultado no queda nada por hacer', () => {
     const plan = planificar(mapeoClientes, []);
     // Simula el portal despues de correr crearPropiedades.
+    // ⚠️ Va `label` tambien: HubSpot lo devuelve siempre, y desde el 2026-09-04
+    // `planificar` compara la etiqueta y el grupo. Un doble al que le falta un
+    // campo que el codigo lee esconde justo la clase de bug que se busca.
     const yaCreadas = plan.aCrear.map((p) => ({
-        name: p.name, type: p.type, fieldType: p.fieldType,
+        name: p.name, type: p.type, fieldType: p.fieldType, label: p.label,
         hasUniqueValue: !!p.hasUniqueValue, groupName: p.groupName,
         options: p.options || [],
     }));
@@ -400,4 +403,70 @@ test('una etiqueta vieja que no choca con ninguna nueva se deja como esta', () =
     }];
     const { aParchear } = planificar(mapeo, enElPortal);
     assert.strictEqual(aParchear[0].cambios.options.find((o) => o.value === 'PATAGONIA').label, 'PATAGONIA');
+});
+
+// ── El grupo y la etiqueta tambien se comparan (2026-09-04) ─────────────────
+
+/**
+ * `condiciones_de_pago` ya existia, con el tipo y las opciones bien, pero en
+ * "Informacion del negocio" y con la etiqueta de la planilla vieja. El
+ * planificador la daba por buena porque solo miraba tipo y opciones — y en la
+ * ficha comercial no la encontraba entre los campos de Tango.
+ */
+
+const MAPEO_MUDANZA = {
+    _meta: { claveIdempotencia: { hubspot: 'clave' } },
+    campos: [{ tango: 'X', hubspot: 'condiciones_de_pago', label: 'Condicion de venta (Tango)', tipo: 'string' }],
+};
+
+test('una propiedad en el grupo equivocado se parchea, no se recrea', () => {
+    const { aParchear, aCrear, aRehacer } = planificar(MAPEO_MUDANZA, [{
+        name: 'condiciones_de_pago', type: 'string', fieldType: 'text',
+        groupName: 'dealinformation', label: 'Condicion de venta (Tango)', options: [],
+    }]);
+    assert.strictEqual(aCrear.length, 0, 'no se duplica');
+    assert.strictEqual(aRehacer.length, 0, 'no se borra ni se rehace');
+    assert.strictEqual(aParchear.length, 1);
+    assert.strictEqual(aParchear[0].cambios.groupName, 'tango_erp');
+    assert.match(aParchear[0].detalle, /dealinformation/);
+});
+
+test('una etiqueta distinta a la del mapeo se parchea', () => {
+    const { aParchear } = planificar(MAPEO_MUDANZA, [{
+        name: 'condiciones_de_pago', type: 'string', fieldType: 'text',
+        groupName: 'tango_erp', label: 'Condiciones de Pago', options: [],
+    }]);
+    assert.strictEqual(aParchear.length, 1);
+    assert.strictEqual(aParchear[0].cambios.label, 'Condicion de venta (Tango)');
+    assert.strictEqual(aParchear[0].cambios.groupName, undefined, 'el grupo ya estaba bien');
+});
+
+test('mudanza y opciones viajan en UN solo PATCH', () => {
+    // Dos PATCH sobre la misma propiedad es una llamada de mas y una
+    // oportunidad de que la segunda falle y quede a medias.
+    const mapeo = {
+        _meta: { claveIdempotencia: { hubspot: 'clave' } },
+        campos: [{
+            tango: 'X', hubspot: 'condiciones_de_pago', label: 'Condicion de venta (Tango)',
+            hsFieldType: 'select', opciones: { 1: '1', 5: '5' },
+        }],
+    };
+    const { aParchear } = planificar(mapeo, [{
+        name: 'condiciones_de_pago', type: 'enumeration', fieldType: 'select',
+        groupName: 'dealinformation', label: 'Condiciones de Pago',
+        options: [{ label: 'MERCADOPAGO', value: 'MERCADOPAGO', hidden: false }],
+    }]);
+    assert.strictEqual(aParchear.length, 1, 'uno solo, no dos');
+    assert.strictEqual(aParchear[0].cambios.groupName, 'tango_erp');
+    assert.strictEqual(aParchear[0].cambios.label, 'Condicion de venta (Tango)');
+    assert.ok(aParchear[0].cambios.options.some((o) => o.value === '5'), 'y las opciones nuevas');
+    assert.ok(aParchear[0].cambios.options.some((o) => o.value === 'MERCADOPAGO'), 'sin perder la vieja');
+});
+
+test('si el grupo y la etiqueta ya estan bien, no se parchea nada', () => {
+    const { aParchear } = planificar(MAPEO_MUDANZA, [{
+        name: 'condiciones_de_pago', type: 'string', fieldType: 'text',
+        groupName: 'tango_erp', label: 'Condicion de venta (Tango)', options: [],
+    }]);
+    assert.strictEqual(aParchear.length, 0);
 });
