@@ -2219,6 +2219,40 @@ Ahora se comparan las tres cosas y **viajan en un solo PATCH**: dos PATCH sobre 
 
 El fixture del test de idempotencia no traía `label` —HubSpot lo devuelve siempre— y por eso el hueco pasaba desapercibido. Es la misma lección de siempre: *un doble al que le falta un campo que el código lee esconde justo la clase de bug que se busca*.
 
+### 9.25 La moneda salía fija en pesos (2026-09-04)
+
+Pregunta de Matías: *"si yo cambio la moneda del negocio, ¿se cambia también para el pedido en Tango?"*. **No.** `ID_MONEDA` era un valor fijo en `pedidos.defaults`, y `deal_currency_code` **ni se leía**: la palabra "moneda" no aparecía en ninguna parte de la lógica.
+
+El default estaba bien fundado —los 1.065 pedidos de 2026 del ERP son en pesos (§9.7)— pero es un default, no una lectura. Y el portal ya tenía **4 de 151 negocios en USD**.
+
+Un negocio en dólares entraba a Tango como pesos **con los importes en dólares**: un equipo de USD 3.000 quedaba como **3.000 pesos**. El pedido se crea, nada falla, y el número está mal por un factor de mil. Es el mismo modo de falla que hizo sacar el default de `condicion_iva` y el del talonario de factura — sólo que acá el error es el importe.
+
+**Qué se hizo.** La moneda sale del negocio:
+
+```
+ARS -> ID_MONEDA 1 (PES)
+USD -> ID_MONEDA 2 (DOL)
+```
+
+Los dos IDs están verificados contra GVA21 (§9.7): son los únicos en uso en el padrón de pedidos.
+
+- **Una moneda que no esté en la tabla FRENA el pedido**, no cae al default. Mismo criterio que el depósito y el talonario (§9.14).
+- **Sin moneda en el negocio sigue yendo el default**, que es lo que se hacía siempre. Todo Deal de HubSpot trae moneda, así que ése es el caso raro.
+- ⚠️ El código del peso argentino es **`ARS`**, no `ARG`. Hay test.
+
+**No es un lookup contra el ERP.** Tango no tiene `process` para la tabla de monedas: es la única auxiliar que falta de las catorce. La equivalencia vive en `defaults.tango.json → pedidos.monedas`, versionada, con el motivo escrito. Si aparece una tercera moneda hay que verificarla contra GVA21 antes de agregarla.
+
+`deal_currency_code` es una propiedad **estándar** de HubSpot —las opciones las pone el portal con las divisas de la cuenta— así que entró en `propiedades.ESTANDAR`: se lee, pero no se crea ni se parchea.
+
+#### Dos bugs propios que atrapó la suite en el acto
+
+1. La nota que explicaba el fallback la puse **dentro de `pedidos.defaults`**. Ese objeto se copia **tal cual** al payload, así que `_ID_MONEDA` habría viajado a Tango como un campo más. Ya había un test para eso.
+2. Declaré el campo como `hsFieldType: 'select'` sin opciones, y otro test lo cazó: un desplegable sin opciones degrada a texto libre en el portal (§9.13). Como no la creamos nosotros, no declara tipo ni opciones.
+
+#### Lo que esto no arregla
+
+La **lista de precios** (`ID_GVA10`) se hereda del cliente, y hay 7 clientes con `CON IVA EN U$S`. Un pedido de esos puede salir con lista en dólares y moneda en pesos, o al revés: son dos campos que hoy nadie cruza. No se tocó — es una decisión de negocio, no un bug del circuito.
+
 
 ## 10. Seguridad
 

@@ -1574,3 +1574,74 @@ test('el duplicado sin uso queda oculto, no borrado', () => {
     assert.deepStrictEqual(campo.opcionesOcultas, ['68']);
     assert.ok(campo.opciones['68'], 'sigue existiendo como opcion');
 });
+
+// ── La moneda sale del negocio (2026-09-04) ────────────────────────────────
+
+/**
+ * `ID_MONEDA` era un valor fijo en 1 (Pesos) y `deal_currency_code` ni se leia.
+ * Un negocio en USD entraba a Tango como pesos CON LOS IMPORTES EN DOLARES: un
+ * equipo de USD 3.000 quedaba como 3.000 pesos y no fallaba nada. El dia que se
+ * implemento habia 4 negocios asi en el portal.
+ */
+const MONEDAS = require('../config/defaults.tango.json').pedidos.monedas;
+
+test('un negocio en pesos manda el ID de PES', () => {
+    const r = verificar({ deal: { deal_currency_code: 'ARS' } });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_MONEDA, 1);
+});
+
+test('un negocio en dolares manda el ID de DOL, no el default', () => {
+    const r = verificar({ deal: { deal_currency_code: 'USD' } });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_MONEDA, 2, 'antes mandaba 1 y el importe quedaba en pesos');
+});
+
+test('sin moneda en el negocio sigue yendo el default', () => {
+    // Es lo que hacia hasta el 2026-09-04. No frena: todo Deal de HubSpot trae
+    // moneda, asi que esto es el caso raro, no el normal.
+    const r = verificar({ deal: {} });
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_MONEDA, 1);
+});
+
+test('una moneda que no esta configurada FRENA el pedido', () => {
+    // Caer al default seria el mismo modo de falla que esto cierra, y encima
+    // silencioso: el ERP acepta el pedido y el importe queda por mil.
+    const r = verificar({ deal: { deal_currency_code: 'EUR' } });
+    assert.strictEqual(r.ok, false);
+    const p = r.problemas.find((x) => x.campo === 'ID_MONEDA');
+    assert.ok(p, JSON.stringify(r.problemas));
+    assert.match(p.motivo, /EUR/);
+    assert.match(p.comoSeArregla, /ARS/, 'dice cuales SI se pueden');
+});
+
+test("'ARG' no es el peso argentino: el codigo es ARS", () => {
+    // Vale como test porque es un error facil de cometer —y se cometio— y el
+    // sintoma seria un pedido frenado sin motivo aparente.
+    const r = verificar({ deal: { deal_currency_code: 'ARG' } });
+    assert.strictEqual(r.ok, false, 'ARG no existe: HubSpot manda ARS');
+    assert.strictEqual(MONEDAS.porCodigoDeHubSpot.ARG, undefined);
+    assert.strictEqual(MONEDAS.porCodigoDeHubSpot.ARS, 1);
+});
+
+test('la moneda no distingue mayusculas ni espacios', () => {
+    const r = verificar({ deal: { deal_currency_code: ' usd ' } });
+    assert.strictEqual(r.payload.ID_MONEDA, 2);
+});
+
+test('cada moneda de la tabla apunta a un ID que el ERP ya uso', () => {
+    // 1 = PES y 2 = DOL son los unicos ID_MONEDA en uso en el padron de pedidos
+    // (verificado 2026-08-28, §9.7). Si alguien agrega una tercera hay que
+    // verificarla contra GVA21 antes.
+    for (const [codigo, id] of Object.entries(MONEDAS.porCodigoDeHubSpot)) {
+        assert.ok([1, 2].includes(id), `${codigo} apunta al ID ${id}, que no esta verificado contra GVA21`);
+        assert.ok(MONEDAS.descripciones[String(id)], `el ID ${id} no tiene descripcion en el catalogo`);
+    }
+});
+
+test('PROPS_DEAL pide la moneda: sin eso llega undefined y va el default', () => {
+    // La misma red de §9.16: si el pedido lee una propiedad, alguna lista tiene
+    // que pedirla. Aca el sintoma seria mudo — todo en pesos, como antes.
+    assert.ok(d2t.PROPS_DEAL.includes('deal_currency_code'));
+});

@@ -29,6 +29,9 @@ const ESTANDAR = new Set([
     'name', 'website', 'phone', 'address', 'city', 'zip', 'state', 'country',
     'description', 'price', 'hs_sku',
     'firstname', 'lastname', 'email', 'jobtitle',
+    // La moneda del negocio. La define HubSpot con las divisas de la cuenta:
+    // crearla o parchearla desde aca la romperia.
+    'deal_currency_code',
 ]);
 
 /** Tipo de HubSpot que le corresponde a un campo del mapeo. */

@@ -607,6 +607,15 @@
       ]
     },
     {
+      "tango": "ID_MONEDA",
+      "hubspot": "deal_currency_code",
+      "label": "Moneda del negocio",
+      "tipo": "string",
+      "direccion": "hubspot->tango",
+      "estandarDeHubSpot": true,
+      "notas": "La moneda del pedido sale del NEGOCIO (decision de Matias 2026-09-04). `deal_currency_code` es una propiedad ESTANDAR de HubSpot: la define el portal con las divisas de la cuenta, asi que NO se crea ni se parchea desde aca (esta en propiedades.ESTANDAR). La equivalencia con los IDs de Tango vive en defaults.tango.json -> pedidos.monedas, porque Tango no tiene process para la tabla de monedas. Una moneda que no este en esa tabla FRENA el pedido: no cae al default. Ojo, el codigo del peso argentino es ARS, no ARG. No declara `hsFieldType` ni `opciones` a proposito: las opciones las pone HubSpot con las divisas de la cuenta y este mapeo no la crea."
+    },
+    {
       "tango": "FECHA_ENTREGA",
       "hubspot": "tango_fecha_entrega",
       "label": "Fecha de entrega (Tango)",

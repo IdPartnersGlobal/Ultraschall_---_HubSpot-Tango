@@ -328,6 +328,20 @@
     "confirmar": [
       "VALIDA_STOCK = true desde el 2026-08-25 (decision de Matias). El ejemplo de Postman iba en false. Es el unico default del pedido que sigue sin evidencia del ERP: si BAT250 no tiene stock, Tango rechaza el pedido y no es culpa del circuito."
     ],
+    "monedas": {
+      "_esElFallback": "defaults.ID_MONEDA (1 = PES Pesos) se usa SOLO si el negocio no trae moneda. Lo normal es que salga de aca. ⚠️ Esa nota no puede vivir dentro de `defaults`: ese objeto se copia TAL CUAL al payload del ERP, asi que una clave de metadata ahi viaja a Tango. Hay un test que lo impide.",
+      "_nota": "DECISION DE MATIAS 2026-09-04: la moneda del pedido sale del NEGOCIO. Antes ID_MONEDA era un valor fijo en 1 (Pesos) y `deal_currency_code` ni se leia, asi que un negocio en USD entraba a Tango como pesos con los importes en dolares — un equipo de USD 3.000 quedaba como 3.000 pesos, sin que nada fallara. Medido el 2026-09-04: 4 de los 151 negocios del portal estan en USD.",
+      "_porQueNoEsUnLookup": "Tango no tiene `process` para la tabla de monedas y no se relevo: es la unica auxiliar que falta. Los dos IDs estan verificados contra GVA21 (ARQUITECTURA 9.7): 1 = PES y 2 = DOL son los unicos en uso en el padron de pedidos. Si aparece una tercera moneda hay que agregarla aca.",
+      "_siNoEstaEnLaTabla": "FRENA el pedido, no cae al default. Mismo criterio que el deposito y el talonario (9.14): una moneda equivocada no falla, se guarda mal y el importe queda por un factor de mil.",
+      "porCodigoDeHubSpot": {
+        "ARS": 1,
+        "USD": 2
+      },
+      "descripciones": {
+        "1": "PES (Pesos)",
+        "2": "DOL (Dolares)"
+      }
+    },
     "productoDePrueba": {
       "_nota": "DECISION DE MATIAS 2026-08-27. Hasta que exista la integracion de productos, ningun product de HubSpot tiene tango_id_sta11: TODOS los renglones se marcaban incompletos y el pedido no salia nunca. Con esto el renglon sale igual, con la cantidad y el precio de la linea real, pero apuntando a este articulo.",
       "activo": true,

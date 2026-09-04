@@ -168,6 +168,39 @@ function deDesplegable(tangoCampo, deal, lookups) {
 }
 
 /**
+ * La moneda del pedido, desde `deal_currency_code` del negocio (2026-09-04).
+ *
+ * Antes `ID_MONEDA` era un valor fijo en 1 (Pesos) y la moneda del negocio ni
+ * se leia. Un negocio en USD entraba a Tango como pesos **con los importes en
+ * dolares**: un equipo de USD 3.000 quedaba como 3.000 pesos y no fallaba nada.
+ * En el portal habia 4 negocios asi el dia que se implemento esto.
+ *
+ * ⚠️ Una moneda que no este en la tabla FRENA el pedido. Caer al default seria
+ * el mismo modo de falla que se acaba de cerrar, y ademas silencioso: el ERP
+ * acepta el pedido igual y el importe queda mal por un factor de mil.
+ *
+ * Sin moneda en el negocio se usa el default, que es lo que se hacia siempre.
+ *
+ * @returns {null|{valor}|{problema}}
+ */
+function monedaDelNegocio(deal) {
+    const cfg = PEDIDOS.monedas || {};
+    const tabla = cfg.porCodigoDeHubSpot || {};
+    const codigo = String(deal.deal_currency_code ?? '').trim().toUpperCase();
+
+    if (!codigo) return null; // va el default: es lo que hacia hasta el 2026-09-04
+
+    const id = tabla[codigo];
+    if (id === undefined) {
+        return {
+            problema: problema('ID_MONEDA', `el negocio esta en '${codigo}' y esa moneda no esta configurada para Tango`,
+                `pasar el negocio a una de las monedas configuradas (${Object.keys(tabla).join(', ')}), o avisar a sistemas para que agreguen '${codigo}'`),
+        };
+    }
+    return { valor: id, codigo };
+}
+
+/**
  * Fecha para Tango: 'YYYY-MM-DDTHH:mm:ss', sin zona. El ERP no interpreta el
  * offset y una fecha con 'Z' se guarda corrida.
  */
@@ -219,6 +252,12 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         elegido[campo] = r;
     }
     const idSta22 = elegido.ID_STA22 ? elegido.ID_STA22.valor : PEDIDOS.defaults.ID_STA22;
+
+    // La moneda no sale de una tabla de Tango —no hay `process` para monedas—
+    // asi que no pasa por `deDesplegable`, pero el criterio es el mismo.
+    const moneda = monedaDelNegocio(deal);
+    if (moneda && moneda.problema) problemas.push(moneda.problema);
+    else if (moneda) elegido.ID_MONEDA = moneda;
 
     // -------------------------------------------------------- los renglones
     const renglones = [];
