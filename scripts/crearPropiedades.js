@@ -169,7 +169,13 @@ function leerToken() {
         }
     }
 
-    console.log(`\naplicados: ${ok}/${plan.aCrear.length + plan.aParchear.length + plan.aConvertir.length}`);
+    // El total tiene que incluir las sobrantes cuando se piden: sin eso la
+    // corrida que SOLO quita opciones termina diciendo "aplicados: 1/0", que
+    // se lee como un error y es exactamente lo contrario.
+    const total = plan.aCrear.length + plan.aParchear.length + plan.aConvertir.length
+        + (quitarSobrantes ? plan.sobrantes.length : 0);
+    console.log(`
+aplicados: ${ok}/${total}`);
     if (errores.length) {
         console.log('con error:');
         for (const e of errores) console.log(`   ${e.name}: ${e.error}`);
