@@ -2253,6 +2253,38 @@ Los dos IDs están verificados contra GVA21 (§9.7): son los únicos en uso en e
 
 La **lista de precios** (`ID_GVA10`) se hereda del cliente, y hay 7 clientes con `CON IVA EN U$S`. Un pedido de esos puede salir con lista en dólares y moneda en pesos, o al revés: son dos campos que hoy nadie cruza. No se tocó — es una decisión de negocio, no un bug del circuito.
 
+### 9.26 El pedido que sale bien también deja nota (2026-09-04)
+
+Todas las notas del negocio eran de algo que salió mal. Un pedido exitoso escribía cuatro propiedades y **no dejaba nada en la línea de tiempo**: comercial veía el negocio en Cierre ganado y, para saber si el pedido existía, tenía que mirar campos sueltos o entrar a Tango — que es justamente lo que no hace.
+
+Ahora deja una nota con lo que le sirve a un comercial:
+
+```
+El pedido se creó en Tango: 00001-00013602
+Con este número lo encontrás en el ERP.
+  • Cliente en Tango: 007611          • Vendedor: FACUNDO
+  • Fecha de entrega: 2026-09-12      • Depósito: PRODUCTO TERMINADO
+  • Condición de venta: MERCADOPAGO   • Talonario de factura: FACTURA ELECTRONICA A
+  • Moneda: Pesos                     • Lista de precios: CON IVA EN $
+  • Total según el negocio: 97.998,00 Pesos
+  • Productos: Estimulador de Piso Pélvico Sure Pro
+
+Una cosa a tener en cuenta:
+  • Productos del negocio: '…' va con el articulo de prueba ZZZ (Varios)
+```
+
+**Los IDs se traducen.** A esta altura la parametría ya está resuelta a ID interno —es literalmente lo que viajó en el payload— así que hizo falta el camino inverso: `lookups.descripcionPorId()`. Decirle *"ID_GVA23 26"* a un comercial no es decirle nada; *"Juan Butorac"* sí. La nota entera pasa por `enCastellano` como todas las demás (§9.21), y hay test.
+
+**Un campo vacío no deja renglón.** Sin talonario elegido no aparece "Talonario: —": una nota con la mitad de las filas en blanco se deja de leer.
+
+**Los avisos van acá también.** Hoy el único es el artículo de prueba, y un pedido que salió con un artículo que no es el que se vendió no puede pasar en silencio — el log de Azure no lo lee nadie de comercial.
+
+⚠️ **"Total según el negocio", no "Total del pedido".** Lo calcula el circuito sumando las líneas de HubSpot; **no** lo devuelve Tango. Ponerle el nombre del total del ERP sería darle una autoridad que no tiene.
+
+**No puede tumbar nada.** Va después de escribir las propiedades y dentro de un `try`: el pedido ya está en el ERP y el Deal ya quedó marcado. Que falle la nota no puede convertirse en un problema mayor — el mismo criterio que §9.9.
+
+De paso, el aviso del artículo de prueba dejó de nombrar `ID_STA11`: el artículo se busca por su código (`ZZZ`), no por su ID interno.
+
 
 ## 10. Seguridad
 

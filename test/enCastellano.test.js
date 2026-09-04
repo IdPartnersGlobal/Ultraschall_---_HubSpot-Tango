@@ -152,3 +152,19 @@ test('un rechazo del pedido no se reporta como si fuera el alta de la empresa', 
     assert.match(alta.motivo, /alta de la empresa/);
     assert.match(alta.comoSeArregla, /en la empresa/);
 });
+
+test('la nota del pedido creado tampoco muestra nombres internos', () => {
+    // Es la nota que MAS se va a leer: sale en todos los pedidos que salen bien.
+    const html = notaProblema.cuerpoPedidoCreado({
+        nroPedido: '00001-00013602',
+        resumen: {
+            cliente: '007611', fechaEntrega: '2026-09-12', condicionVenta: 'MERCADOPAGO',
+            moneda: 'Pesos', vendedor: 'FACUNDO', deposito: 'PRODUCTO TERMINADO',
+            total: 97998, productos: ['Estimulador de Piso Pelvico'],
+        },
+        avisos: [{ campo: 'RENGLON_DTO', motivo: "'Ecografo' va con el articulo de prueba ZZZ (Varios)" }],
+    });
+    sinNombresInternos(html, 'la nota del pedido creado');
+    assert.match(html, /00001-00013602/);
+    assert.match(html, /Productos del negocio/, 'RENGLON_DTO traducido');
+});

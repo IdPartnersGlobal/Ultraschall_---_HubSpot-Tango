@@ -60,6 +60,19 @@ class TablaAuxiliar {
         return r && this.def.descripcion ? r[this.def.descripcion] : null;
     }
 
+    /**
+     * ID interno -> descripcion legible. El camino inverso al de siempre.
+     *
+     * Hace falta para la nota que ve comercial cuando el pedido sale bien
+     * (§9.26): ahi el dato ya esta resuelto a ID —es lo que se mando al ERP— y
+     * lo que hay que mostrar es el nombre. Decirle "ID_GVA23 26" no es decirle
+     * nada; "Juan Butorac" si.
+     */
+    descripcionPorId(id) {
+        const r = this.porId.get(Number(id));
+        return r && this.def.descripcion ? r[this.def.descripcion] : null;
+    }
+
     /** Registro completo por codigo. */
     registro(codigo) {
         return this.porCodigo.get(clave(codigo)) || null;
@@ -160,6 +173,17 @@ class Lookups {
      * Resuelve un codigo y explica el fallo si no se puede.
      * Usar en el armado de payloads: nunca mandar un codigo sin resolver.
      */
+    /**
+     * ID interno -> descripcion, para mostrarle a una persona lo que se mando.
+     *
+     * No lanza si la tabla no esta: esto alimenta una nota, y una nota sin un
+     * renglon es mejor que un pedido que ya salio y una excepcion al anotarlo.
+     */
+    descripcionPorId(nombreTabla, id) {
+        const t = this.tablas?.[nombreTabla];
+        return t ? t.descripcionPorId(id) : null;
+    }
+
     resolver(nombreTabla, codigo, contexto = '') {
         const t = this.tabla(nombreTabla);
         if (codigo === null || codigo === undefined || String(codigo).trim() === '') {

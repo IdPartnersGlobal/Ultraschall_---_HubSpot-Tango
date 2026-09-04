@@ -338,8 +338,12 @@
         "USD": 2
       },
       "descripciones": {
-        "1": "PES (Pesos)",
-        "2": "DOL (Dolares)"
+        "1": "Pesos",
+        "2": "Dólares"
+      },
+      "codigosTango": {
+        "1": "PES",
+        "2": "DOL"
       }
     },
     "productoDePrueba": {

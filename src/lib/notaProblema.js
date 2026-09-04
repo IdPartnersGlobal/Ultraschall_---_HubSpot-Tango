@@ -92,6 +92,79 @@ function cuerpo({ problemas = [], retroceso = null, etapaGanada = 'Cierre ganado
     return partes.join('');
 }
 
+/** Un renglon de la ficha del pedido. Se omite si no hay dato. */
+function dato(etiqueta, valor) {
+    if (valor === null || valor === undefined || String(valor).trim() === '') return '';
+    return `<li><b>${escapar(etiqueta)}</b>: ${escapar(valor)}</li>`;
+}
+
+/** 10859.73 -> "10.859,73". Formato de aca, que es el que lee comercial. */
+function importe(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return null;
+    return v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * EL PEDIDO SALIO BIEN (§9.26, pedido de Matias 2026-09-04).
+ *
+ * Hasta ahora un pedido exitoso no dejaba NADA en la linea de tiempo del
+ * negocio: solo se escribian cuatro propiedades. Comercial veia el negocio en
+ * Cierre ganado y tenia que ir a mirar campos para saber si habia salido, o
+ * entrar a Tango — que es justamente lo que no hace.
+ *
+ * Que lleva, y por que cada cosa:
+ *
+ *   - El NUMERO de Tango. Es con lo que administracion busca el pedido en el
+ *     ERP, y desde §9.19 es el de verdad y no el ID del negocio.
+ *   - El cliente, la fecha de entrega y la moneda: lo que comercial comprometio
+ *     y quiere confirmar que viajo bien.
+ *   - Condicion de venta, vendedor, deposito, talonario: la parametria con la
+ *     que el pedido quedo grabado. Si algo salio por default, se ve aca.
+ *   - Los avisos. Hoy el unico es el articulo de prueba, y un pedido que salio
+ *     con un articulo que no es el que se vendio NO puede pasar en silencio.
+ *
+ * @param {object} p
+ * @param {string} p.nroPedido  el NRO_PEDIDO de Tango
+ * @param {object} [p.resumen]  `verificarPedido.verificar().resumen`
+ * @param {Array}  [p.avisos]   cosas que el pedido lleva y hay que saber
+ */
+function cuerpoPedidoCreado({ nroPedido, resumen = {}, avisos = [] } = {}) {
+    const partes = [];
+    partes.push(`<p><b>El pedido se creó en Tango: ${escapar(nroPedido)}</b></p>`);
+    partes.push('<p>Con este número lo encontrás en el ERP.</p>');
+
+    const total = importe(resumen.total);
+    const filas = [
+        dato('Cliente en Tango', resumen.cliente),
+        dato('Fecha de entrega', resumen.fechaEntrega),
+        dato('Condición de venta', resumen.condicionVenta),
+        dato('Moneda', resumen.moneda),
+        // "segun el negocio" y no "total del pedido" a proposito: lo calcula
+        // esto sumando las lineas, no lo devuelve Tango. Ponerle el nombre del
+        // total del ERP seria darle una autoridad que no tiene.
+        dato('Total según el negocio', total ? `${total}${resumen.moneda ? ` ${resumen.moneda}` : ''}` : null),
+        dato('Productos', resumen.productos?.length ? resumen.productos.join(', ') : null),
+        dato('Vendedor', resumen.vendedor),
+        dato('Depósito', resumen.deposito),
+        dato('Talonario de factura', resumen.talonarioFactura),
+        dato('Lista de precios', resumen.listaPrecios),
+        dato('Transporte', resumen.transporte),
+        dato('Orden de compra', resumen.ordenCompra),
+    ].filter(Boolean).join('');
+
+    if (filas) partes.push(`<ul>${filas}</ul>`);
+
+    if (avisos.length) {
+        partes.push(avisos.length === 1
+            ? '<p><b>Una cosa a tener en cuenta:</b></p>'
+            : `<p><b>${avisos.length} cosas a tener en cuenta:</b></p>`);
+        partes.push(`<ul>${avisos.map(linea).join('')}</ul>`);
+    }
+
+    return partes.join('');
+}
+
 /**
  * La otra nota: el cliente SE CREO y el pedido salio, pero con lo minimo.
  *
@@ -128,4 +201,4 @@ function resumen({ problemas = [] } = {}) {
         .join(' | ');
 }
 
-module.exports = { cuerpo, cuerpoACompletar, resumen, escapar };
+module.exports = { cuerpo, cuerpoPedidoCreado, cuerpoACompletar, resumen, escapar };

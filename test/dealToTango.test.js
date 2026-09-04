@@ -1645,3 +1645,72 @@ test('PROPS_DEAL pide la moneda: sin eso llega undefined y va el default', () =>
     // que pedirla. Aca el sintoma seria mudo — todo en pesos, como antes.
     assert.ok(d2t.PROPS_DEAL.includes('deal_currency_code'));
 });
+
+// ── La nota de que el pedido SALIO BIEN (§9.26) ─────────────────────────────
+
+/**
+ * Pedido de Matias, 2026-09-04. Hasta ahora un pedido exitoso no dejaba nada en
+ * la linea de tiempo: solo cuatro propiedades. Comercial veia el negocio en
+ * Cierre ganado y para saber si el pedido existia tenia que mirar campos, o
+ * entrar a Tango — que es justo lo que no hace.
+ */
+
+test('un pedido que sale bien deja una nota con el numero de Tango', async () => {
+    const hs = hsFalso();
+    const tango = tangoFalso({ NRO_PEDIDO: '00001-00013602' });
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(hs.notas.length, 1, 'tiene que quedar constancia en el negocio');
+    assert.match(hs.notas[0].cuerpo, /00001-00013602/, 'el numero con el que se busca en el ERP');
+});
+
+test('la nota lleva los datos que le sirven a comercial', async () => {
+    const hs = hsFalso({ deal: { tango_fecha_entrega: '2026-09-12' } });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    const nota = hs.notas[0].cuerpo;
+    assert.match(nota, /Fecha de entrega/);
+    assert.match(nota, /2026-09-12/);
+    assert.match(nota, /Cliente en Tango/);
+    assert.match(nota, /Vendedor/);
+    assert.match(nota, /Total según el negocio/);
+    assert.strictEqual(r.estado, 'creado');
+});
+
+test('un dato que no esta no deja un renglon vacio en la nota', async () => {
+    // Sin talonario de factura elegido no tiene que aparecer "Talonario: —".
+    const hs = hsFalso();
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.ok(!/Talonario de factura/.test(hs.notas[0].cuerpo), hs.notas[0].cuerpo);
+    assert.ok(!/Orden de compra/.test(hs.notas[0].cuerpo));
+});
+
+test('el articulo de prueba se avisa TAMBIEN en la nota del pedido creado', async () => {
+    // Un pedido que salio con un articulo que no es el que se vendio no puede
+    // pasar en silencio, y el log de Azure no lo lee comercial.
+    // El doble de HubSpot devuelve products, no el Map que arma procesarDeal.
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Ecografo' } }] });
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.match(hs.notas[0].cuerpo, /articulo de prueba/);
+});
+
+test('si la nota falla, el pedido NO se pierde', async () => {
+    // El pedido ya esta en el ERP y el Deal ya quedo marcado: que no se pueda
+    // anotar no puede convertirse en un problema mayor (mismo criterio que 9.9).
+    const hs = hsFalso();
+    hs.crearNota = async () => { throw new Error('HubSpot no contesta'); };
+
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(r.nroPedido, '00012345');
+    assert.ok(hs.escrituras.some((e) => e.props.tango_nro_pedido), 'la marca de idempotencia igual se escribio');
+});
+
+test('en dry-run no se anota nada', async () => {
+    const hs = hsFalso();
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: true });
+    assert.strictEqual(hs.notas.length, 0);
+});

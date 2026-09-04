@@ -211,6 +211,50 @@ function fechaTango(valor) {
 }
 
 /**
+ * Lo que el pedido lleva, en castellano, para la nota que ve comercial (§9.26).
+ *
+ * Traduce los IDs internos que se mandaron al ERP a los nombres que la gente
+ * reconoce: `ID_GVA23 26` no le dice nada a nadie, "Juan Butorac" si. La
+ * traduccion va por `descripcionPorId` porque a esta altura el dato YA esta
+ * resuelto a ID — es literalmente lo que viajo en el payload.
+ *
+ * Nunca lanza ni frena: si una tabla no esta cargada, ese renglon no sale y el
+ * resto de la nota igual. El pedido ya esta en el ERP cuando esto se usa.
+ */
+function resumenParaComercial({ payload, renglones, lineItems = [], lookups }) {
+    const desc = (tabla, id) => {
+        if (id === undefined || id === null || !lookups) return null;
+        try { return lookups.descripcionPorId(tabla, id); } catch { return null; }
+    };
+    const monedas = (PEDIDOS.monedas || {}).descripciones || {};
+
+    const total = renglones.reduce((suma, r) => {
+        const bruto = (Number(r.CANTIDAD_PEDIDA) || 0) * (Number(r.PRECIO) || 0);
+        return suma + bruto * (1 - (Number(r.PORCENTAJE_BONIFICACION) || 0) / 100);
+    }, 0);
+
+    const nombres = new Map(lineItems.map((l) => [String(l.id), l.properties?.name]));
+
+    return {
+        cliente: payload.ID_GVA14 ?? null,
+        fechaEntrega: payload.FECHA_ENTREGA ? String(payload.FECHA_ENTREGA).slice(0, 10) : null,
+        moneda: monedas[String(payload.ID_MONEDA)] || null,
+        condicionVenta: desc('condicionesVenta', payload.ID_GVA01),
+        listaPrecios: desc('listasPrecios', payload.ID_GVA10),
+        vendedor: desc('vendedores', payload.ID_GVA23),
+        transporte: desc('transportes', payload.ID_GVA24),
+        deposito: desc('depositos', payload.ID_STA22),
+        talonarioFactura: desc('talonariosFactura', payload.ID_GVA43_TALONARIO_FACTURA),
+        ordenCompra: payload.NRO_ORDEN_COMPRA || null,
+        renglones: renglones.length,
+        total,
+        // Los nombres reales de lo que se vendio, que es lo primero que
+        // comercial va a querer confirmar.
+        productos: lineItems.map((l) => nombres.get(String(l.id))).filter(Boolean),
+    };
+}
+
+/**
  * @param {object} p
  * @param {object} p.deal        properties del Deal (mas su id)
  * @param {object} p.company     properties de la company asociada
@@ -300,7 +344,9 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
             huboPrueba = true;
             avisos.push({
                 campo: 'RENGLON_DTO',
-                motivo: `'${nombre}' va con el articulo de prueba ${productoDePrueba.codigo} (ID_STA11=${idSta11})`,
+                // El ID interno no va: esto lo lee comercial y el articulo se
+                // busca por su codigo, no por su ID (§9.21).
+                motivo: `'${nombre}' va con el articulo de prueba ${productoDePrueba.codigo}${productoDePrueba.descripcion ? ` (${productoDePrueba.descripcion})` : ''}`,
                 porQue: 'ese producto todavia no esta atado a Tango y la integracion de productos esta pendiente',
             });
         }
@@ -390,6 +436,7 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         renglones,
         heredado,
         elegido,
+        resumen: resumenParaComercial({ payload, renglones, lineItems, lookups }),
     };
 }
 

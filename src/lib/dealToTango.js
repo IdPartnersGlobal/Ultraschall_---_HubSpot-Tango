@@ -305,6 +305,26 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         [PROP_PROBLEMA]: '',
     });
 
+    // 8. La nota de que SALIO BIEN (§9.26, pedido de Matias 2026-09-04).
+    //
+    //    Un pedido exitoso no dejaba nada en la linea de tiempo del negocio:
+    //    solo cuatro propiedades. Comercial veia el negocio en Cierre ganado y
+    //    para saber si el pedido existia tenia que mirar campos, o entrar a
+    //    Tango — que es justo lo que no hace.
+    //
+    //    Va DESPUES de escribir las propiedades y no puede tumbar nada: el
+    //    pedido ya esta en el ERP y el Deal ya quedo marcado. Que falle la nota
+    //    no puede convertirse en un problema mayor (mismo criterio que 9.9).
+    try {
+        await hs.crearNota('deals', dealId, notaProblema.cuerpoPedidoCreado({
+            nroPedido,
+            resumen: { ...(v.resumen || {}), cliente: cliente.codigo || v.resumen?.cliente },
+            avisos: v.avisos || [],
+        }), { cuando: ahora });
+    } catch (e) {
+        log.aviso('DEAL', `el pedido ${nroPedido} salio, pero no se pudo dejar la nota en ${dealId}: ${e.message}`);
+    }
+
     // El cliente se creo con lo minimo (9.10): lo que quedo con un default o
     // sin cargar tiene que llegarle a alguien. NO frena ni mueve la etapa: el
     // pedido ya esta en el ERP.
