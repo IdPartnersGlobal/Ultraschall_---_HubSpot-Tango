@@ -248,6 +248,8 @@
       "tipo": "string",
       "hsFieldType": "select",
       "direccion": "hubspot->tango",
+      "requerido": true,
+      "porQueRequerido": "DECISION DE MATIAS 2026-09-15 (ARQUITECTURA 9.29): el pedido no hereda nada del cliente. Sin eleccion en el negocio no hay de donde sacarla, y el default (CONTADO) no falla: sale mal la factura.",
       "notas": "Con que condicion de venta sale el pedido. Lo elige comercial en el Deal y GANA sobre la del cliente (2026-09-04): la condicion se negocia por venta, no es un atributo fijo de la empresa. Si no elige nada se hereda del cliente, y si el cliente tampoco tiene, va el default. ⚠️ La propiedad ya existia como `condiciones_de_pago` en \"Informacion del negocio\", con 83 opciones que guardaban la DESCRIPCION: no se puede resolver a un ID porque `CHEQUE 45 DIAS FF` esta DOS veces en GVA01 (cod 13 / id 13 y cod 68 / id 1069), y le faltaba CONTADO —el 54% de la cartera— porque decia \"Contado\" y en Tango es \"CONTADO\". Se regeneraron guardando el CODIGO. El nombre interno de una propiedad de HubSpot no se puede cambiar, asi que sigue llamandose condiciones_de_pago.",
       "lookupInverso": "condicionesVenta",
       "opciones": {
@@ -613,6 +615,8 @@
       "tipo": "string",
       "hsFieldType": "select",
       "direccion": "hubspot->tango",
+      "requerido": true,
+      "porQueRequerido": "DECISION DE MATIAS 2026-09-15 (ARQUITECTURA 9.29): el pedido no hereda nada del cliente. Sin eleccion en el negocio no hay de donde sacarlo, y el default (RETIRA CLIENTE) no falla: sale mal el envio.",
       "notas": "Como se entrega el pedido. Lo elige comercial en el NEGOCIO y GANA sobre el transporte de la empresa (decision de Matias 2026-09-04): como se entrega se decide por venta, no es un atributo fijo del cliente. Si no elige nada se hereda de la empresa, y si la empresa tampoco tiene, va el default 01 RETIRA CLIENTE. ⚠️ Guarda el CODIGO: en GVA24 el codigo diverge del ID en las 41 filas (el codigo 07 es el ID 8), asi que mandar el codigo como ID mandaria la mercaderia por otro transporte sin que nada falle. La propiedad del mismo nombre en COMPANIES es otra: esa es el transporte habitual del cliente y la escribe el sync.",
       "lookupInverso": "transportes",
       "opciones": {

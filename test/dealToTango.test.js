@@ -210,6 +210,15 @@ test('una falla tecnica NO le pide a comercial que cargue nada', () => {
 test('la nota cuenta los problemas en singular y en plural', () => {
     assert.match(notaProblema.cuerpo({ problemas: [{ campo: 'a', motivo: 'b' }] }), /Falta este dato/);
     assert.match(notaProblema.cuerpo({ problemas: [{ campo: 'a', motivo: 'b' }, { campo: 'c', motivo: 'd' }] }), /Faltan 2 datos/);
+
+    // Un dato que ESTA pero mal (§7.14): "falta" mandaria a buscar un campo
+    // vacio en una ficha que lo tiene lleno.
+    const mal = notaProblema.cuerpo({ problemas: [{ campo: 'COD_GVA14', motivo: 'b', clase: 'corregir' }] });
+    assert.match(mal, /Hay que corregir esto/);
+    assert.match(mal, /Cuando lo resuelvas/);
+    assert.doesNotMatch(mal, /Falta|cargues lo que falta/);
+    assert.match(notaProblema.cuerpo({ problemas: [{ campo: 'COD_GVA14', motivo: 'b', clase: 'corregir' }, { campo: 'c', motivo: 'd' }] }),
+        /Hay 2 cosas para resolver/);
 });
 
 
@@ -321,8 +330,16 @@ const SIN_ATAR = new Map([['77', { name: 'Ecografo' }]]);
 
 const PRUEBA = require('../config/defaults.tango.json').pedidos.productoDePrueba;
 
-/** Un Deal completo. `tango_fecha_entrega` es obligatoria desde §9.18. */
-const DEAL_BASE = { hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', tango_fecha_entrega: '2026-09-07' };
+/**
+ * Un Deal completo. `tango_fecha_entrega` es obligatoria desde §9.18; la
+ * condicion de venta, el transporte y el responsable, desde §9.29, porque el
+ * pedido ya no los hereda del cliente.
+ *
+ * El responsable va como MAIL: `emailDelOwner` lo acepta ya resuelto, asi que
+ * los tests de la verificacion no necesitan la tabla de owners.
+ */
+const PARAMETRIA_DEL_NEGOCIO = { condiciones_de_pago: '1', tango_transporte: '01', hubspot_owner_id: 'farancibia@ultraschall.com.ar' };
+const DEAL_BASE = { hs_object_id: '111', dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', tango_fecha_entrega: '2026-09-07', ...PARAMETRIA_DEL_NEGOCIO };
 
 // El `deal` se MEZCLA en vez de reemplazarse: si no, cada override tendria que
 // acordarse de repetir los campos obligatorios, y el test fallaria por lo que
@@ -346,20 +363,27 @@ test('un negocio ganado completo arma el payload del pedido', () => {
     });
 });
 
-test('la parametria del pedido la hereda del cliente', () => {
-    const r = verificar();
-    assert.strictEqual(r.payload.ID_GVA01, 5);
-    assert.strictEqual(r.payload.ID_GVA10, 3);
-    assert.strictEqual(r.payload.ID_GVA23, 10);
-    assert.strictEqual(r.payload.ID_GVA24, 5);
-    assert.ok(r.heredado.ID_GVA01.deLaCompany, 'salio de la company, no del default');
+test('el pedido NO hereda la parametria del cliente: sale toda del negocio (§9.29)', () => {
+    // Decision de Matias 2026-09-15: "esas propiedades se sacan del negocio, el
+    // cliente nomas lo queremos para hacer la asociacion". COMPANY trae
+    // condicion 5, lista 3, vendedor 10 y transporte 5: no tiene que llegar
+    // ninguno.
+    const r = verificar({ deal: { condiciones_de_pago: '2', tango_transporte: '07', hubspot_owner_id: 'jbutorac@ultraschall.com.ar' } });
+
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_GVA14, 2590, 'del cliente, SOLO el vinculo');
+    assert.strictEqual(r.payload.ID_GVA01, lk.resolver('condicionesVenta', '2').id, 'la condicion del negocio');
+    assert.strictEqual(r.payload.ID_GVA24, lk.resolver('transportes', '07').id, 'el transporte del negocio');
+    assert.strictEqual(r.payload.ID_GVA23, lk.resolver('vendedores', '24').id, 'el vendedor del owner del negocio');
+    assert.strictEqual(r.payload.ID_GVA10, 1, 'la lista de la moneda (pesos), no la 3 del cliente');
 });
 
-test('si la company no trae la parametria, va el default del catalogo', () => {
-    const r = verificar({ company: { codigo_tango: '000123', tango_id_gva14: '2590' } });
-    assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
-    assert.strictEqual(r.payload.ID_GVA01, 1, 'CONTADO');
-    assert.strictEqual(r.heredado.ID_GVA01.deLaCompany, false);
+test('la parametria del cliente no cambia NADA del pedido', () => {
+    // La red: el mismo negocio con un cliente cargado de parametria y con uno
+    // pelado tiene que dar exactamente la misma cabecera.
+    const conTodo = verificar();
+    const pelado = verificar({ company: { codigo_tango: '000123', tango_id_gva14: '2590' } });
+    assert.deepStrictEqual(conTodo.payload, pelado.payload);
 });
 
 test('el talonario, el deposito, la moneda y el stock salen de los defaults', () => {
@@ -406,7 +430,7 @@ const conDeposito = (valor) => verificar({
 test('sin elegir deposito va el default, y el pedido no marca nada', () => {
     const r = verificar();
     assert.strictEqual(r.ok, true, JSON.stringify(r.problemas));
-    assert.deepStrictEqual(r.elegido, {}, 'no eligio nada: no hay que inventar que si');
+    assert.strictEqual(r.elegido.ID_STA22, undefined, 'no eligio deposito: no hay que inventar que si');
     assert.strictEqual(r.payload.ID_STA22, 1, 'PRODUCTO TERMINADO');
 });
 
@@ -650,12 +674,21 @@ function soloLasPedidas(props, propiedades = []) {
 }
 
 /** Un HubSpot de mentira que registra lo que se le pide y lo que se le escribe. */
-function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], productos = [{ id: '77', properties: { tango_id_sta11: '394' } }], pipelines = PIPELINES } = {}) {
+function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], productos = [{ id: '77', properties: { tango_id_sta11: '394' } }], pipelines = PIPELINES, vinculadas = [] } = {}) {
     const escrituras = [];
     const notas = [];
     return {
         escrituras,
         notas,
+        /**
+         * La busqueda de una ficha que ya este vinculada a un cliente (§7.14).
+         * `vinculadas` son OTRAS companies del portal, con su clave cargada.
+         */
+        async buscar(objetoTipo, cuerpo) {
+            const filtro = cuerpo?.filterGroups?.[0]?.filters?.[0] || {};
+            if (objetoTipo !== 'companies' || filtro.propertyName !== 'tango_codigo_cliente') return { results: [] };
+            return { results: vinculadas.filter((c) => c.properties?.tango_codigo_cliente === filtro.value) };
+        },
         /** El PATCH de la etapa, que es lo que hay que poder mirar aparte. */
         get etapaFinal() {
             return escrituras.filter((e) => e.props.dealstage).at(-1)?.props.dealstage ?? null;
@@ -671,7 +704,7 @@ function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], producto
         async objeto(objetoTipo, id, propiedades = []) {
             // dealstage va por defecto: el webhook SOLO llega por un ganado.
             if (objetoTipo === 'deals') {
-                return { id, properties: soloLasPedidas({ hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', tango_fecha_entrega: '2026-09-07', ...deal }, propiedades) };
+                return { id, properties: soloLasPedidas({ hs_object_id: id, dealname: 'Venta demo', closedate: '2026-08-25T00:00:00Z', dealstage: 'closedwon', tango_fecha_entrega: '2026-09-07', ...PARAMETRIA_DEL_NEGOCIO, ...deal }, propiedades) };
             }
             // El alta relee la company antes de escribirle de vuelta, para no
             // pisar lo que se cargo a mano (lib/altaCliente).
@@ -939,9 +972,9 @@ test('un negocio propio pasa el freno y sigue el circuito de siempre', async () 
     const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER } });
     const tango = tangoFalso();
 
-    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio() });
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false, filtroOwner: filtroMio(), owners: OWNERS });
 
-    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(r.estado, 'creado', JSON.stringify(r.problemas));
     assert.strictEqual(r.nroPedido, '00012345');
 });
 
@@ -949,8 +982,8 @@ test('sin filtro, el circuito toma cualquier negocio: el freno no cambia el comp
     // El estado al que se vuelve cuando la prueba termina. Si esto se rompiera,
     // el "freno de pruebas" se habria convertido en una regla permanente.
     const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL } });
-    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
-    assert.strictEqual(r.estado, 'creado');
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false, owners: OWNERS });
+    assert.strictEqual(r.estado, 'creado', JSON.stringify(r.problemas));
 });
 
 test('el freno corre ANTES de la idempotencia y de las lecturas caras', async () => {
@@ -1536,9 +1569,16 @@ test('lo que elige comercial GANA sobre la condicion del cliente', () => {
     assert.strictEqual(r.payload.ID_GVA01, lk.resolver('condicionesVenta', '5').id);
 });
 
-test('sin elegir nada se sigue heredando la del cliente', () => {
-    const r = verificar({ company: { ...COMPANY, tango_id_gva01: '7' } });
-    assert.strictEqual(r.payload.ID_GVA01, 7, 'el ID que ya trae la company');
+test('sin condicion de venta en el negocio FRENA, aunque el cliente tenga una (§9.29)', () => {
+    // Hasta el 2026-09-15 se heredaba del cliente y, si no, iba CONTADO. Un
+    // default equivocado no falla: sale mal la factura.
+    const r = verificar({ company: { ...COMPANY, tango_id_gva01: '7' }, deal: { condiciones_de_pago: '' } });
+    assert.strictEqual(r.ok, false);
+    const p = r.problemas.find((x) => x.campo === 'ID_GVA01');
+    assert.ok(p, JSON.stringify(r.problemas));
+    assert.match(p.motivo, /no se eligió en el negocio/);
+    assert.match(p.comoSeArregla, /elegir 'Condicion de venta' en el negocio/);
+    assert.strictEqual(r.payload.ID_GVA01, undefined, 'y no se completa con nada');
 });
 
 test('una condicion de venta que no existe FRENA el pedido, no cae al default', () => {
@@ -1674,10 +1714,12 @@ test('la lista de la moneda PISA la que tiene cargada el cliente', () => {
     assert.strictEqual(r.payload.ID_GVA10, 2, 'gana la de la moneda');
 });
 
-test('sin moneda en el negocio la lista se sigue heredando del cliente', () => {
-    // El camino de antes queda intacto para el negocio que no trae moneda.
+test('sin moneda en el negocio va la lista de los pesos, no la del cliente (§9.29)', () => {
+    // Hasta el 2026-09-15 este era el unico caso en que la lista se heredaba.
+    // La moneda del default es Pesos, y la lista va pareja con la moneda.
     const r = verificar({ company: { ...COMPANY, tango_id_gva10: '5' }, deal: {} });
-    assert.strictEqual(r.payload.ID_GVA10, 5);
+    assert.strictEqual(r.payload.ID_MONEDA, 1);
+    assert.strictEqual(r.payload.ID_GVA10, MONEDAS.porCodigoDeHubSpot.ARS.idListaPrecios);
 });
 
 test('moneda y lista nunca salen desparejas', () => {
@@ -1793,9 +1835,28 @@ test('el transporte del negocio GANA sobre el de la empresa', () => {
     assert.strictEqual(r.payload.ID_GVA24, lk.resolver('transportes', '01').id, 'RETIRA CLIENTE');
 });
 
-test('sin elegir nada se sigue heredando el transporte de la empresa', () => {
-    const r = verificar({ company: { ...COMPANY, tango_id_gva24: '5' }, deal: {} });
-    assert.strictEqual(r.payload.ID_GVA24, 5);
+test('sin transporte en el negocio FRENA, aunque la empresa tenga uno (§9.29)', () => {
+    const r = verificar({ company: { ...COMPANY, tango_id_gva24: '5' }, deal: { tango_transporte: '' } });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA24' && /elegir 'Transporte'/.test(p.comoSeArregla)), JSON.stringify(r.problemas));
+    assert.strictEqual(r.payload.ID_GVA24, undefined);
+});
+
+test('sin responsable con vendedor, el pedido de un cliente que YA existe tambien frena', () => {
+    // Antes el vendedor del owner solo se exigia al CREAR el cliente; el pedido
+    // de uno existente llevaba el que el ERP tuviera asignado.
+    const r = verificar({ deal: { hubspot_owner_id: 'pthaler@ultraschall.com.ar' } });
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.problemas.some((p) => p.campo === 'ID_GVA23' && /pthaler/.test(p.motivo)), JSON.stringify(r.problemas));
+});
+
+test('si el alta y el pedido reportan el mismo vendedor, la nota lo dice una vez', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_SIN_VENDEDOR }, company: COMPANY_A_CREAR });
+    const r = await d2t.procesarDeal({
+        dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false,
+        owners: OWNERS, estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    });
+    assert.strictEqual(r.problemas.filter((p) => p.campo === 'ID_GVA23').length, 1, JSON.stringify(r.problemas));
 });
 
 test('un transporte que no existe FRENA el pedido, no cae al default', () => {
@@ -1822,4 +1883,214 @@ test('las etiquetas del transporte son unicas: HubSpot lo exige', () => {
 test('el transporte elegido sale en la nota del pedido creado', () => {
     const r = verificar({ deal: { tango_transporte: '02' } });
     assert.strictEqual(r.resumen.transporte, 'ULTRASCHALL');
+});
+
+// ── Una empresa con codigo de Tango nunca se da de alta (§7.14) ─────────────
+
+/**
+ * La importacion del 2026-09-03 trajo 7.586 empresas con `codigo_tango` y sin
+ * `tango_id_gva14`. El circuito decidia "no existe en Tango" mirando solo el
+ * ID, asi que un negocio ganado con una de ellas creaba un cliente DUPLICADO en
+ * el ERP y le pisaba el codigo. Decision de Matias (2026-09-15): se busca el
+ * codigo; si es el mismo cliente se usa, y si no existe o es de otro, FRENA.
+ */
+
+/** Un cliente real del padron, tal como lo devuelve process 2117: 000003 ARCANA SRL. */
+const ARCANA = fixture('clientes-muestra')[0];
+
+/** Como llego al portal con la importacion: el codigo si, el vinculo no. */
+const IMPORTADA = { name: 'Arcana', razon_social: 'Arcana SRL', cuit: 30709859311, codigo_tango: '000003' };
+
+/** Un Tango que conoce a ARCANA y que NO deja leer el padron: si hay alta, revienta. */
+function tangoConCliente(filas = [ARCANA]) {
+    const tango = tangoFalso();
+    tango.consultas = [];
+    tango.getByFilter = async (process, filtro) => {
+        tango.consultas.push({ process, filtro });
+        if (process !== CATALOGO.entidades.clientes.process) return [];
+        return filas.filter((f) => filtro === `COD_GVA14 = '${f.COD_GVA14}'`);
+    };
+    tango.get = async () => { throw new Error('se leyo el padron: el circuito intento dar de alta un cliente'); };
+    return tango;
+}
+
+const procesarImportada = ({ company = IMPORTADA, vinculadas = [], tango = tangoConCliente(), dryRun = false } = {}) => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company, vinculadas });
+    return d2t.procesarDeal({
+        dealId: '111', hs, tango, lookups: lk, dryRun, owners: OWNERS,
+        estrategiaNumeracion: defaults.clientes.numeracion.estrategia,
+    }).then((r) => ({ r, hs, tango }));
+};
+
+test('una empresa importada que YA es cliente no se da de alta: el pedido sale con ese cliente', async () => {
+    const { r, tango } = await procesarImportada();
+
+    assert.strictEqual(r.estado, 'creado', JSON.stringify(r.problemas));
+    assert.ok(!tango.creados.some((c) => c.process === CATALOGO.entidades.clientes.process), 'no se crea ningun cliente en Tango');
+    assert.strictEqual(tango.creados.length, 1, 'solo el pedido');
+    assert.strictEqual(tango.creados[0].payload.ID_GVA14, ARCANA.ID_GVA14, 'el ID interno del cliente que ya existia');
+    assert.strictEqual(r.cliente, '000003');
+});
+
+test('del cliente vinculado sale el vinculo y nada mas: la parametria es del negocio (§9.29)', async () => {
+    // ARCANA en Tango es de Butorac, con su condicion y su transporte. El
+    // negocio es de farancibia (FACUNDO) y eligio CONTADO y RETIRA CLIENTE: eso
+    // es lo que tiene que viajar.
+    const { r, tango } = await procesarImportada();
+    assert.strictEqual(r.estado, 'creado', JSON.stringify(r.problemas));
+    const payload = tango.creados[0].payload;
+    assert.strictEqual(payload.ID_GVA14, ARCANA.ID_GVA14);
+    assert.strictEqual(payload.ID_GVA23, lk.resolver('vendedores', '10').id, 'el vendedor del owner');
+    assert.notStrictEqual(payload.ID_GVA23, lk.resolver('vendedores', ARCANA.GVA23_CODIGO).id, 'no el del cliente');
+    assert.strictEqual(payload.ID_GVA01, lk.resolver('condicionesVenta', '1').id);
+    assert.strictEqual(payload.ID_GVA24, lk.resolver('transportes', '01').id);
+});
+
+test('la empresa queda vinculada con el mismo mapeo del sync, sin pisar lo cargado a mano', async () => {
+    const { hs } = await procesarImportada();
+    const esc = hs.escrituras.find((e) => e.objetoTipo === 'companies');
+
+    assert.ok(esc, 'se escribe la empresa');
+    assert.strictEqual(esc.props.tango_codigo_cliente, '000003', 'la clave del sync');
+    assert.strictEqual(esc.props.tango_id_gva14, ARCANA.ID_GVA14);
+    assert.ok(esc.props.tango_sync_hash, 'con hash: el sync la ve igual y no la reescribe');
+    assert.strictEqual(esc.props.name, undefined, 'el nombre que saneo Ultraschall no se toca');
+});
+
+test('se busca el codigo TAL CUAL: 04078 y 004078 son clientes distintos', async () => {
+    const { r, tango } = await procesarImportada({ company: { ...IMPORTADA, codigo_tango: '00003' } });
+    assert.strictEqual(r.estado, 'incompleto', 'con un cero menos no es ARCANA');
+    assert.strictEqual(tango.consultas[0].filtro, "COD_GVA14 = '00003'");
+});
+
+test('un codigo que no existe en Tango FRENA, no crea nada y la nota dice que hacer', async () => {
+    const { r, hs, tango } = await procesarImportada({ company: { ...IMPORTADA, codigo_tango: '002410' } });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(tango.creados.length, 0, 'ni cliente ni pedido');
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'vuelve una etapa, como cualquier freno');
+    assert.ok(!hs.escrituras.some((e) => e.objetoTipo === 'companies'), 'la empresa no se toca');
+
+    const nota = hs.notas[0].cuerpo;
+    assert.match(nota, /Hay que corregir esto/);
+    assert.match(nota, /Código de cliente en Tango/);
+    assert.match(nota, /002410/);
+    assert.match(nota, /no existe ningún cliente/);
+    assert.match(nota, /corregirlo si está mal/, 'una salida: el codigo esta mal escrito');
+    assert.match(nota, /borrar el código/, 'la otra: nunca fue cliente');
+    assert.doesNotMatch(nota, /Falta este dato/);
+});
+
+test('con codigo declarado NO se piden los datos del alta: no va a haber alta', async () => {
+    // Pedirle el CUIT o el vendedor de un cliente que no hay que crear lo manda a
+    // completar algo que no destraba nada.
+    const { r } = await procesarImportada({ company: { name: 'Sin datos', codigo_tango: '002410' } });
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['COD_GVA14']);
+});
+
+test('un codigo de OTRO cliente frena y la nota dice de quien es', async () => {
+    // La forma de un caso real de la importacion: una SA con el codigo de una SRL
+    // que no tiene nada que ver.
+    const { r, hs, tango } = await procesarImportada({
+        company: { name: 'Tienda Demo', razon_social: 'Tienda Demo SA', cuit: 30999999995, codigo_tango: '000003' },
+    });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(tango.creados.length, 0);
+    const nota = hs.notas[0].cuerpo;
+    assert.match(nota, /es de otro cliente/);
+    assert.match(nota, /ARCANA SRL/, 'dice de quien es el codigo');
+    assert.match(nota, /30-70985931-1/, 'con el CUIT de ese cliente');
+    assert.match(nota, /30-99999999-5/, 'y el de la empresa, para verlo');
+    assert.match(nota, /poner en la empresa el código de Tango que le corresponde/);
+});
+
+test('el mismo nombre con otro CUIT tambien es otro cliente', async () => {
+    // Caso real: una importada tenia el codigo de un cliente con su mismo nombre
+    // de fantasia y otro CUIT. El documento manda.
+    const { r } = await procesarImportada({ company: { name: 'ARCANA SRL', razon_social: 'ARCANA SRL', cuit: 30999999995, codigo_tango: '000003' } });
+    assert.strictEqual(r.estado, 'incompleto');
+});
+
+test('sin CUIT y con otro nombre frena, y pide el CUIT para confirmar', async () => {
+    const { r, hs } = await procesarImportada({ company: { name: 'Club Social Norte', codigo_tango: '000003' } });
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.match(hs.notas[0].cuerpo, /no tiene CUIT cargado/);
+    assert.match(hs.notas[0].cuerpo, /cargar su CUIT en la empresa/);
+});
+
+test('sin CUIT pero con el mismo nombre, es el mismo cliente', async () => {
+    const { r } = await procesarImportada({ company: { name: 'Arcana S.R.L.', codigo_tango: '000003' } });
+    assert.strictEqual(r.estado, 'creado', JSON.stringify(r.problemas));
+});
+
+test('el DNI de un lado y el CUIT del otro son la misma persona', async () => {
+    const persona = { ...ARCANA, RAZON_SOCI: 'Perez Juan', NOM_COM: 'Perez Juan', CUIT: '30123456' };
+    const { r } = await procesarImportada({
+        company: { name: 'Juan Perez', cuit: 20301234565, codigo_tango: '000003' },
+        tango: tangoConCliente([persona]),
+    });
+    assert.strictEqual(r.estado, 'creado', JSON.stringify(r.problemas));
+});
+
+test('si el cliente ya esta vinculado a OTRA empresa, frena: hay dos fichas', async () => {
+    // `tango_codigo_cliente` es unica: escribirla daria un rechazo de HubSpot
+    // que saldria como falla tecnica. Caso real: un hospital publico esta dos
+    // veces con el mismo CUIT.
+    const { r, hs, tango } = await procesarImportada({
+        vinculadas: [{ id: '777', properties: { name: 'Arcana (la otra ficha)', tango_codigo_cliente: '000003' } }],
+    });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(tango.creados.length, 0);
+    assert.ok(!hs.escrituras.some((e) => e.objetoTipo === 'companies'));
+    assert.match(hs.notas[0].cuerpo, /dos fichas para el mismo cliente/);
+    assert.match(hs.notas[0].cuerpo, /Arcana \(la otra ficha\)/);
+});
+
+test('un cliente que llega sin ID interno corta: no sale un pedido sin cliente', async () => {
+    const { ID_GVA14: _sinId, ...sinId } = ARCANA;
+    await assert.rejects(() => procesarImportada({ tango: tangoConCliente([sinId]) }), /no trajo ID_GVA14/);
+});
+
+test('si Tango no contesta la busqueda, se propaga: el codigo puede estar bien', async () => {
+    // Tratarlo como "no existe" frenaria el negocio con una nota que culpa a
+    // comercial por un codigo correcto. Es una caida: que reintente la cola.
+    const tango = tangoConCliente();
+    tango.getByFilter = async () => { throw new TangoError('fetch failed'); };
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: IMPORTADA });
+
+    await assert.rejects(
+        () => d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false, owners: OWNERS, estrategiaNumeracion: 'correlativo' }),
+        /fetch failed/);
+    assert.strictEqual(hs.notas.length, 0);
+});
+
+test('un codigo con forma invalida frena sin preguntarle nada al ERP', async () => {
+    const { r, tango, hs } = await procesarImportada({ company: { ...IMPORTADA, codigo_tango: "000003' OR 1=1" } });
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(tango.consultas.length, 0, 'no entra a un filtro SQL');
+    assert.match(hs.notas[0].cuerpo, /sólo lleva letras y números/);
+});
+
+test('en dry-run se busca el codigo pero no se escribe nada', async () => {
+    // El ensayo tiene que poder mostrar que negocios frenarian por esto.
+    const { r, hs, tango } = await procesarImportada({ dryRun: true });
+    assert.strictEqual(r.estado, 'dry-run');
+    assert.strictEqual(tango.consultas.length, 1);
+    assert.strictEqual(hs.escrituras.length, 0);
+    assert.strictEqual(tango.creados.length, 0);
+});
+
+test('una empresa ya vinculada no vuelve a buscar el codigo', async () => {
+    const hs = hsFalso();
+    const tango = tangoConCliente();
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(tango.consultas.length, 0);
+});
+
+test('PROPS_COMPANY pide lo que compara la vinculacion', () => {
+    const faltan = require('../src/lib/vinculoCliente').PROPIEDADES.filter((p) => !d2t.PROPS_COMPANY.includes(p));
+    assert.deepStrictEqual(faltan, []);
 });

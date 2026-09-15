@@ -218,6 +218,43 @@ function emailDelOwner(ownerId, owners) {
     return (typeof owners.get === 'function' ? owners.get(v) : owners[v]) || null;
 }
 
+/**
+ * El vendedor de Tango que corresponde al owner del NEGOCIO.
+ *
+ * Lo usan el alta del cliente y, desde el 2026-09-15, tambien el PEDIDO: el
+ * vendedor del pedido ya no se hereda del cliente, sale de quien cerro la venta
+ * (decision de Matias, §9.29).
+ *
+ * El match NO puede ser por el mail de Tango: GVA23.E_MAIL esta vacio en 26 de
+ * 27 vendedores, asi que la equivalencia vive en el catalogo (`porOwner`).
+ *
+ * ⚠️ Sin equivalencia FRENA (decision de Matias 2026-09-03). Antes caia en
+ * FACUNDO, que tiene el 63% de la cartera y por eso parecia razonable: el pedido
+ * del 2026-09-02 salio asi, con `ok: true` y sin un solo aviso. Un vendedor
+ * equivocado no lo descubre nadie hasta la comision.
+ *
+ * @returns {{valor, codigo, mail}|{problema}}
+ */
+function vendedorDelOwner({ ownerId, owners, lookups }) {
+    const campo = ALTA.campos.find((c) => c.origen === 'owner');
+    const mail = String(emailDelOwner(ownerId, owners) || '').trim().toLowerCase();
+    const codigo = mail ? (campo.porOwner || {})[mail] : undefined;
+    const r = porCodigo(campo, codigo, lookups);
+    if (r) return { valor: r.valor, codigo: r.codigo, mail };
+
+    return {
+        problema: problema(
+            campo,
+            mail
+                ? `el responsable del negocio (${mail}) no es un vendedor de Tango`
+                : 'el negocio no tiene responsable asignado',
+            mail
+                ? 'asignar el negocio a un responsable que sea vendedor en Tango. Si el responsable es correcto, avisar a sistemas para que lo den de alta como vendedor'
+                : 'asignar un responsable al negocio en HubSpot',
+        ),
+    };
+}
+
 /** Etiqueta de `tipo_de_documento` -> tipo logico de lib/documento. */
 function tipoLogicoDesdeEtiqueta(etiqueta, m) {
     if (vacio(etiqueta)) return null;
@@ -324,23 +361,13 @@ function verificar({ propiedades = {}, mapper: m, lookups, decididos = {}, owner
             // con `ok: true` y sin un solo aviso. Un cliente que queda con el
             // vendedor equivocado no lo descubre nadie hasta la comision.
             if (campo.origen === 'owner') {
-                const mail = String(emailDelOwner(ownerId, owners) || '').trim().toLowerCase();
-                const codigo = mail ? (campo.porOwner || {})[mail] : undefined;
-                const r = porCodigo(campo, codigo, lookups);
-                if (r) {
-                    valores[campo.tango] = r.valor;
-                    resueltos[campo.tango] = { codigo: r.codigo, porOwner: mail };
-                    continue;
+                const vendedor = vendedorDelOwner({ ownerId, owners, lookups });
+                if (vendedor.problema) {
+                    problemas.push(vendedor.problema);
+                } else {
+                    valores[campo.tango] = vendedor.valor;
+                    resueltos[campo.tango] = { codigo: vendedor.codigo, porOwner: vendedor.mail };
                 }
-                problemas.push(problema(
-                    campo,
-                    mail
-                        ? `el responsable del negocio (${mail}) no es un vendedor de Tango`
-                        : 'el negocio no tiene responsable asignado',
-                    mail
-                        ? 'asignar el negocio a un responsable que sea vendedor en Tango. Si el responsable es correcto, avisar a sistemas para que lo den de alta como vendedor'
-                        : 'asignar un responsable al negocio en HubSpot',
-                ));
                 continue;
             } else {
                 const d = porCodigo(campo, campo.codigoPorDefecto, lookups);
@@ -465,4 +492,4 @@ function propiedadesQueNecesita() {
     return [...props];
 }
 
-module.exports = { verificar, buscarDuplicados, literalSeguro, propiedadesQueNecesita, ALTA, COD_SEGURO, DOC_SEGURO };
+module.exports = { verificar, vendedorDelOwner, buscarDuplicados, literalSeguro, propiedadesQueNecesita, ALTA, COD_SEGURO, DOC_SEGURO };

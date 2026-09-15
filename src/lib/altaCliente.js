@@ -195,10 +195,14 @@ function planificarEscritura(registroTango, propsActuales, m, ahora = new Date()
  * @param {object}  o.lookups     instancia de lib/lookups ya cargada
  * @param {string}  o.companyId   ID de HubSpot de la company que disparo el alta
  * @param {string}  o.codigo      COD_GVA14 que se uso en el alta
+ * @param {object}  [o.registro]  el cliente ya leido de Tango. Lo pasa la
+ *                                vinculacion de una empresa que YA era cliente
+ *                                (§7.14): lo acaba de leer para compararlo y
+ *                                releerlo seria pagar dos veces lo mismo.
  * @param {boolean} [o.dryRun=true]
  * @returns {Promise<object>} resumen
  */
-async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, log = silencioso, dryRun = true, ahora = new Date() }) {
+async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, registro: yaLeido = null, log = silencioso, dryRun = true, ahora = new Date() }) {
     if (!companyId) throw new Error('altaCliente: falta companyId');
 
     const claveHs = mapeoClientes._meta.claveIdempotencia.hubspot;
@@ -218,9 +222,12 @@ async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, log = s
         );
     }
 
-    // 2. El cliente recien creado, leido con la proyeccion del sync.
-    log.paso('ALTA', `leyendo de Tango el cliente ${codigo} recien creado...`);
-    const registro = await leerCreado(tango, codigo, log);
+    // 2. El cliente, leido con la proyeccion del sync.
+    let registro = yaLeido;
+    if (!registro) {
+        log.paso('ALTA', `leyendo de Tango el cliente ${codigo} recien creado...`);
+        registro = await leerCreado(tango, codigo, log);
+    }
 
     // 3. Que escribir.
     const { propiedades, problemas, respetados, clave } = planificarEscritura(registro, company.properties, m, ahora);
@@ -377,9 +384,22 @@ function verificar({ lookups, propiedades, owners = null, ownerId = null }) {
     });
 }
 
+/**
+ * Como queda la empresa si se la vincula a este cliente de Tango. Sin red.
+ *
+ * Es lo que `escribirDeVuelta` le va a escribir, calculado antes: el pedido de
+ * una empresa que ya era cliente (§7.14) necesita SU `tango_id_gva14`, que
+ * todavia no esta en la ficha. Del cliente no sale nada mas (§9.29).
+ */
+function propiedadesVinculadas({ registro, propiedades, lookups, ahora = new Date() }) {
+    const plan = planificarEscritura(registro, propiedades, mapper.crear(mapeoClientes, lookups), ahora);
+    return { ...propiedades, ...plan.propiedades };
+}
+
 module.exports = {
     crear,
     verificar,
+    propiedadesVinculadas,
     filaPorCodigo,
     esElMismoCliente,
     CANDIDATOS,

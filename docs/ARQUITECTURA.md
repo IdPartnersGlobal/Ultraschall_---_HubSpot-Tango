@@ -1113,6 +1113,60 @@ Los dos valores entran a `filtroSql`** —SQL concatenado del lado del ERP (§10
 
 **Lo que falta para tener el alta entera:** la función HTTP del hook y el `POST Api/Create` en sí. La verificación, la numeración (§7.6) y la escritura de vuelta (§7.8) ya están.
 
+### 7.14 Una empresa con código de Tango nunca se da de alta (2026-09-15)
+
+#### La importación masiva
+
+El **2026-09-03, 14:21–14:23 UTC**, Ultraschall importó el padrón al portal: pasó de 69 a **41.225 empresas** (`hs_object_source: IMPORT`). Se hizo con la planilla y sin acceso a la integración, así que el código de cliente entró en **`codigo_tango`** —el nombre de la planilla— y no en la clave del circuito.
+
+Cruce contra el padrón de Tango, 2026-09-15, sólo lectura:
+
+| | empresas |
+|---|---|
+| con `codigo_tango` | 7.586 |
+| el código existe en Tango **y** coincide el documento o el nombre | **5.660** |
+| el código existe pero es de otro cliente | 13 (incluye 7 de los 9 códigos repetidos) |
+| el código no existe en Tango | 1.913 |
+| con `tango_codigo_cliente` / `tango_id_gva14` | **1** (la de prueba) |
+
+⚠️ **La copia de Tango termina el 2026-07-02** (último alta: `007610`). La importación trae 80 códigos `007612`–`007691`, que son clientes creados en producción después de la copia, y el `007611` ya chocó: en la copia lo tomó la empresa de prueba (§9.19) y en la importación es otra entidad. Lo que "no existe" hoy puede existir en la empresa 3.
+
+#### El bug que esto destapaba
+
+`verificarPedido` decidía **"hay que dar de alta"** mirando sólo `tango_id_gva14`. Con una empresa importada que ya es cliente, un negocio ganado **creaba un cliente nuevo en el ERP** y `escribirDeVuelta` —que sólo protege `tango_codigo_cliente`, vacía— le pisaba el código importado con el nuevo. Cliente duplicado en Tango y vínculo original perdido, sin camino de vuelta (§9.22). Lo que lo frenaba de rebote era que sólo 4 de las 41.225 tienen condición de IVA.
+
+#### La regla (decisión de Matías, 2026-09-15)
+
+*"Si podemos detectar que un código no existe o es de otro cliente, tenemos que frenar y figurar el error de manera asertiva en la nota del negocio para que el comercial entienda."*
+
+Si la empresa tiene `tango_codigo_cliente` o `codigo_tango` y no tiene `tango_id_gva14`, **no hay alta**. Se busca ese código en Tango (`GetByFilter`, ~0,7 s) y:
+
+| resultado | qué pasa |
+|---|---|
+| es el mismo cliente | se vincula con `escribirDeVuelta` (mismo mapeo que el alta y el sync, con hash) y el pedido sale con **ese** cliente. Del cliente sale sólo `ID_GVA14`: la parametría es del negocio (§9.29) |
+| no existe | **frena**: nota + una etapa atrás |
+| es de otro cliente | **frena**, y la nota dice de quién es el código y con qué CUIT |
+| forma inválida | **frena** sin consultar (entra a `filtroSql`, §10.0) |
+| el cliente ya está vinculado a **otra** ficha | **frena**: hay dos empresas para el mismo cliente. `tango_codigo_cliente` es única y escribirla daría un rechazo de HubSpot que saldría como falla técnica |
+| Tango no contesta | se **propaga** y la cola reintenta: no es un código inexistente |
+
+Con código declarado **no se verifican los datos del alta**: pedirle el CUIT o el domicilio de un cliente que no hay que crear no destraba nada.
+
+La nota dice **"Hay que corregir esto"** y no "Falta este dato" (`clase: 'corregir'`): el código está cargado, está mal. Da siempre las dos salidas, porque desde la ficha no se sabe cuál es: si está mal escrito, corregirlo; si la empresa nunca fue cliente, borrarlo y el próximo intento la da de alta.
+
+#### Cómo se decide "el mismo" (`lib/vinculoCliente.comparar`)
+
+1. **Documento**, si los dos lados tienen uno que sirva (11 dígitos, o 7–8 de DNI; los de relleno como `12.345.678` no). Contempla CUIT de un lado y DNI del otro (2 casos reales). **Si los dos existen y no coinciden, no es el mismo aunque el nombre sea idéntico** — hubo un caso real así.
+2. **Nombre**, sólo si no hay documento para comparar: **las mismas palabras**, sin importar orden, acentos ni forma jurídica. Se eligió midiendo: las 94 importadas que se confirman por nombre tienen exactamente las mismas palabras que su cliente, y los criterios más flojos juntaban dos clubes, dos personas y dos hermanas contra el padrón entero.
+
+Calibración: contra su propio código confirma 5.660 y rechaza 13 (los 13 revisados a mano, todos mal). Contra el cliente de **otra** empresa, en tres corrimientos de 5.673 pares, **0 falsos positivos**.
+
+⚠️ **El código se busca tal cual** (§7.5): `04078` y `004078` son clientes distintos. Y se vuelve a comparar la fila que devuelve el ERP, sin dar por hecho cómo compara.
+
+#### Lo que NO se hizo, a propósito
+
+**El sync de empresas no se tocó** (Matías, 2026-09-15: *"con el sync no hay que avanzar"*). Si la Fase 2 corriera hoy, no reconocería las 5.660 por su clave y crearía ~5.670 empresas duplicadas. La vinculación masiva queda pendiente; la de este apartado es **por negocio**, cuando se gana.
+
 ---
 
 ## 8. Estrategia de sincronización
@@ -2329,6 +2383,8 @@ Los 41 nombres son únicos hoy, así que no hizo falta desempatar etiquetas — 
 
 #### La regla que ya son cuatro campos
 
+> ⛔ **REEMPLAZADA el 2026-09-15 por §9.29.** El pedido ya no hereda nada del cliente y `DEL_CLIENTE` no existe más. Se deja como historia.
+
 `ID_GVA01`, `ID_GVA10`, `ID_GVA23` e `ID_GVA24` están en `DEL_CLIENTE`; `ID_GVA01` e `ID_GVA24` están **además** en `DEL_DEAL`. No es una duplicación: es la precedencia.
 
 ```
@@ -2336,6 +2392,32 @@ default del catálogo  <  lo que tiene el cliente  <  lo que eligió comercial
 ```
 
 Lo resuelve el orden en que se arma la cabecera —`heredado` primero, `elegido` después— y **no hay que tocar ese orden**. Los dos que no están en `DEL_DEAL` es a propósito: la lista de precios la decide la moneda (§9.27) y el vendedor lo decide el owner (§9.19), no un desplegable.
+
+### 9.29 El pedido no hereda nada del cliente (2026-09-15)
+
+Pregunta de Matías al ver la vinculación de §7.14: *"¿el pedido hereda la configuración de transporte y todo eso del cliente? Si es así no tiene que serlo: esas propiedades se sacan del negocio, el cliente nomás lo queremos para hacer la asociación."*
+
+**Heredaba**, y no sólo en el caso nuevo: desde §9.28, con el negocio vacío el pedido tomaba condición de venta, transporte, lista y vendedor de los `tango_id_gvaNN` de la empresa, y recién si la empresa tampoco los tenía, del default. Con la importación masiva, el caso "empresa que ya es cliente" pasaba a ser el normal, y el pedido iba a salir con lo que el ERP tuviera guardado para esa empresa sin que comercial lo eligiera.
+
+Y había una creencia equivocada que conviene dejar escrita: se daba por hecho que condición de venta y transporte **ya frenaban**. No: el único dato del negocio con `requerido` era la fecha de entrega. Medido el mismo día: de los dos negocios ganados más recientes, uno no tenía transporte y nada lo marcó.
+
+**Del cliente sale `ID_GVA14` y nada más.** El resto:
+
+| campo | sale de | si falta |
+|---|---|---|
+| condición de venta `ID_GVA01` | el negocio, `condiciones_de_pago` | **frena** (`requerido: true`) |
+| transporte `ID_GVA24` | el negocio, `tango_transporte` | **frena** (`requerido: true`) |
+| vendedor `ID_GVA23` | el **owner del negocio**, por `porOwner` (decisión de Matías) | **frena**, igual que en el alta (§9.19) |
+| lista `ID_GVA10` | la moneda del negocio (§9.27) | sin moneda van Pesos **con su lista** (1), no la del cliente |
+| depósito, talonarios | el negocio | va el default, como antes |
+
+El vendedor lo resuelve `verificarEmpresa.vendedorDelOwner`, la misma función para el alta y para el pedido. Cuando las dos lo reportan, `dealToTango` deja el problema **una sola vez** en la nota.
+
+Por qué frenar y no ir al default: CONTADO y RETIRA CLIENTE no fallan en el ERP. Si están mal, se entera alguien cuando sale la factura o el envío, y es el mismo criterio que la condición de IVA (§9.10).
+
+La red: un test compara la cabecera de un mismo negocio con un cliente cargado de parametría y con uno vacío, y exige que sean **idénticas**. Verificado con mutación: sin `requerido` fallan los dos tests de freno, y sin el vendedor del owner fallan tres.
+
+⚠️ **El talonario de factura sigue sin ser obligatorio**: es la decisión abierta de §9.18, y esta no la toca.
 
 
 ## 10. Seguridad

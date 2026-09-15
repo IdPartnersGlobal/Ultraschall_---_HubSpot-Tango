@@ -45,7 +45,9 @@ const OVERRIDES = {
     ID_GVA14: 'Empresa del negocio',
     COD_GVA14: 'Código de cliente en Tango',
     ID_GVA23: 'Vendedor',
-    ID_GVA01: 'Condición de pago',
+    // Como se llama el campo en el negocio desde §9.24. Con "Condicion de pago"
+    // la nota decia "Condicion de pago: falta elegir 'Condicion de venta'".
+    ID_GVA01: 'Condición de venta',
     ID_GVA10: 'Lista de precios',
     ID_GVA24: 'Transporte',
     ID_GVA05: 'Zona',

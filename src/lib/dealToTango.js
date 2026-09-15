@@ -5,6 +5,7 @@ const etapas = require('./etapas');
 const verificarPedido = require('./verificarPedido');
 const altaCliente = require('./altaCliente');
 const verificarEmpresa = require('./verificarEmpresa');
+const vinculoCliente = require('./vinculoCliente');
 const notaProblema = require('./notaProblema');
 const soloOwner = require('./soloOwner');
 const rechazoTango = require('./rechazoTango');
@@ -64,6 +65,8 @@ const PROPS_COMPANY = [...new Set([
     'codigo_tango', 'tango_codigo_cliente', 'tango_id_gva14',
     // Lo que necesita el ALTA, derivado del catalogo para que no se desfase.
     ...verificarEmpresa.propiedadesQueNecesita(),
+    // Lo que compara la vinculacion de una empresa que ya es cliente (§7.14).
+    ...vinculoCliente.PROPIEDADES,
 ])];
 const PROPS_LINEA = ['name', 'quantity', 'price', 'hs_product_id', 'hs_discount_percentage'];
 const PROPS_PRODUCTO = ['name', 'hs_sku', 'tango_id_sta11'];
@@ -156,13 +159,55 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     const company = companies[0] || null;
     const companyProps = company?.properties || null;
 
-    const v = verificarPedido.verificar({
+    const verificarCon = (props) => verificarPedido.verificar({
         deal: { ...deal.properties, id: dealId },
-        company: companyProps,
+        company: props,
         lineItems,
         productos,
         lookups,
+        // El vendedor del PEDIDO tambien sale del owner del negocio (§9.29).
+        owners,
     });
+    let v = verificarCon(companyProps);
+
+    // 5a. Una empresa que TIENE codigo de Tango nunca se da de alta (§7.14,
+    //     decision de Matias 2026-09-15).
+    //
+    //     "No esta vinculada" no quiere decir "no es cliente". La importacion
+    //     del 2026-09-03 trajo 7.586 empresas con `codigo_tango` y sin
+    //     `tango_id_gva14`, y el circuito las daba de alta: un cliente
+    //     DUPLICADO en el ERP, y el codigo importado pisado con el nuevo.
+    //
+    //     Se busca el codigo en Tango. Si es el mismo cliente, el pedido sale
+    //     con ese cliente —se vuelve a verificar para que lleve SU ID_GVA14, y
+    //     nada mas: la parametria sale del negocio (§9.29)—. Si no existe o es
+    //     de otro, frena: crear seria duplicar y usarlo seria facturarle a otro.
+    let vinculo = null;
+    if (v.cliente.faltaAlta && vinculoCliente.codigoDeclarado(companyProps)) {
+        vinculo = await vinculoCliente.buscar({ tango, props: companyProps });
+
+        if (vinculo.estado === 'mismo') {
+            const otra = await fichaYaVinculada({ hs, codigo: vinculo.codigo, company });
+            if (otra) {
+                vinculo = {
+                    ...vinculo,
+                    estado: 'ya-vinculado',
+                    problema: vinculoCliente.problemas.yaVinculado({
+                        codigo: vinculo.codigo, otra,
+                        nombre: companyProps.name || companyProps.razon_social,
+                    }),
+                };
+            } else {
+                v = verificarCon(altaCliente.propiedadesVinculadas({ registro: vinculo.fila, propiedades: companyProps, lookups, ahora }));
+                // Sin el ID interno el pedido saldria sin cliente, y el alta ya
+                // quedo descartada. No es un dato de comercial: se corta.
+                if (v.cliente.faltaAlta) {
+                    throw new Error(`dealToTango: el cliente ${vinculo.codigo} de Tango no trajo ID_GVA14; no se arma un pedido sin cliente`);
+                }
+            }
+        }
+        log.paso('DEAL', `${dealId}: la empresa ${company.id} declara el cliente ${vinculo.codigo} de Tango -> ${vinculo.estado}`);
+    }
 
     // Los avisos no frenan nada, pero tienen que verse: hoy el unico es que el
     // renglon va con el articulo de prueba (§9.6), y un pedido que sale con un
@@ -180,11 +225,17 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     //     salir con la empresa a medias, quedando el negocio en Cierre ganado
     //     con un cliente sin CUIT que ya nadie iba a completar — no hay ningun
     //     camino que mande a Tango un dato cargado despues.
-    const empresa = v.cliente.faltaAlta
+    //
+    //     Con codigo declarado NO se verifica el alta: no va a haber alta, y
+    //     pedirle a comercial el CUIT de un cliente que no hay que crear lo
+    //     manda a completar algo que no destraba nada.
+    const empresa = v.cliente.faltaAlta && !vinculo
         ? altaCliente.verificar({ lookups, propiedades: companyProps, owners, ownerId: deal.properties?.hubspot_owner_id })
         : null;
 
-    const problemasTodos = [
+    const problemasTodos = unaVezCadaUno([
+        // El codigo primero: si esta mal, es lo que hay que mirar antes que nada.
+        ...(vinculo?.problema ? [vinculo.problema] : []),
         ...v.problemas,
         ...(empresa ? empresa.problemas : []),
         ...(empresa ? empresa.pendientes.map((p) => ({
@@ -192,7 +243,7 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
             motivo: `falta definirlo: ${p.queFalta}`,
             comoSeArregla: `lo define ${p.quienLoDefine}`,
         })) : []),
-    ];
+    ]);
 
     if (problemasTodos.length) {
         const r = await reportarIncompleto({
@@ -207,7 +258,22 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     // company queda con su COD_GVA14, asi que la proxima vez ya no hace falta.
     let cliente = v.cliente;
     let avisosDelAlta = [];
-    if (v.cliente.faltaAlta) {
+
+    // La empresa YA era el cliente: se la vincula, con el mismo mapeo del alta
+    // y del sync, antes del pedido. Asi el proximo negocio no vuelve a buscar,
+    // y el sync la encuentra por su clave en vez de crear otra ficha.
+    if (vinculo?.estado === 'mismo') {
+        log.paso('DEAL', `la empresa ${company.id} es el cliente ${vinculo.codigo} de Tango (por ${vinculo.comparacion.por}); se vincula en vez de darla de alta`);
+        await altaCliente.escribirDeVuelta({
+            tango, hs, lookups,
+            companyId: company.id,
+            codigo: vinculo.codigo,
+            registro: vinculo.fila,
+            log, dryRun, ahora,
+        });
+    }
+
+    if (v.cliente.faltaAlta && !vinculo) {
         log.paso('DEAL', `la empresa ${company.id} no esta creada en Tango; se da de alta antes del pedido`);
 
         let alta;
@@ -334,6 +400,47 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
 
     log.paso('DEAL-OK', `${dealId} -> pedido ${nroPedido} en Tango (cliente ${cliente.codigo})`);
     return { dealId, estado: 'creado', nroPedido, cliente: cliente.codigo, avisos: v.avisos, aCompletar: avisosDelAlta };
+}
+
+/**
+ * Los problemas sin repetir. El vendedor lo verifican el pedido y el alta, con
+ * la misma funcion y el mismo texto (§9.29): una nota que dice dos veces
+ * "el responsable no es un vendedor de Tango" parece que son dos cosas.
+ */
+function unaVezCadaUno(problemas) {
+    const vistos = new Set();
+    return problemas.filter((p) => {
+        const k = `${p.campo}|${p.motivo}`;
+        if (vistos.has(k)) return false;
+        vistos.add(k);
+        return true;
+    });
+}
+
+/**
+ * El nombre de OTRA empresa de HubSpot que ya esta vinculada a este cliente de
+ * Tango, o null.
+ *
+ * `tango_codigo_cliente` es unica: si otra ficha ya la tiene, vincular esta
+ * haria que HubSpot rechace la escritura, y ese rechazo saldria como falla
+ * tecnica —reintentos de la cola y una nota de "avisar a sistemas"— por algo que
+ * se arregla en la ficha: hay dos empresas para el mismo cliente. Medido en la
+ * importacion: un hospital publico esta dos veces, con el mismo CUIT.
+ *
+ * Si la empresa del negocio ya tiene esa clave, ninguna otra puede tenerla y no
+ * se pregunta.
+ */
+async function fichaYaVinculada({ hs, codigo, company }) {
+    if (String(company?.properties?.tango_codigo_cliente ?? '').trim() === codigo) return null;
+
+    const d = await hs.buscar('companies', {
+        filterGroups: [{ filters: [{ propertyName: 'tango_codigo_cliente', operator: 'EQ', value: codigo }] }],
+        properties: ['name', 'razon_social'],
+        limit: 5,
+    });
+    const otra = (d?.results || []).find((r) => String(r.id) !== String(company.id));
+    if (!otra) return null;
+    return String(otra.properties?.name || otra.properties?.razon_social || `empresa ${otra.id}`).trim();
 }
 
 /**

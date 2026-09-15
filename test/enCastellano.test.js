@@ -126,6 +126,23 @@ test('la nota de un rechazo del ERP tampoco', () => {
     sinNombresInternos(notaProblema.cuerpo({ problemas: [p] }), 'la nota del rechazo');
 });
 
+test('la nota de un codigo de Tango equivocado tampoco (§7.14)', () => {
+    const vinculoCliente = require('../src/lib/vinculoCliente');
+    const f = { COD_GVA14: '000466', RAZON_SOCI: 'CLINICA DEMO SA', CUIT: '30-99999999-5' };
+    const props = { name: 'Tienda Demo', cuit: 30712345678, codigo_tango: '000466' };
+    const problemas = [
+        vinculoCliente.problemas.noExiste({ codigo: '002410', nombre: 'Tienda Demo' }),
+        vinculoCliente.problemas.otroCliente({ codigo: '000466', nombre: 'Tienda Demo', props, fila: f, comparacion: { documento: 'distinto' } }),
+        vinculoCliente.problemas.otroCliente({ codigo: '000466', nombre: 'Tienda Demo', props: { name: 'Tienda Demo' }, fila: f, comparacion: { documento: 'sin-dato' } }),
+        vinculoCliente.problemas.otroCliente({ codigo: '000466', nombre: 'Tienda Demo', props, fila: { ...f, CUIT: '' }, comparacion: { documento: 'sin-dato' } }),
+        vinculoCliente.problemas.codigoInvalido({ codigo: '12.3', nombre: null }),
+        vinculoCliente.problemas.yaVinculado({ codigo: '000466', nombre: 'Tienda Demo', otra: 'Clinica Demo' }),
+    ];
+    sinNombresInternos(notaProblema.cuerpo({ problemas }), 'la nota del codigo');
+    sinNombresInternos(notaProblema.resumen({ problemas }), 'la propiedad del codigo');
+    assert.match(notaProblema.cuerpo({ problemas }), /Código de cliente en Tango/);
+});
+
 test('la propiedad del negocio que ve comercial tampoco', () => {
     // `tango_pedido_problema` se ve en la ficha, no solo en la nota.
     const texto = notaProblema.resumen({

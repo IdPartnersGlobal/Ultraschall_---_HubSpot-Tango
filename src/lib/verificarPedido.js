@@ -3,6 +3,7 @@
 const defaults = require('../../config/defaults.tango.json');
 const mapeoPedidos = require('../../config/mapeo.pedidos.json');
 const enCastellano = require('./enCastellano');
+const verificarEmpresa = require('./verificarEmpresa');
 
 /**
  * Verificacion previa del pedido, cuando un negocio se gana.
@@ -37,30 +38,27 @@ const enCastellano = require('./enCastellano');
  */
 
 const PEDIDOS = defaults.pedidos;
-const CAMPOS_CLIENTE = defaults.clientes.alta.campos;
-
-/** Parametria que el pedido hereda del cliente. Ver 9.2. */
-const DEL_CLIENTE = ['ID_GVA01', 'ID_GVA10', 'ID_GVA23', 'ID_GVA24'];
 
 /**
  * Parametria que elige COMERCIAL en el Deal, con un desplegable (9.8).
  *
- * Es la unica parametria del pedido que no se hereda ni sale de un default: son
- * decisiones del negocio que ni la company ni el catalogo pueden saber. De que
- * deposito sale la mercaderia es la mas obvia — dos tercios de los pedidos
- * salen de PRODUCTO TERMINADO, pero los ~144 anuales de SERVICIO TECNICO y los
- * ~104 de EQUIPOS VETERINARIA no.
+ * ⚠️ EL PEDIDO NO HEREDA NADA DEL CLIENTE (decision de Matias, 2026-09-15,
+ * §9.29): *"esas propiedades se sacan del negocio, el cliente nomas lo queremos
+ * para hacer la asociacion"*. Del cliente sale `ID_GVA14` y nada mas.
  *
- * Vacio no es un problema: es el caso normal, y va el default.
+ * Hasta ese dia la condicion de venta, el transporte, la lista y el vendedor se
+ * tomaban del cliente cuando el negocio no los traia, y recien si el cliente
+ * tampoco, del default. Con la importacion masiva eso pasaba a ser el caso
+ * normal: el pedido salia con el transporte y la condicion que el ERP tuviera
+ * guardados para esa empresa, sin que comercial los hubiera elegido.
  *
- * ⚠️ `ID_GVA01` (condicion de venta) e `ID_GVA24` (transporte) estan en las DOS
- * listas, y no es un error: se heredan del cliente, pero si comercial eligio en
- * el negocio, esa eleccion gana. Las dos son decisiones DE LA VENTA —un
- * anticipo y tres cheques, o que este pedido lo retire el cliente aunque al
- * cliente normalmente se le mande por expreso— y no atributos fijos de la
- * empresa (decisiones de Matias, 2026-09-04). El orden en que se arma la
- * cabecera es lo que lo resuelve: `heredado` primero, `elegido` despues. No
- * tocar ese orden.
+ * De donde sale cada uno ahora:
+ *
+ *   - condicion de venta, transporte -> el negocio, OBLIGATORIOS (`requerido`
+ *     en el mapeo). Si faltan, frena.
+ *   - deposito, talonarios           -> el negocio; vacio va el default.
+ *   - lista de precios               -> la moneda del negocio (§9.27).
+ *   - vendedor                       -> el owner del negocio (§9.19).
  */
 const DEL_DEAL = ['ID_STA22', 'ID_GVA43_TALON_PED', 'ID_GVA43_TALONARIO_FACTURA', 'ID_GVA01', 'ID_GVA24'];
 
@@ -127,23 +125,6 @@ function numero(v) {
 }
 
 /**
- * Un campo de parametria del cliente. Gana lo que la company tenga cargado; si
- * no tiene, el default del catalogo, que se resuelve contra la tabla viva y no
- * queda hardcodeado (§5.4).
- */
-function parametria(tangoCampo, props, lookups) {
-    const campo = CAMPOS_CLIENTE.find((c) => c.tango === tangoCampo);
-    if (!campo) return null;
-
-    const cargado = numero(props[campo.hubspot]);
-    if (cargado !== null) return { valor: cargado, deLaCompany: true };
-
-    if (!campo.lookup || !campo.codigoPorDefecto || !lookups) return null;
-    const r = lookups.resolver(campo.lookup, campo.codigoPorDefecto, tangoCampo);
-    return r.ok ? { valor: r.id, deLaCompany: false, codigo: campo.codigoPorDefecto } : null;
-}
-
-/**
  * Un desplegable del Deal -> ID interno de Tango.
  *
  * El desplegable guarda el CODIGO de Tango, no el ID, y la etiqueta legible
@@ -152,14 +133,23 @@ function parametria(tangoCampo, props, lookups) {
  * por el mismo motivo — el codigo NO es el ID, y en depositos divergen 11 de 16.
  *
  * @returns null si comercial no eligio nada (va el default), o
- *          { valor } si resolvio, o { problema } si eligio algo que no resuelve.
+ *          { valor } si resolvio, o { problema } si eligio algo que no resuelve
+ *          o no eligio nada en un campo `requerido`.
  */
 function deDesplegable(tangoCampo, deal, lookups) {
     const campo = mapeoPedidos.campos.find((c) => c.tango === tangoCampo && c.opcionesInversas);
     if (!campo) return null;
 
     const elegido = deal[campo.hubspot];
-    if (vacio(elegido)) return null;
+    if (vacio(elegido)) {
+        // Condicion de venta y transporte (§9.29): sin eleccion en el negocio
+        // no hay de donde sacarlos. El cliente ya no se mira, y un default
+        // equivocado —CONTADO, RETIRA CLIENTE— no falla: sale mal la factura o
+        // el envio.
+        if (!campo.requerido) return null;
+        const etiqueta = enCastellano.limpiar(campo.label);
+        return { problema: problema(tangoCampo, 'no se eligió en el negocio', `elegir '${etiqueta}' en el negocio`) };
+    }
 
     const codigo = campo.opcionesInversas[String(elegido).trim()];
     // Que una opcion no resuelva NO puede terminar en "va el default": eso
@@ -189,16 +179,21 @@ function deDesplegable(tangoCampo, deal, lookups) {
  * el mismo modo de falla que se acaba de cerrar, y ademas silencioso: el ERP
  * acepta el pedido igual y el importe queda mal por un factor de mil.
  *
- * Sin moneda en el negocio se usa el default, que es lo que se hacia siempre.
+ * Sin moneda en el negocio va la moneda del default (Pesos) CON SU LISTA. Hasta
+ * el 2026-09-15 la lista, en ese caso, se heredaba del cliente; desde §9.29 el
+ * pedido no hereda nada, y la lista sigue yendo pareja con la moneda.
  *
- * @returns {null|{valor}|{problema}}
+ * @returns {{valor, codigo, idListaPrecios, porDefecto?}|{problema}|null}
  */
 function monedaDelNegocio(deal) {
     const cfg = PEDIDOS.monedas || {};
     const tabla = cfg.porCodigoDeHubSpot || {};
     const codigo = String(deal.deal_currency_code ?? '').trim().toUpperCase();
 
-    if (!codigo) return null; // va el default: es lo que hacia hasta el 2026-09-04
+    if (!codigo) {
+        const [codigoDefault, fila] = Object.entries(tabla).find(([, f]) => f.idMoneda === PEDIDOS.defaults.ID_MONEDA) || [];
+        return fila ? { valor: fila.idMoneda, codigo: codigoDefault, idListaPrecios: fila.idListaPrecios, porDefecto: true } : null;
+    }
 
     const fila = tabla[codigo];
     if (fila === undefined) {
@@ -272,11 +267,13 @@ function resumenParaComercial({ payload, renglones, lineItems = [], lookups }) {
  * @param {Map}    p.productos   id de product de HubSpot -> properties
  * @param {object} p.lookups     tablas auxiliares
  * @param {object} p.productoDePrueba  articulo de reemplazo, o null (§9.6)
+ * @param {Map}    [p.owners]    id de owner de HubSpot -> mail. Sin esto no hay
+ *                               vendedor y el pedido FRENA (§9.19, §9.29).
  * @returns {{ok, problemas, avisos, payload, cliente, renglones}}
  *
  * Nunca lanza: un Deal incompleto es un informe, no una excepcion.
  */
-function verificar({ deal = {}, company = null, lineItems = [], productos = new Map(), lookups, productoDePrueba = resolverProductoDePrueba() } = {}) {
+function verificar({ deal = {}, company = null, lineItems = [], productos = new Map(), lookups, owners = null, productoDePrueba = resolverProductoDePrueba() } = {}) {
     const problemas = [];
     // Los avisos NO frenan el pedido: son cosas que el pedido lleva y hay que
     // saber, no cosas que falten.
@@ -317,17 +314,20 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         // La lista de precios VA CON LA MONEDA (decision de Matias 2026-09-04):
         // ARS -> lista 1 (SIN IVA EN $), USD -> lista 2 (SIN IVA EN U$S).
         //
-        // ⚠️ Pisa la lista que tenga cargada el cliente, a proposito. Un pedido
-        // en dolares con una lista en pesos es plata mal calculada, y era lo que
-        // pasaba: `ID_GVA10` se heredaba del cliente y `ID_MONEDA` era fijo en
-        // pesos, asi que los dos campos no se miraban nunca entre si.
-        //
-        // Va por `elegido`, que se aplica DESPUES de `heredado`: ese orden es lo
-        // que hace que gane. No tocarlo.
+        // Un pedido en dolares con una lista en pesos es plata mal calculada, y
+        // era lo que pasaba: `ID_GVA10` se heredaba del cliente y `ID_MONEDA` era
+        // fijo en pesos, asi que los dos campos no se miraban nunca entre si.
         if (moneda.idListaPrecios !== undefined) {
             elegido.ID_GVA10 = { valor: moneda.idListaPrecios, porLaMoneda: codigoLegible(moneda.codigo) };
         }
     }
+
+    // El vendedor es quien cerro la venta: el owner del negocio (§9.19). Hasta
+    // el 2026-09-15 eso valia solo para el cliente que se CREA; el pedido de un
+    // cliente existente llevaba el vendedor que el ERP tuviera asignado (§9.29).
+    const vendedor = verificarEmpresa.vendedorDelOwner({ ownerId: deal.hubspot_owner_id, owners, lookups });
+    if (vendedor.problema) problemas.push(vendedor.problema);
+    else elegido.ID_GVA23 = { valor: vendedor.valor, porOwner: vendedor.mail };
 
     // -------------------------------------------------------- los renglones
     const renglones = [];
@@ -443,12 +443,7 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
     // apague este modo no hay forma de saber cuales hay que dar de baja.
     if (huboPrueba) cabecera.LEYENDA_3 = LEYENDA_PRUEBA;
 
-    const heredado = {};
-    for (const campo of DEL_CLIENTE) {
-        const r = parametria(campo, props, lookups);
-        if (r) { cabecera[campo] = r.valor; heredado[campo] = r; }
-    }
-
+    // Del cliente, nada mas que `ID_GVA14` (§9.29). Lo demas sale del negocio.
     for (const [campo, r] of Object.entries(elegido)) cabecera[campo] = r.valor;
 
     const payload = { ...PEDIDOS.defaults, ...cabecera, RENGLON_DTO: renglones };
@@ -460,10 +455,9 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
         payload,
         cliente,
         renglones,
-        heredado,
         elegido,
         resumen: resumenParaComercial({ payload, renglones, lineItems, lookups }),
     };
 }
 
-module.exports = { verificar, fechaTango, resolverProductoDePrueba, deDesplegable, DEL_CLIENTE, DEL_DEAL, DEL_DEAL_DIRECTO, LEYENDA_PRUEBA };
+module.exports = { verificar, fechaTango, resolverProductoDePrueba, deDesplegable, DEL_DEAL, DEL_DEAL_DIRECTO, LEYENDA_PRUEBA };

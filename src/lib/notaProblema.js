@@ -72,6 +72,13 @@ function cuerpo({ problemas = [], retroceso = null, etapaGanada = 'Cierre ganado
         // que no se cumple. Decir "falta este dato" manda a buscar un campo
         // vacio que no existe.
         partes.push('<p>Tango no aceptó la operación por esto:</p>');
+    } else if (problemas.some((p) => p.clase === 'corregir')) {
+        // Hay un dato que ESTA, pero mal: el codigo de Tango de la empresa es de
+        // otro cliente o no existe (§7.14). "Falta este dato" mandaria a buscar
+        // un campo vacio en una ficha que lo tiene lleno.
+        partes.push(problemas.length === 1
+            ? '<p>Hay que corregir esto:</p>'
+            : `<p>Hay ${problemas.length} cosas para resolver:</p>`);
     } else {
         partes.push(problemas.length === 1 ? '<p>Falta este dato:</p>' : `<p>Faltan ${problemas.length} datos:</p>`);
     }
@@ -85,9 +92,10 @@ function cuerpo({ problemas = [], retroceso = null, etapaGanada = 'Cierre ganado
     // ⚠️ Guardar el negocio NO dispara nada: el webhook escucha el CAMBIO DE
     // ETAPA y nada mas. Decir "volvé a guardarlo" —como decia la cola de
     // veneno— manda a alguien a hacer algo que no hace nada.
+    const hayQueCorregir = tipo === 'datos' && problemas.some((p) => p.clase === 'corregir');
     partes.push(tipo === 'tecnico'
         ? `<p>Para reintentar, movelo a <b>${escapar(etapaGanada)}</b> otra vez cuando Tango vuelva a estar disponible.</p>`
-        : `<p>Cuando cargues lo que falta, movelo de nuevo a <b>${escapar(etapaGanada)}</b>: el pedido se reintenta solo.</p>`);
+        : `<p>Cuando ${hayQueCorregir ? 'lo resuelvas' : 'cargues lo que falta'}, movelo de nuevo a <b>${escapar(etapaGanada)}</b>: el pedido se reintenta solo.</p>`);
 
     return partes.join('');
 }
