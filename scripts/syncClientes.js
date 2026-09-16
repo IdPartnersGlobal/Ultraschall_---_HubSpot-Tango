@@ -8,6 +8,9 @@
  *   node scripts/syncClientes.js --proxy <url>   # dry-run contra el Tango de la Function App
  *   node scripts/syncClientes.js --escribir      # escribe en HubSpot (solo sin proxy)
  *
+ * ⚠️ Desde el 2026-09-16 el proxy pide clave (§10.0.1): la URL va con su
+ * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY en el entorno.
+ *
  * `--escribir` pone SYNC_DRY_RUN_CLIENTES=false para ESTA corrida y nada mas:
  * no toca el modo del sync de productos ni el del circuito de negocios.
  *

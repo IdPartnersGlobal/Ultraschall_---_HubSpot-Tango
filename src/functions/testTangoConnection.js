@@ -4,18 +4,25 @@ const politicaProxy = require('../lib/politicaProxy');
 // Herramienta de diagnóstico: proxy contra Tango.
 // No es la función de producción — el sync real vive en syncClientes / syncProductos / dealToTango.
 //
-// El endpoint es anónimo por decisión de Matías (docs/ARQUITECTURA.md §10.0) y así queda.
-// Como la autenticación no contiene nada, la contención la pone lib/politicaProxy:
-// allowlist de ruta, de método, de query params y de process. Ya no es pass-through.
+// 🔑 Pide clave de función desde el 2026-09-16 (§10.0). Era anónimo por decisión
+// de Matías, tomada cuando Azure leía la COPIA de Tango; el 2026-09-15 pasó a leer
+// la empresa 3, productivo, y él pidió cerrarlo: "hagamos la mejor práctica".
+// Sin `?code=` (o el header `x-functions-key`) Azure contesta 401 y el handler ni
+// se ejecuta. La clave se saca del portal, en la función → "Obtener URL".
+//
+// La clave NO reemplaza a lib/politicaProxy, que sigue siendo la contención de
+// fondo: allowlist de ruta, de método, de query params y de process. Son dos
+// capas distintas — quién puede entrar, y qué puede pedir el que entró.
 //
 // Los dos interruptores viven en las Application Settings, apagados por defecto:
 //   TANGO_PROXY_MODO=relevamiento  -> process fuera del catálogo + filtroSql (método §5.7)
 //   TANGO_PROXY_ESCRITURA=true     -> Api/Create, Api/Update, Api/Delete
-// Sin ellos el proxy sólo lee las entidades ya conocidas. El día que esto apunte
-// a producción, la configuración segura es la de no hacer nada.
+// Sin ellos el proxy sólo lee las entidades ya conocidas. Apuntando a producción,
+// `TANGO_PROXY_ESCRITURA` no tiene por qué estar encendida: los scripts con
+// `--proxy` sólo leen.
 app.http('testTangoConnection', {
     methods: ['GET', 'POST', 'DELETE', 'PUT'],
-    authLevel: 'anonymous',
+    authLevel: 'function',
     handler: async (request, context) => {
         const requestId = Math.random().toString(36).substring(2, 9).toUpperCase();
         const startTime = Date.now();

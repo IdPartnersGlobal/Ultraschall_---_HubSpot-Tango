@@ -20,7 +20,22 @@
  *   1. El proxy ENVUELVE la respuesta en { status, proxyTarget, result }.
  *      Se devuelve `result` pelado, que es lo que contesto Tango.
  *   2. La API key la pone el proxy con la suya. La de aca no viaja: mandarla
- *      seria filtrar la credencial del ERP a un endpoint anonimo (10.0).
+ *      seria filtrar la credencial del ERP en la query de otro endpoint (10.0).
+ *
+ * La clave de la funcion
+ * ----------------------
+ * Desde el 2026-09-16 el proxy pide clave (`authLevel: 'function'`). Se pasa de
+ * las dos formas de siempre y las dos terminan igual:
+ *
+ *   - En la URL, tal cual la copia el portal: `...?code=<clave>`. Se la saca de
+ *     la query y se manda como header `x-functions-key`, para que la credencial
+ *     no quede escrita en la URL de cada request ni en los logs de red.
+ *   - Como opcion `clave`, o en `TANGO_PROXY_KEY`.
+ *
+ * Sin clave Azure contesta 401 y eso se lee como un fallo de Tango, que manda a
+ * buscar el problema al lado equivocado: por eso falta la clave falla al armar
+ * el fetch, antes de salir a la red. Contra localhost no se exige — el runtime
+ * local no valida claves y ahi el proxy se usa para depurar.
  *
  * Lo que el proxy bloquea por politica (lib/politicaProxy) sigue bloqueado:
  * esto no es una puerta de atras, es el mismo endpoint con otra sintaxis. Un
@@ -43,8 +58,21 @@ class ProxyBloqueado extends Error {
  * @param {string} urlProxy  URL completa de la funcion testTangoConnection.
  * @returns {Function} fetchImpl para pasarle a tangoClient.crear().
  */
-function fetchPorProxy(urlProxy, { fetchImpl = fetch, timeoutMs = TIMEOUT_MS } = {}) {
+function fetchPorProxy(urlProxy, { fetchImpl = fetch, timeoutMs = TIMEOUT_MS, clave = null } = {}) {
     if (!urlProxy) throw new Error('proxyTango: falta la URL del proxy');
+
+    // La clave puede venir en la URL (`?code=`), como opcion o en el entorno.
+    // Se resuelve UNA vez, aca, y no en cada request.
+    const base = new URL(urlProxy);
+    const claveDeLaUrl = base.searchParams.get('code');
+    base.searchParams.delete('code');
+    const claveFuncion = clave || claveDeLaUrl || process.env.TANGO_PROXY_KEY || null;
+    if (!claveFuncion && !esLocal(base)) {
+        throw new Error(
+            'proxyTango: falta la clave de la funcion. El proxy dejo de ser anonimo el 2026-09-16 (10.0): '
+            + 'pasa la URL con su `?code=...` (portal de Azure -> la funcion -> "Obtener URL") o pone TANGO_PROXY_KEY.',
+        );
+    }
 
     return async function fetchTraducido(urlTango, opciones = {}) {
         const origen = new URL(urlTango);
@@ -52,12 +80,14 @@ function fetchPorProxy(urlProxy, { fetchImpl = fetch, timeoutMs = TIMEOUT_MS } =
         // De '/Api/Get' sale 'Api/Get'. El proxy lo espera sin la barra.
         const tangoPath = origen.pathname.replace(/^\/+/, '');
 
-        const destino = new URL(urlProxy);
+        const destino = new URL(base);
         destino.searchParams.set('tangoPath', tangoPath);
         for (const [k, v] of origen.searchParams) destino.searchParams.append(k, v);
 
-        // La credencial de Tango NO se reenvia: la pone el proxy.
+        // La credencial de Tango NO se reenvia: la pone el proxy. La que si
+        // viaja es la de la funcion, y va en el header y no en la URL.
         const headers = { 'Content-Type': 'application/json' };
+        if (claveFuncion) headers['x-functions-key'] = claveFuncion;
 
         const res = await fetchImpl(destino.toString(), {
             method: opciones.method || 'GET',
@@ -98,6 +128,11 @@ function fetchPorProxy(urlProxy, { fetchImpl = fetch, timeoutMs = TIMEOUT_MS } =
             headers: { 'Content-Type': 'application/json' },
         });
     };
+}
+
+/** El runtime local no valida claves de funcion; Azure si. */
+function esLocal(url) {
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
 }
 
 module.exports = { fetchPorProxy, ProxyBloqueado, TIMEOUT_MS };

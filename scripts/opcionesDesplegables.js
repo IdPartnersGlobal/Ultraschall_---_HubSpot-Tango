@@ -9,6 +9,9 @@
  *   node scripts/opcionesDesplegables.js --aplicar       # escribe los mapeos
  *   node scripts/opcionesDesplegables.js --proxy <url>   # relee el ERP primero
  *
+ * ⚠️ Desde el 2026-09-16 el proxy pide clave (§10.0.1): la URL va con su
+ * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY en el entorno.
+ *
  * POR QUE EXISTE
  *
  * Once campos del mapeo pedian `hsFieldType: "select"` y ninguno declaraba

@@ -22,6 +22,9 @@
  *
  *   node scripts/articuloDePrueba.js --proxy <url de la Function App>
  *
+ * ⚠️ Desde el 2026-09-16 el proxy pide clave (§10.0.1): la URL va con su
+ * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY en el entorno.
+ *
  * ⚠️ Tango solo acepta la IP de Azure: sin `--proxy` no hay forma de correrlo
  * desde una maquina de escritorio (§5.6).
  */

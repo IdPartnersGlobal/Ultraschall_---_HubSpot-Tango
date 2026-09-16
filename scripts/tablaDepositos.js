@@ -9,6 +9,9 @@
  *   node scripts/tablaDepositos.js --aplicar           # actualiza config/
  *   node scripts/tablaDepositos.js --proxy <url>       # desde afuera de Azure
  *
+ * ⚠️ Desde el 2026-09-16 el proxy pide clave (§10.0.1): la URL va con su
+ * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY en el entorno.
+ *
  * Por que existe: hasta el 2026-08-31 no habia process para STA22 y la tabla se
  * habia reconstruido al reves, desde los pedidos ya cargados (9.7). Ese metodo
  * solo ve los depositos que ALGUN pedido uso: quedaron 16 filas y el resto,

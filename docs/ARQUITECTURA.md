@@ -57,7 +57,7 @@ Sirvió para validar conectividad y relevar datos. **No es la función de produc
 | # | Problema | Archivo | Acción | Estado |
 |---|---|---|---|---|
 | D1 | `local.settings.json` define `TANGO_API_TOKEN`, pero el código lee `TANGO_API_KEY`. Además falta `TANGO_COMPANY`. | `local.settings.json` | Unificar a `TANGO_API_KEY` y agregar `TANGO_COMPANY`. | ✅ 2026-08-14. Se sumaron `HUBSPOT_TOKEN` y `SYNC_DRY_RUN` como placeholders. ⚠️ **Falta replicar el rename en las Application Settings de Azure.** |
-| D2 | `authLevel: 'anonymous'` en un proxy que expone el ERP entero a internet, incluido el `POST → Api/Create`. | `testTangoConnection.js` | El `authLevel` no se toca (decisión de Matías). Contener por política de acceso. Ver §10.0. | ✅ 2026-08-25 con `lib/politicaProxy`: allowlist de ruta, método, params y `process`; escritura y `filtroSql` apagados por defecto. Queda abierto el transporte `http://` (§10.1), que no depende de nosotros. |
+| D2 | `authLevel: 'anonymous'` en un proxy que expone el ERP entero a internet, incluido el `POST → Api/Create`. | `testTangoConnection.js` | Contener por política de acceso y, desde que apunta a producción, **cerrar el `authLevel`**. Ver §10.0. | ✅ **CERRADA el 2026-09-16**: `authLevel: 'function'` a pedido de Matías ("hagamos la mejor práctica"), más `lib/politicaProxy` desde el 2026-08-25. Queda abierto el transporte `http://` (§10.1), que no depende de nosotros. |
 | D3 | `pdfkit` está en `dependencies` sin uso aparente. | `package.json` | Confirmar si se usa; si no, sacar. | ✅ 2026-08-14. Sin usos; removido y lock regenerado. Queda `@azure/functions` como única dependencia. |
 | D4 | README vacío ("First commit"). | `README.md` | Completar con setup local + deploy. | ✅ 2026-08-14. |
 | D5 | `.gitignore` ignoraba `.funcignore`, así que nunca llegaba al repo. | `.gitignore` | Sacarlo de la sección de empaquetados. | ✅ 2026-08-14. |
@@ -117,7 +117,7 @@ flowchart LR
 | `lib/altaCliente.js` | módulo | **Escritura de vuelta**: ata la company al cliente que Tango acaba de crear. | ✅ 2026-08-24 |
 | `lib/verificarEmpresa.js` | módulo | Verificación previa del alta: qué falta, quién lo resuelve, y el payload ya resuelto. | ✅ 2026-08-25 |
 | `lib/firmaHubSpot.js` | módulo | Firma v3: la única autenticación del webhook de negocios ganados. | ✅ 2026-08-21 |
-| `lib/politicaProxy.js` | módulo | Contención del proxy anónimo de diagnóstico. | ✅ 2026-08-25 |
+| `lib/politicaProxy.js` | módulo | Contención del proxy de diagnóstico: qué puede pedir el que entró. | ✅ 2026-08-25 |
 | `lib/etapas.js` | módulo | Qué etapa cuenta como negocio ganado. Los dos embudos, sin red. | ✅ 2026-08-25 |
 | `lib/verificarPedido.js` | módulo | Verificación del pedido y armado del payload, cabecera y renglones. | ✅ 2026-08-25 |
 | `lib/dealToTango.js` | módulo | El circuito de la Fase 4, testeable con dobles. | ✅ 2026-08-25 |
@@ -130,7 +130,7 @@ Verificación sobre el padrón completo: los 5.670 clientes se mapean en 176 ms,
 | `functions/syncClientes.js` | Timer | Fase 2. Tango `process=2117` → HubSpot Companies. |
 | `functions/dealToTango.js` | HTTP | Fase 4, **la puerta**. Valida la firma, descarta lo que no es un negocio ganado y encola. No habla con Tango. ✅ 2026-08-26, apagada por defecto (`DEAL_TO_TANGO_ENABLED`). |
 | `functions/dealWorker.js` | Cola | Fase 4, **el trabajo**. Un mensaje = un negocio = un pedido en Tango. Incluye `dealVeneno`, la cola de veneno (§9.5). ✅ 2026-08-26. |
-| `functions/testTangoConnection.js` | HTTP | Ya existe. Queda como diagnóstico, anónimo pero contenido por `lib/politicaProxy` (§10.0). |
+| `functions/testTangoConnection.js` | HTTP | Ya existe. Queda como diagnóstico, con clave de función (§10.0.1) y contenido por `lib/politicaProxy` (§10.0). |
 
 **Criterio:** ninguna función habla directo con `fetch`. Todo pasa por `lib/`, así el mapeo y los reintentos se testean y se cambian en un solo lugar.
 
@@ -318,7 +318,7 @@ Buena parte de las precauciones de este documento se tomaron asumiendo producci�
 - Escribir registros de prueba es barato: se crean, se miden y se borran.
 - Los 8 clientes `999902`-`999909` del relevamiento de tipos de documento se borran sin ceremonia (§5.4).
 - El sondeo de `process` y las consultas pesadas dejan de ser un riesgo operativo.
-- **D2 (proxy anónimo) baja de severidad mientras apunte acá.** Sigue siendo bloqueante antes de apuntar a producción: ver §10.0, que no cambia como diseño, sólo como urgencia.
+- **D2 (proxy anónimo) baja de severidad mientras apunte acá.** Sigue siendo bloqueante antes de apuntar a producción: ver §10.0, que no cambia como diseño, sólo como urgencia. ✅ **Y así fue**: al pasar a producción el 2026-09-15, D2 se cerró el 2026-09-16 (§10.0.1).
 
 ⚠️ Lo que **no** cambia: los datos son reales (5.670 clientes con razón social, CUIT y contactos). Sigue aplicando el cuidado con datos personales — ver §10 y la nota sobre `test/fixtures/`.
 
@@ -2518,14 +2518,29 @@ No se probaron `Api/Delete` ni `Api/Update` (destructivos, producción), pero fi
 
 | # | Acción | Estado |
 |---|---|---|
-| 1 | Pasar `testTangoConnection` a `authLevel: 'function'` | ⛔ **Descartado.** Decisión de Matías: el proxy queda anónimo. No re-litigar. |
+| 1 | Pasar `testTangoConnection` a `authLevel: 'function'` | ✅ **HECHO el 2026-09-16** (§10.0.1). Estuvo descartado mientras Azure leía la copia; cuando pasó a leer producción, Matías lo reabrió y pidió cerrarlo. |
 | 2 | No dejar el proxy pass-through en producción | ✅ **Ya no es pass-through** (2026-08-25). Las funciones de sync tampoco lo usan: hablan con `lib/tangoClient` directo. |
 | 3 | Allowlist de `tangoPath` y de `process` | ✅ **`lib/politicaProxy.js`, 23 tests** (2026-08-25). |
 | 4 | Nunca exponer `filtroSql` a entrada externa | ✅ En el proxy: prohibido salvo en modo relevamiento. En `tangoClient.getByFilter` la condición se arma siempre en código. |
 
-#### `lib/politicaProxy` — la contención de un endpoint que va a seguir siendo anónimo
+#### 10.0.1 El proxy dejó de ser anónimo (2026-09-16)
 
-Como el punto 1 está descartado, la autenticación no contiene nada y **toda** la contención vive en este módulo. Decide, petición por petición, si se reenvía y con qué parámetros:
+`testTangoConnection` pasó a `authLevel: 'function'`. Sin `?code=` —o el header `x-functions-key`— Azure contesta 401 y el handler ni se ejecuta.
+
+**Por qué recién ahora.** El punto 1 estuvo descartado un mes por decisión de Matías, y la razón era buena: el proxy era la única vía de relevamiento del ERP y cerrarlo obligaba a manejar la function key en cada consulta. Esa decisión se tomó **cuando Azure leía la copia de Tango (empresa 11)**. El 2026-09-15 pasó a leer la empresa 3, productivo, con `TANGO_PROXY_MODO=relevamiento` y `TANGO_PROXY_ESCRITURA=true` puestos: cualquiera con la URL podía crear, actualizar y borrar registros del ERP real. No cambió el análisis, cambió a qué base apunta.
+
+**Lo que hay que saber para usarlo:**
+
+- La URL con la clave se copia del portal: la función → "Obtener URL". Es la forma `...?code=<clave>`.
+- `lib/proxyTango` **saca el `code` de la query y lo manda como header `x-functions-key`**, para que la credencial no quede escrita en la URL de cada request ni en los logs de red. También lo toma de la opción `clave` o de `TANGO_PROXY_KEY`.
+- **Sin clave falla al armar el fetch**, antes de salir a la red. Un 401 de Azure se lee como un fallo de Tango y manda a buscar el problema al lado equivocado. Contra `localhost` no se exige: el runtime local no valida claves.
+- Rotar la clave desde el portal invalida las URLs viejas. Es la ventaja sobre el estado anterior: antes no había nada que rotar.
+
+⚠️ La clave **no reemplaza** a `lib/politicaProxy`, y por eso no se tocó. Son dos capas: quién puede entrar, y qué puede pedir el que entró. Y `TANGO_PROXY_ESCRITURA` no tiene por qué estar encendida apuntando a producción — los scripts con `--proxy` sólo leen.
+
+#### `lib/politicaProxy` — la contención, que sigue valiendo igual
+
+La autenticación dice quién entra, no qué puede pedir. Toda la contención de lo segundo vive en este módulo, que decide petición por petición si se reenvía y con qué parámetros:
 
 | Control | Regla |
 |---|---|
@@ -2577,7 +2592,7 @@ Los pasos 1 y 2 no hacen ninguna llamada de red: rechazar una petición falsa cu
 | Tema | Situación | Acción |
 |---|---|---|
 | Transporte a Tango | `http://` plano contra IP pública (`138.99.6.77:17000`), con la API key en el header `ApiAuthorization` | 🔴 **Sin resolver, y no lo resuelve el código.** La credencial del ERP y los datos de los 5.670 clientes viajan en claro por internet. El ERP no expone HTTPS: hay que pedírselo a Tango/Claro Cloud, o meter el tráfico en una VNet/VPN. **Es pregunta para el proveedor, no tarea de este repo.** |
-| Auth del proxy | `anonymous`, por decisión | ✅ Contenido por `lib/politicaProxy` (§10.0). No se cambia el `authLevel`. |
+| Auth del proxy | `function` desde el 2026-09-16 | ✅ Clave de función (§10.0.1) **y** `lib/politicaProxy` (§10.0). La clave va en el header `x-functions-key`, no en la URL. |
 | Secretos | `local.settings.json` local + Application Settings en Azure | ✅ `local.settings.json` está en `.gitignore` y nunca se commiteó (verificado 2026-08-25 contra el historial). 🟡 Falta cargar en Azure: `HUBSPOT_TOKEN`, `HUBSPOT_CLIENT_SECRET` y los dos `TANGO_PROXY_*`. |
 | Logs | El proxy loguea la API key enmascarada (✅) | ✅ El preview del body (hasta 300 bytes, trae CUIT/dirección/teléfono de una persona real) quedó atado al modo relevamiento. En cerrado sólo se loguea el tamaño. |
 
@@ -2644,7 +2659,8 @@ Modo : DRY-RUN (no escribe) — SYNC_DRY_RUN_CLIENTES sin definir y este circuit
 | `TANGO_NUMERACION` | `correlativo` \| `reservado` (§7.6, §7.8). ✅ Decidido el 2026-08-27: **`correlativo`**, y la decisión vive en `config/defaults.tango.json`. La variable sólo hace falta para pisarla sin desplegar. |
 | `HUBSPOT_CLIENT_SECRET` | Client secret de la app, para la firma v3 del webhook (§10.2). **No** es `HUBSPOT_TOKEN`. 🟡 Falta cargarlo. |
 | `TANGO_PROXY_MODO` | `cerrado` (default) \| `relevamiento`. Abre `process` fuera del catálogo y `filtroSql` en el proxy (§10.0). |
-| `TANGO_PROXY_ESCRITURA` | `true` habilita `Api/Create`/`Update`/`Delete` en el proxy. Default apagado (§10.0). |
+| `TANGO_PROXY_ESCRITURA` | `true` habilita `Api/Create`/`Update`/`Delete` en el proxy. Default apagado (§10.0). ⚠️ Apuntando a producción no hace falta: los scripts con `--proxy` sólo leen. |
+| `TANGO_PROXY_KEY` | Clave de función del proxy, para los scripts locales con `--proxy` (§10.0.1). Alternativa a pasarla en la URL como `?code=`. No va en Azure: es de la máquina que corre los scripts. |
 | `DEAL_TO_TANGO_ENABLED` | `true` activa el webhook de negocios ganados (§9). Apagado por defecto: desplegar y activar son dos decisiones distintas. El freno está en la puerta — apagado, no se encola nada (§9.5). |
 | `DEAL_COLA_NOMBRE` | Nombre de la cola de negocios ganados. Default `deals-ganados` (§9.5). El webhook y el worker leen el mismo: si se cambia, se cambia para los dos, o el hook encola en una cola que nadie escucha. |
 | `AzureWebJobsStorage` | Storage de la Function App. Obligatorio en Consumption, y desde el 2026-08-26 también es donde vive la cola (§9.5). |

@@ -10,6 +10,9 @@
  *   node scripts/ensayoNegocios.js --proxy <url> --todos        # el portal entero
  *   node scripts/ensayoNegocios.js --proxy <url> --deal 60784008538
  *
+ * ⚠️ Desde el 2026-09-16 el proxy pide clave (§10.0.1): la URL va con su
+ * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY en el entorno.
+ *
  * Por que existe (pedido de Matias, 2026-09-02): antes de abrir la canilla de
  * webhooks con `hs project upload` hay que saber que negocio saldria bien y cual
  * no, y sobre todo hay que poder mirarlo **solo sobre los negocios propios**,
