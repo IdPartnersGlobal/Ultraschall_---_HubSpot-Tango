@@ -8,6 +8,7 @@ const verificarEmpresa = require('./verificarEmpresa');
 const vinculoCliente = require('./vinculoCliente');
 const notaProblema = require('./notaProblema');
 const soloOwner = require('./soloOwner');
+const dryRun = require('./dryRun');
 const rechazoTango = require('./rechazoTango');
 const { silencioso } = require('./logger');
 const procesos = require('../../config/tango.processes.json');
@@ -698,7 +699,10 @@ function leerConfig(env = process.env) {
         // `correlativo` el 2026-08-27 y la decision vive en el catalogo, que
         // esta versionado. El entorno la puede pisar sin desplegar (§7.6).
         TANGO_NUMERACION: env.TANGO_NUMERACION || defaults.clientes.numeracion.estrategia,
-        DRY_RUN: String(env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false',
+        // SYNC_DRY_RUN_NEGOCIOS manda; sin ella hereda SYNC_DRY_RUN, que es
+        // como esta desplegado hoy (src/lib/dryRun.js).
+        DRY_RUN: dryRun.leer('negocios', env),
+        MODO: dryRun.descripcion('negocios', env),
         // El freno de las pruebas. Vacio = todos los negocios, que es el estado
         // final; puesto = solo los de esos owners (lib/soloOwner). Lo lee el
         // WORKER y no el webhook: el evento de HubSpot no trae el owner, asi

@@ -48,7 +48,8 @@ const log = {
 
 (async () => {
     const env = { ...cargarConfigLocal(), ...process.env };
-    if (process.argv.includes('--escribir')) env.SYNC_DRY_RUN = 'false';
+    // La propia, no la global: la global tambien prende clientes y negocios.
+    if (process.argv.includes('--escribir')) env.SYNC_DRY_RUN_PRODUCTOS = 'false';
 
     // --solo ART-001[,ART-002]: limita la corrida. Es lo que se usa para la
     // primera prueba contra el ERP, con UN articulo.
@@ -69,7 +70,7 @@ const log = {
         'Articulos': config.SOLO_CODIGOS.length ? config.SOLO_CODIGOS.join(', ') : 'TODOS',
         'Perfiles que se publican': config.PERFILES.length ? config.PERFILES.join(', ') : 'todos',
         'Lista de precios': config.LISTA_PRECIOS ?? '(apagada)',
-        'Modo': config.DRY_RUN ? 'DRY-RUN (no escribe)' : '*** ESCRITURA REAL ***',
+        'Modo': config.MODO,
     });
 
     const tango = urlProxy

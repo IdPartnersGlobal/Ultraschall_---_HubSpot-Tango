@@ -4,6 +4,7 @@ const tangoClient = require('./tangoClient');
 const hubspotClient = require('./hubspotClient');
 const mapper = require('./mapper');
 const preciosArticulo = require('./preciosArticulo');
+const dryRun = require('./dryRun');
 const procesos = require('../../config/tango.processes.json');
 const mapeoProductos = require('../../config/mapeo.productos.json');
 const defaults = require('../../config/defaults.tango.json');
@@ -283,7 +284,7 @@ async function correr({ config, log, dryRun = true, tango: tangoInyectado = null
 
     // 5. Escribir (o no).
     if (dryRun) {
-        log.aviso('DRY-RUN', `SYNC_DRY_RUN activo: no se escribe nada. Se habrian escrito ${aEscribir.length} products.`);
+        log.aviso('DRY-RUN', `${config.MODO || 'dry-run'}: no se escribe nada. Se habrian escrito ${aEscribir.length} products.`);
     } else if (aEscribir.length) {
         log.paso('HUBSPOT', `escribiendo ${aEscribir.length} products...`);
         const r = await hs.batchUpsert('products', claveHs, aEscribir);
@@ -310,7 +311,9 @@ function leerConfig(env = process.env) {
         TANGO_COMPANY: env.TANGO_COMPANY || '1',
         HUBSPOT_TOKEN: env.HUBSPOT_TOKEN,
         SOLO_CODIGOS: leerSoloCodigos(env.SYNC_PRODUCTOS_SOLO),
-        DRY_RUN: String(env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false',
+        // SYNC_DRY_RUN_PRODUCTOS manda; sin ella hereda SYNC_DRY_RUN (src/lib/dryRun.js).
+        DRY_RUN: dryRun.leer('productos', env),
+        MODO: dryRun.descripcion('productos', env),
         // De que lista salen los precios. Vive versionada en defaults y el
         // entorno solo la pisa: cambiar de lista es una decision, no una
         // variable que alguien toca en Azure sin dejar rastro.

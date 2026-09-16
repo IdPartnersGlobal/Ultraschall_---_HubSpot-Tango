@@ -44,7 +44,7 @@ async function handler(_timer, context) {
             'Empresa': config.TANGO_COMPANY,
             'HubSpot token': logger.enmascarar(config.HUBSPOT_TOKEN),
             'Articulos': config.SOLO_CODIGOS.length ? config.SOLO_CODIGOS.join(', ') : 'TODOS',
-            'Modo': config.DRY_RUN ? 'DRY-RUN (no escribe)' : 'ESCRITURA REAL',
+            'Modo': config.MODO,
         });
 
         const r = await sync.correr({ config, log, dryRun: config.DRY_RUN });

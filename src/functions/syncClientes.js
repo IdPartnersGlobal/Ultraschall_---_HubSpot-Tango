@@ -12,7 +12,10 @@ const sync = require('../lib/syncClientes');
  * functionTimeout a 10 min, el maximo del plan Consumption.
  *
  * Horario por SYNC_CLIENTES_CRON. Default: 03:00 (hora del server).
- * Escribe solo si SYNC_DRY_RUN=false; cualquier otro valor deja el dry-run.
+ * Escribe solo si SYNC_DRY_RUN_CLIENTES=false; cualquier otro valor deja el
+ * dry-run. Este circuito NO hereda la global SYNC_DRY_RUN: en Azure esta en
+ * `false` por el circuito de negocios, y encender el sync de empresas tiene
+ * que ser una decision propia (src/lib/dryRun.js).
  */
 
 const CRON = process.env.SYNC_CLIENTES_CRON || '0 0 3 * * *';
@@ -44,7 +47,7 @@ async function handler(_timer, context) {
             'Tango key': logger.enmascarar(config.TANGO_API_KEY),
             'Empresa': config.TANGO_COMPANY,
             'HubSpot token': logger.enmascarar(config.HUBSPOT_TOKEN),
-            'Modo': config.DRY_RUN ? 'DRY-RUN (no escribe)' : 'ESCRITURA REAL',
+            'Modo': config.MODO,
         });
 
         const r = await sync.correr({ config, log, dryRun: config.DRY_RUN });
@@ -53,15 +56,20 @@ async function handler(_timer, context) {
             'leidos de Tango': r.leidosTango,
             'companies en HubSpot': r.enHubSpot,
             'a crear': r.aCrear,
+            'a vincular (importadas)': r.aVincular,
             'a actualizar': r.aActualizar,
             'sin cambios': r.sinCambios,
-            'campos respetados (migracion manual)': r.respetados,
+            'etiquetas cambiadas': r.etiquetasCambiadas,
+            'estados': JSON.stringify(r.estados),
+            'conflictos': r.conflictos.length,
+            'campos respetados (lo cargado en HubSpot)': r.respetados,
             'escritos': r.dryRun ? '(dry-run)' : r.escritos,
             'con problemas de mapeo': r.problemas.length,
             'fallidos': r.fallidos.length,
         });
 
         // Un registro que falla no corta la corrida: se reporta al final.
+        for (const c of r.conflictos.slice(0, 20)) log.aviso('CONFLICTO', `${c.codigo}: ${c.tipo} (${c.empresas.join(', ')})`);
         for (const p of r.problemas.slice(0, 20)) log.aviso('MAPEO', p);
         if (r.problemas.length > 20) log.aviso('MAPEO', `... y ${r.problemas.length - 20} mas`);
         for (const f of r.fallidos.slice(0, 20)) log.error('ESCRITURA', JSON.stringify(f));

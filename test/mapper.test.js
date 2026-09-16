@@ -473,9 +473,25 @@ test('name deja de ser autoritativo: no pisa la limpieza manual', () => {
 test('la clave y los IDs internos SI son autoritativos', () => {
     // Estos los manda Tango siempre: no tiene sentido "respetar" un valor viejo.
     const auth = mapper.camposAutoritativos();
-    for (const p of ['codigo_tango', 'tango_id_gva14', 'razon_social', 'tango_sync_hash']) {
+    for (const p of ['tango_codigo_cliente', 'tango_id_gva14', 'tango_sync_hash', 'tango_estado', 'tango_estado_detalle']) {
         assert.ok(auth.includes(p), `${p} deberia ser autoritativo`);
     }
+});
+
+test('lo que cargo la importacion o comercial NO lo pisa Tango (§7.15)', () => {
+    // Matias 2026-09-15: "Tango no tendria que pisar lo que cargaron realmente".
+    const respeta = mapper.camposNoAutoritativos();
+    for (const p of ['codigo_tango', 'razon_social', 'cuit', 'condicion_iva', 'tango_condicion_venta', 'tipo_de_documento', 'tango_mails_comprobantes']) {
+        assert.ok(respeta.includes(p), `${p} lo cargan personas: no se pisa`);
+    }
+});
+
+test('la unica excepcion: el ID de categoria de IVA lo corrige Tango (§7.15)', () => {
+    // La importacion le puso los codigos de la planilla (0=RI, 1=CF, 3=RS),
+    // que no son los IDs de Tango (1=RI, 2=CF, 4=RS): 95% distintos. En la
+    // planilla el 1 es Consumidor Final y en Tango el ID 1 es Responsable
+    // Inscripto. Si alguien lo pasa a "no pisar", queda mal para siempre.
+    assert.ok(mapper.camposAutoritativos().includes('tango_id_categoria_iva'));
 });
 
 // ---------------------------------------------------------------- domain

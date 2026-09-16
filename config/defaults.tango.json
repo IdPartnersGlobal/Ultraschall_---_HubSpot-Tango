@@ -8,6 +8,16 @@
   "clientes": {
     "process": 2117,
     "endpoint": "Api/Create",
+    "sync": {
+      "_nota": "El sync de empresas (Fase 2), ARQUITECTURA 7.15. Va al lado de `defaults` y nunca adentro: `clientes.defaults` se copia tal cual al payload del alta.",
+      "empresaProductiva": "3",
+      "porQueEmpresaProductiva": "DECISION DE MATIAS 2026-09-15. El portal de HubSpot es el real, asi que el sync solo ESCRIBE si TANGO_COMPANY es la empresa 3 (productivo de Ultraschall). La 11 es una copia que termina el 2026-07-02: sincronizar desde ahi llevaria datos viejos al portal y etiquetaria como 'no existe' a clientes que en produccion existen. En dry-run corre contra cualquiera.",
+      "basura": {
+        "palabras": ["BORRAR", "NO USAR", "ANULADO", "REPETIDO", "DAR DE BAJA", "PRUEBA"],
+        "porQue": "DECISION DE MATIAS 2026-09-15: los clientes basura de Tango se crean igual en HubSpot, etiquetados 'Marcada para borrar en Tango', y decide la gente. Se reconocen por PALABRA ENTERA en la razon social o el nombre de fantasia. Medido sobre produccion (5.803 clientes): 10. Buscar por fragmento ('test', 'baja') agarraba a Testa, Contestin, Bajamich, Carabajal y Global Testing.",
+        "noSeUsaHabilitado": "HABILITADO=false son 10 clientes y solo 3 tienen nombre de basura: inhabilitado no es lo mismo que basura, y ya se ve en tango_habilitado."
+      }
+    },
     "numeracion": {
       "_nota": "DECISION DE MATIAS 2026-08-27, despues de meses pendiente de administracion (7.6). Tango NO autoasigna el COD_GVA14: lo elige la integracion, del mismo espacio de numeros que usan las personas.",
       "estrategia": "correlativo",

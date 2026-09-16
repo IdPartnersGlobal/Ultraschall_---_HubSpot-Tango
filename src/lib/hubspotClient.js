@@ -201,6 +201,40 @@ function crear({ token, log = silencioso, fetchImpl = fetch } = {}) {
         },
 
         /**
+         * Update por ID de HubSpot. Parte en tandas de 100.
+         *
+         * Existe para lo que el upsert no puede: escribirle la clave a una
+         * company que TODAVIA no la tiene. Un upsert por `tango_codigo_cliente`
+         * no la encontraria y crearia otra (§7.15, las importadas).
+         *
+         * @param {Array<{id:string, properties:object}>} registros
+         * @returns {{ procesados, fallidos: Array }}
+         */
+        async batchUpdate(objeto, registros) {
+            let procesados = 0;
+            const fallidos = [];
+            const tandas = trozos(registros, TAM_BATCH);
+
+            for (const [i, tanda] of tandas.entries()) {
+                try {
+                    const d = await pedir(`/crm/v3/objects/${objeto}/batch/update`, {
+                        metodo: 'POST',
+                        body: { inputs: tanda.map((r) => ({ id: String(r.id), properties: r.properties })) },
+                    });
+                    procesados += (d.results || []).length;
+                    for (const e of d.errors || []) fallidos.push({ tanda: i + 1, error: e.message || JSON.stringify(e) });
+                    log.paso('HS-UPDATE', `tanda ${i + 1}/${tandas.length}: ${(d.results || []).length} registros`);
+                } catch (e) {
+                    // Mismo criterio que el upsert: una tanda que falla no corta la corrida.
+                    log.error('HS-UPDATE', `tanda ${i + 1}/${tandas.length} fallo: ${e.message}`);
+                    for (const r of tanda) fallidos.push({ id: r.id, error: e.message });
+                    if (e instanceof HubSpotError && e.esFaltaDeScope) throw e;
+                }
+            }
+            return { procesados, fallidos };
+        },
+
+        /**
          * Un registro puntual, por su ID de HubSpot. Devuelve null si no existe.
          *
          * Lo usa la escritura de vuelta del alta (lib/altaCliente): antes de

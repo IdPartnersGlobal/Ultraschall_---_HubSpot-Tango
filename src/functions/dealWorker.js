@@ -121,7 +121,7 @@ app.storageQueue('dealWorker', {
             'estado': resultado.estado,
             'pedido': resultado.nroPedido || '—',
             'motivo': resultado.motivo || '—',
-            'modo': config.DRY_RUN ? 'DRY-RUN' : 'ESCRITURA REAL',
+            'modo': config.MODO,
         });
         log.fin(resultado.estado);
     },

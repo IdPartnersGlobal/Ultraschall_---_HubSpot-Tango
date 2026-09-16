@@ -48,6 +48,11 @@ function leerToken() {
     const entidad = process.argv[2];
     const aplicar = process.argv.includes('--aplicar');
     const quitarSobrantes = process.argv.includes('--quitar-sobrantes');
+    // Solo CREA lo que falta: no parchea ni convierte nada. Existe desde el
+    // 2026-09-15 porque en companies el plan quiere mover de grupo y sacarle
+    // los tildes a 8 propiedades que Ultraschall configuro asi a proposito
+    // ("Razón Social" en Informacion de la empresa). Aplicar todo se lo deshacia.
+    const soloCrear = process.argv.includes('--solo-crear');
     const def = ENTIDADES[entidad];
     if (!def) {
         console.error(`Uso: node scripts/crearPropiedades.js <${Object.keys(ENTIDADES).join('|')}> [--aplicar]`);
@@ -120,7 +125,10 @@ function leerToken() {
     }
     // Parchear y convertir son los dos un PATCH a la misma ruta: la diferencia
     // esta en que manda cada uno, no en como se aplica.
-    for (const p of [...plan.aParchear, ...plan.aConvertir]) {
+    if (soloCrear && (plan.aParchear.length || plan.aConvertir.length)) {
+        console.log(`   (--solo-crear) no se tocan ${plan.aParchear.length + plan.aConvertir.length} propiedades a parchear o convertir`);
+    }
+    for (const p of soloCrear ? [] : [...plan.aParchear, ...plan.aConvertir]) {
         try {
             await hs.actualizarPropiedad(def.objeto, p.name, p.cambios);
             ok++;
@@ -172,7 +180,7 @@ function leerToken() {
     // El total tiene que incluir las sobrantes cuando se piden: sin eso la
     // corrida que SOLO quita opciones termina diciendo "aplicados: 1/0", que
     // se lee como un error y es exactamente lo contrario.
-    const total = plan.aCrear.length + plan.aParchear.length + plan.aConvertir.length
+    const total = plan.aCrear.length + (soloCrear ? 0 : plan.aParchear.length + plan.aConvertir.length)
         + (quitarSobrantes ? plan.sobrantes.length : 0);
     console.log(`
 aplicados: ${ok}/${total}`);

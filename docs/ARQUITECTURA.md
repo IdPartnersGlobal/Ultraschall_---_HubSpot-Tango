@@ -1165,7 +1165,79 @@ Calibración: contra su propio código confirma 5.660 y rechaza 13 (los 13 revis
 
 #### Lo que NO se hizo, a propósito
 
-**El sync de empresas no se tocó** (Matías, 2026-09-15: *"con el sync no hay que avanzar"*). Si la Fase 2 corriera hoy, no reconocería las 5.660 por su clave y crearía ~5.670 empresas duplicadas. La vinculación masiva queda pendiente; la de este apartado es **por negocio**, cuando se gana.
+**El sync de empresas no se tocó** (Matías, 2026-09-15: *"con el sync no hay que avanzar"*). Si la Fase 2 corriera hoy, no reconocería las 5.660 por su clave y crearía ~5.670 empresas duplicadas. La vinculación masiva queda pendiente; la de este apartado es **por negocio**, cuando se gana. → Se retomó el mismo día: §7.15.
+
+### 7.15 El sync de empresas después de la importación (2026-09-15)
+
+Con el circuito de negocios ya subido (`be0987b`), Matías pidió charlar el sync. Las cinco decisiones, todas suyas:
+
+| # | decisión |
+|---|---|
+| 1 | El sync **vincula las importadas en cada corrida**, no con un script de una vez: se arregla solo si vuelven a importar |
+| 2 | Sólo **escribe contra la empresa 3** (productivo). Azure se pasó a la 3 ese mismo día |
+| 3 | Lo que no cierra **se etiqueta** en la empresa |
+| 4 | **Tango no pisa lo que se cargó en HubSpot**: *"Ultra está de acuerdo con lo que se cargó"* |
+| 5 | Los clientes basura se **crean igual, etiquetados**, y decide la gente |
+
+#### Contra producción (5.803 clientes, leído el 2026-09-15)
+
+| | empresas |
+|---|---|
+| se vinculan | **5.742** |
+| el código no existe en Tango | 1.829 |
+| el código es de otro cliente | 13 |
+| dos fichas para el mismo cliente | 2 |
+| clientes sin ninguna ficha, que se crean | 55 — 50 dados de alta en agosto y septiembre, después de la importación |
+| basura por nombre | 10 |
+
+⚠️ **Al pasar a productivo, la empresa de prueba quedó apuntando a un cliente real.** Tenía `tango_codigo_cliente 007611` y `tango_id_gva14 6424` de la copia; en producción el `007611` es la Fundación y el ID `6424` es `007669` Friscione Julieta Belen. Como tenía ID interno, el circuito no la verificaba: un negocio de prueba ganado le mandaba el pedido a Friscione. **Se le vaciaron esos tres valores** (con OK de Matías; valores anteriores guardados). Por eso el sync ahora verifica la identidad **también de las ya vinculadas**.
+
+#### Cómo decide (`syncClientes.planificar`, pura)
+
+| la empresa | caso | qué pasa | `tango_estado` |
+|---|---|---|---|
+| tiene la clave | es su cliente | se actualiza si cambió el hash | vinculada / marcada para borrar |
+| tiene la clave | **no es** su cliente | **no se pisa nada** | código de otro cliente |
+| sin clave, con `codigo_tango` | es la única que es | **se vincula por ID** (`batchUpdate`) | vinculada / marcada para borrar |
+| sin clave | hay más de una que es, u otra ya vinculada | no se vincula | ficha duplicada |
+| sin clave | no es ese cliente | no se toca, y **el cliente no se crea encima** | código de otro cliente |
+| cualquiera | el código no existe | no se toca | no existe |
+| sin código | prospecto | nada; si tenía estado, se limpia | — |
+
+"Es su cliente" es `vinculoCliente.comparar` (§7.14): documento, y sin documento, las mismas palabras del nombre. El código se busca tal cual.
+
+La vinculación va **por ID** y no por el upsert: un `batch/upsert` por `tango_codigo_cliente` no encuentra a una empresa que todavía no tiene la clave, y crea otra.
+
+`tango_estado_detalle` dice por qué, para comercial: *"En Tango el 000109 es «CSE NET S.R.L», CUIT 30-71610011-8."*
+
+#### Qué no se pisa
+
+Pasaron a `autoritativoTango: false` los campos que la importación llenó o que carga comercial: `codigo_tango`, `razon_social`, `cuit`, `tango_mails_comprobantes`, `tango_condicion_venta`, `tipo_de_documento`, `condicion_iva`. Medido en los 5.659 pares confirmados, donde lo importado difiere de Tango, lo importado es mejor: mails de comprobantes 30% (Tango agrega los internos de Ultraschall), teléfono 23% (números pegados), localidad 11% (Tango corta a 20).
+
+**La única excepción: `tango_id_categoria_iva` lo corrige Tango.** La importación le puso la columna "Tipo IVA" de la planilla, que tiene otra codificación, verificada tres veces:
+
+1. Cruce: `0`→RI 2.790 de 2.794 · `1`→CF 989 de 996 · `3`→RS 1.533 de 1.538 · `5`→EX 309 de 310 · `2`→EXE 21 de 21. Los IDs de Tango son 1, 2, 4, 5 y 9 (§7.7).
+2. En la planilla esa columna tenía como destino "Condición IVA".
+3. El historial de HubSpot: la escribió `IMPORT` el 2026-09-03 14:21, y `condicion_iva` nunca tuvo valor.
+
+`condicion_iva` está vacía en todas, así que Tango la completa: pasa de 4 empresas a ~5.740.
+
+#### Basura
+
+Por **palabra entera** en razón social o nombre de fantasía: `BORRAR`, `NO USAR`, `ANULADO`, `REPETIDO`, `DAR DE BAJA`, `PRUEBA` (`defaults.tango.json → clientes.sync.basura`). Por fragmento se llevaba a Testa, Contestin, Bajamich, Carabajal y Global Testing. `HABILITADO=false` no cuenta: son 10 y sólo 3 tienen nombre de basura.
+
+#### Lo que se encontró en el camino
+
+- **`TANGO_COMPANY` caía en `'1'`** si faltaba. En el sync ya no tiene default: sin la variable no arranca, y escribiendo exige la 3.
+- **`crearPropiedades --aplicar` deshacía la configuración de Ultraschall**: quiere mover al grupo `tango_erp` y sacarle los tildes a 8 propiedades ("Razón Social" en Información de la empresa, desde el 31/7; lo empezó a detectar §9.24). Se agregó **`--solo-crear`**.
+- **`cuit` es texto en el portal desde el 2026-09-02** (otro usuario, etiqueta "CUIT/DNI"). El mapeo seguía en number, y el plan la marcaba REHACER sugiriendo `repararPropiedades.js`, que **borra** la propiedad con sus 41.000 valores. El mapeo se adaptó al portal; el formato que se escribe no cambió.
+- Con `--proxy` el script **no escribe**: la empresa la pone Azure y desde local no se puede verificar.
+
+#### Pendiente
+
+- **Crear las dos propiedades** (`crearPropiedades.js clientes --solo-crear --aplicar`) antes de la primera corrida real, o HubSpot rechaza las tandas con `tango_estado`.
+- **La primera corrida real**: ✅ el dry-run global se separó por circuito el 2026-09-16 (§11.1) — el sync de empresas ahora se enciende solo, con `SYNC_DRY_RUN_CLIENTES=false`. Queda que el timer tiene ~6 min de lectura antes de escribir, con un límite de 10.
+- Las tablas estáticas del catálogo (categorías de IVA, listas, depósitos, talonarios) se verificaron contra la **copia**. Antes de pedidos reales en producción, reverificarlas contra la 3.
 
 ---
 
@@ -1334,7 +1406,7 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 | ✅ ~~Riesgo 5 — el hook tiene que responder rápido~~ **Resuelto el 2026-08-26**: contesta `202` y encola (§9.5) | — |
 | 🔴 **De las 66 companies del portal, 65 no se pueden dar de alta en Tango** (medido 2026-08-27 con `verificarEmpresa`): falta `razon_social` en 64, `condicion_iva` en 64, `domicilio_del_consultorio` en 64 y `cuit` en 62. Es carga de datos, no código. Rodeado con una company de prueba (§7.13) para no quedar bloqueados | Comercial |
 | 🟡 `hs project upload` para que el webhook apunte de verdad a la Function App. El `targetUrl` ya es el correcto (verificado 2026-08-27) | Matías |
-| 🟡 `DEAL_TO_TANGO_ENABLED=true` y `SYNC_DRY_RUN=false` en Azure. Ambos apagados por defecto | Matías |
+| ✅ ~~`DEAL_TO_TANGO_ENABLED=true` y `SYNC_DRY_RUN=false` en Azure~~ **Puestos** (así salió el primer pedido real el 2026-09-02). ⚠️ Desde el 2026-09-16 el modo se decide por circuito (§11.1): `SYNC_DRY_RUN=false` ya no enciende el sync de empresas | — |
 
 ### 9.5 Riesgo 5 — contestar rápido: la cola (construido 2026-08-26)
 
@@ -2520,6 +2592,41 @@ Los pasos 1 y 2 no hacen ninguna llamada de red: rechazar una petición falsa cu
 
 Deploy: push a `main` → GitHub Actions → Azure.
 
+### 11.1 Un dry-run por circuito (2026-09-16)
+
+**El problema.** Había una sola variable, `SYNC_DRY_RUN`, y la leían los tres circuitos: empresas, productos y negocios. En Azure está en `false` desde el 2026-09-02 — así salió el primer pedido real (§9.16). Es decir que el día que se prendiera `SYNC_CLIENTES_ENABLED`, el sync de empresas arrancaba **escribiendo 5.742 companies del portal real**, sin que nadie hubiera tomado esa decisión: la tomó otra variable, para otro circuito, dos semanas antes.
+
+Y al revés era igual de malo: poner `SYNC_DRY_RUN=true` para ensayar empresas **apagaba en silencio el circuito de negocios**, que está en producción. Un negocio movido a "Cierre ganado" no emitiría pedido y nada fallaría: el log diría "dry-run" y listo.
+
+Encender un circuito ya era una decisión propia (`SYNC_CLIENTES_ENABLED`, `SYNC_PRODUCTOS_ENABLED`, `DEAL_TO_TANGO_ENABLED`); que escriba, no.
+
+**Cómo quedó.** `src/lib/dryRun.js` resuelve el modo por circuito:
+
+| Circuito | Variable | Si no está |
+|---|---|---|
+| Empresas (Fase 2) | `SYNC_DRY_RUN_CLIENTES` | **dry-run**. No hereda: ver abajo |
+| Productos (Fase 1) | `SYNC_DRY_RUN_PRODUCTOS` | hereda `SYNC_DRY_RUN` |
+| Negocios (Fase 4) | `SYNC_DRY_RUN_NEGOCIOS` | hereda `SYNC_DRY_RUN` |
+
+En todos los casos **sólo un `false` explícito escribe**: vacío, `no`, `falso` o un typo dejan el dry-run. Heredar es lo que hace que desplegar esto no cambie nada de lo que hoy funciona — los negocios siguen escribiendo igual que antes.
+
+**La excepción, a propósito.** `clientes` no hereda. A un circuito que ya corre, heredar le sirve; a uno que **nunca corrió en serio** le sirve lo contrario: que nadie lo encienda sin nombrarlo. Sin `SYNC_DRY_RUN_CLIENTES` el sync corre, lee, calcula todo y no escribe, y el log dice qué le falta. Es una marca de "todavía no es rutina" —un `exigePropia: true` en la tabla de `dryRun.js`—, no una regla permanente: el día que sea una corrida más, se le saca y pasa a heredar como los otros dos.
+
+**El log de arranque dice de dónde salió el modo**, no sólo cuál es:
+
+```
+Modo : *** ESCRITURA REAL *** (heredado de SYNC_DRY_RUN=false, que tambien gobierna
+       los otros circuitos; para decidirlo aca, SYNC_DRY_RUN_PRODUCTOS)
+Modo : DRY-RUN (no escribe) — SYNC_DRY_RUN_CLIENTES sin definir y este circuito NO
+       hereda de SYNC_DRY_RUN: para escribir hay que ponerla en 'false'
+```
+
+"Dry-run" a secas no distingue entre lo que uno pidió y lo que le impuso el circuito de al lado; el modo más peligroso —el que nadie eligió para *este* circuito— era el que menos se notaba.
+
+`scripts/syncClientes.js --escribir` y `scripts/syncProductos.js --escribir` ponen la variable **propia** de esa corrida, no la global.
+
+⚠️ **Para la primera corrida real del sync de empresas**: `SYNC_CLIENTES_ENABLED=true` **y** `SYNC_DRY_RUN_CLIENTES=false`. Con la primera sola, corre y no escribe.
+
 🟡 **PENDIENTE:** ¿hay portal sandbox de HubSpot y/o empresa de prueba en Tango para no escribir sobre producción durante el desarrollo?
 
 ### Variables de entorno
@@ -2530,7 +2637,10 @@ Deploy: push a `main` → GitHub Actions → Azure.
 | `TANGO_API_KEY` | Valor del header `ApiAuthorization` (corregir D1) |
 | `TANGO_COMPANY` | Código de empresa, default `1` |
 | `HUBSPOT_TOKEN` | Private app token 🟡 a crear |
-| `SYNC_DRY_RUN` | `true` = calcula y loguea pero no escribe en HubSpot |
+| `SYNC_DRY_RUN` | Lo que hereda el circuito que no tenga la suya (§11.1). `true` = calcula y loguea pero no escribe. Hoy en Azure: `false`, puesta por el circuito de negocios |
+| `SYNC_DRY_RUN_CLIENTES` | El modo del sync de empresas. **No hereda `SYNC_DRY_RUN`**: sin ella el sync corre en dry-run aunque la global diga `false` (§11.1) |
+| `SYNC_DRY_RUN_PRODUCTOS` | El modo del sync de productos. Sin ella hereda `SYNC_DRY_RUN` |
+| `SYNC_DRY_RUN_NEGOCIOS` | El modo del circuito de negocios. Sin ella hereda `SYNC_DRY_RUN`, que es como está desplegado hoy |
 | `TANGO_NUMERACION` | `correlativo` \| `reservado` (§7.6, §7.8). ✅ Decidido el 2026-08-27: **`correlativo`**, y la decisión vive en `config/defaults.tango.json`. La variable sólo hace falta para pisarla sin desplegar. |
 | `HUBSPOT_CLIENT_SECRET` | Client secret de la app, para la firma v3 del webhook (§10.2). **No** es `HUBSPOT_TOKEN`. 🟡 Falta cargarlo. |
 | `TANGO_PROXY_MODO` | `cerrado` (default) \| `relevamiento`. Abre `process` fuera del catálogo y `filtroSql` en el proxy (§10.0). |
@@ -2590,6 +2700,7 @@ Para cerrar el diseño y empezar a codear, en orden de importancia:
 | `config/mapeo.pedidos.json` | Propiedades de Deal donde se guarda el resultado de mandar el negocio al ERP (§9). |
 | `src/lib/dealToTango.js` | El circuito de la Fase 4. |
 | `src/lib/cola.js` | La cola entre el webhook y el trabajo (§9.5): nombre y forma del mensaje. |
+| `src/lib/dryRun.js` | Quién decide si cada circuito escribe o sólo calcula (§11.1). Una variable por circuito; el default es no escribir. |
 | `src/lib/verificarPedido.js` | Verificación del pedido, armado del payload y el artículo de prueba (§9.6). |
 | `docs/payloads/cliente-create.json` | Payload de alta de cliente (`process=2117`). |
 | `docs/payloads/producto-create.json` | Payload de alta de artículo (`process=87`). |

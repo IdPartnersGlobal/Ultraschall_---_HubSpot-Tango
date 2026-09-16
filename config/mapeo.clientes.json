@@ -29,7 +29,8 @@
       "porcentajeCarga": "% de registros con dato, medido sobre los 5670 clientes reales (2026-08-14).",
       "lookup": "Si un campo declara `lookup`, su valor es un CODIGO de Tango que se traduce al ID interno contra esa tabla auxiliar. Nunca copiar el codigo tal cual: ver ARQUITECTURA.md §5.4.",
       "lookupPendiente": "Como `lookup`, pero todavia no se consiguio el `process` de la tabla. El campo guarda el codigo sin resolver y NO se puede usar para escribir en Tango.",
-      "direccion": "tango->hubspot en todo el maestro de clientes (Fases 1 y 2). La direccion inversa es la Fase 4 (Deal ganado -> pedido), que usa config/defaults.tango.json y los IDs resueltos por lookups."
+      "direccion": "tango->hubspot en todo el maestro de clientes (Fases 1 y 2). La direccion inversa es la Fase 4 (Deal ganado -> pedido), que usa config/defaults.tango.json y los IDs resueltos por lookups.",
+      "noPisarLoCargado": "DECISION DE MATIAS 2026-09-15 (ARQUITECTURA 7.15): \"Tango no tendria que pisar lo que cargaron realmente, Ultra esta de acuerdo con lo que se cargo en HubSpot\". Pasaron a autoritativoTango:false los campos que la importacion del 2026-09-03 lleno o que comercial carga: codigo_tango, razon_social, cuit, tango_mails_comprobantes, tango_condicion_venta, tipo_de_documento, condicion_iva. Siguen en true los IDs y espejos del ERP que nadie carga. UNICA EXCEPCION a proposito: tango_id_categoria_iva. La importacion le puso los codigos de la columna \"Tipo IVA\" de la planilla (0=RI, 1=CF, 2=EXE, 3=RS, 5=EX), que NO son los IDs de Tango (1=RI, 2=CF, 4=RS, 5=EX, 9=EXE): 95% distintos sobre 5.659 pares confirmados. Tango lo corrige."
     },
     "fuente": {
       "planilla": "config/Ultraschall - Tablero de informacion HubSpot - Empresas TANGO.csv",
@@ -61,7 +62,7 @@
       "hsFieldType": "text",
       "porcentajeCarga": 100,
       "unique": false,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "notas": "El codigo de Tango como lo ve la gente. Nombre segun la planilla de Ultraschall (6.0). DEJO DE SER LA CLAVE el 2026-08-27: la propiedad existente en el portal no es unique y no se borra para recrearla, asi que la clave del upsert se mudo a `tango_codigo_cliente`. Se sigue escribiendo con el mismo valor. `unique: false` aca es para que `lib/propiedades` no la siga reportando como 'a rehacer': la propiedad esta como esta y asi se queda.",
       "direccion": "tango->hubspot"
     },
@@ -95,7 +96,7 @@
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "notas": "Nombre legal. Obligatorio en Tango. Antes se mapeaba a name; la planilla lo separa.",
       "direccion": "tango->hubspot"
     },
@@ -114,14 +115,15 @@
       "tango": "CUIT",
       "hubspot": "cuit",
       "label": "CUIT",
-      "tipo": "number",
-      "hsFieldType": "number",
+      "tipo": "string",
+      "hsFieldType": "text",
       "porcentajeCarga": 100,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "transform": "documentoSoloDigitos",
       "notas": "DECISION 2026-08-27 (Matias): se escriben SOLO DIGITOS, sin guiones, porque la propiedad del portal es `number` y no se borra para recrearla como texto (7.2). Revierte la parte de formato de la decision del 2026-08-18; lo que NO cambia es que Tango exige los guiones en el alta, asi que se los vuelve a poner `lib/documento.formatear` en la ida (verificarEmpresa, resolucion 'documento'). Guardar y mandar dejan de tener el mismo formato: es el precio de no borrar la propiedad. No siempre es un CUIT: segun ID_TIPO_DOCUMENTO_GV puede traer DNI o CUIL. NO sirve como clave: 142 valores se repiten en 267 clientes, y no son sucursales sino placeholders (11111111 lo usan 44 clientes) e instituciones grandes con varias cuentas.",
       "ojo": "Un documento con cero adelante no sobrevive a un campo numerico. El transform NO lo trunca: omite la propiedad y lo reporta. Medido el 2026-08-27 sobre los 300 de la muestra: 0 casos.",
-      "direccion": "tango->hubspot"
+      "direccion": "tango->hubspot",
+      "portalCambio": "MEDIDO 2026-09-15: en el portal la propiedad ya NO es number. La paso a string/text con la etiqueta \"CUIT/DNI\" otro usuario del portal el 2026-09-02, antes de la importacion. El mapeo se adapta al portal, como siempre (7.2): sin esto `crearPropiedades` la marcaba REHACER y sugeria `repararPropiedades.js`, que BORRA la propiedad con sus 41.000 valores. El transform sigue en solo digitos: cambiar el formato que se escribe es otra decision, y desde 7.15 el sync solo lo escribe si esta vacio."
     },
     {
       "tango": "E_MAIL",
@@ -141,7 +143,7 @@
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 82,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "notas": "Lista de destinatarios a los que Tango envia los comprobantes, separados por \";\". NO es el mail del cliente: incluye al vendedor de Ultraschall que recibe copia (903 clientes tienen una direccion @ultraschall.com.ar). Se guarda como texto informativo, no como email."
     },
     {
@@ -392,7 +394,7 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "direccion": "tango->hubspot",
       "opciones": {
         "1": "1",
@@ -1025,7 +1027,7 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "notas": "La planilla de Ultraschall aporta la equivalencia ID_CATEGORIA_IVA: 1 Resp.Inscripto, 4 Exento, 5 Cons.Final, 6 Monotributo. PENDIENTE: falta confirmar el ID de RS y EXE, necesario para el ALTA (Fase 4). Para la LECTURA no hace falta el ID, solo la etiqueta: eso lo resuelve `opciones`. | CATALOGO COMPLETO (11 categorias) desde el 2026-08-24. Las etiquetas de RI, CF y RS son las que YA tiene el portal (planilla de Ultraschall, 6.0) y NO se tocan: el PATCH agrega opciones, no las renombra, asi que cambiarlas dejaria duplicados como 'Responsable Inscripto' y 'Responsable inscripto' conviviendo. Los IDs internos para el alta viven en tango_id_categoria_iva.",
       "direccion": "tango->hubspot",
       "opciones": {
@@ -1068,7 +1070,7 @@
       "tipo": "string",
       "hsFieldType": "select",
       "porcentajeCarga": 100,
-      "autoritativoTango": true,
+      "autoritativoTango": false,
       "notas": "La planilla dice ID_TIPO_DOCUMENTO_GV = 1 para C.U.I.T.; en la lectura ese tipo viene con COD = 80 (otra confirmacion de que codigo != ID). ATENCION: el 54% de los clientes tiene COD = 0 (\"C.I. POLICIA FEDERAL\"), que en los hechos es \"sin definir\" — 132 de ellos tienen un CUIT bien formado. Por eso NO se copia el codigo: se resuelve con lib/documento, que respeta el tipo cuando Tango lo declara e infiere solo cuando dice \"sin definir\".",
       "direccion": "tango->hubspot",
       "transformRegistro": "tipoDocumento",
@@ -1094,6 +1096,45 @@
       "notas": "RESUELTO POR LOOKUP contra provincias. El valor de Tango es un CODIGO, no el ID interno: se traducen. Verificado 2026-08-14, ver ARQUITECTURA.md §5.4.",
       "lookup": "provincias",
       "direccion": "tango->hubspot"
+    },
+    {
+      "tango": "__estado__",
+      "hubspot": "tango_estado",
+      "label": "Estado en Tango",
+      "tipo": "string",
+      "hsFieldType": "select",
+      "autoritativoTango": true,
+      "opciones": {
+        "vinculada": "vinculada",
+        "no_existe": "no_existe",
+        "codigo_de_otro_cliente": "codigo_de_otro_cliente",
+        "ficha_duplicada": "ficha_duplicada",
+        "marcada_para_borrar": "marcada_para_borrar"
+      },
+      "opcionesOrden": [
+        "vinculada",
+        "no_existe",
+        "codigo_de_otro_cliente",
+        "ficha_duplicada",
+        "marcada_para_borrar"
+      ],
+      "opcionesEtiquetas": {
+        "vinculada": "Vinculada con Tango",
+        "no_existe": "No existe en Tango",
+        "codigo_de_otro_cliente": "Código de otro cliente",
+        "ficha_duplicada": "Ficha duplicada",
+        "marcada_para_borrar": "Marcada para borrar en Tango"
+      },
+      "notas": "DECISION DE MATIAS 2026-09-15 (ARQUITECTURA 7.15). Lo escribe el sync de empresas, no sale de ninguna columna de Tango. Solo lo llevan las empresas que declaran un codigo de Tango; un prospecto sin codigo no tiene estado. El detalle legible va en tango_estado_detalle."
+    },
+    {
+      "tango": "__estado_detalle__",
+      "hubspot": "tango_estado_detalle",
+      "label": "Detalle del estado en Tango",
+      "tipo": "string",
+      "hsFieldType": "text",
+      "autoritativoTango": true,
+      "notas": "Por que la empresa tiene ese estado, para comercial: \"En Tango el 000109 es «CSE NET S.R.L», CUIT 30-71610011-8\". Vacio cuando esta vinculada."
     },
     {
       "tango": "__hash__",

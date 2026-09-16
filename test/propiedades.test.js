@@ -15,7 +15,8 @@ const mapeoContactos = require('../config/mapeo.contactos.json');
 const PORTAL_REAL = [
     { name: 'codigo_tango', type: 'string', fieldType: 'text', hasUniqueValue: false, groupName: 'companyinformation' },
     { name: 'razon_social', type: 'string', fieldType: 'text', hasUniqueValue: false, groupName: 'companyinformation' },
-    { name: 'cuit', type: 'number', fieldType: 'number', hasUniqueValue: false, groupName: 'companyinformation' },
+    // Era number al 2026-08-20; otro usuario del portal la paso a texto el 2026-09-02.
+    { name: 'cuit', type: 'string', fieldType: 'text', hasUniqueValue: false, groupName: 'companyinformation' },
     {
         name: 'condicion_iva', type: 'enumeration', fieldType: 'select', groupName: 'companyinformation',
         options: [
@@ -89,14 +90,17 @@ test('ninguna propiedad del portal queda marcada para rehacer', () => {
         'si algo vuelve a aparecer aca, hay que rodearlo, no borrarlo');
 });
 
-test('cuit se queda como number y el mapeo se adapta', () => {
+test('cuit: el mapeo se adapta a como esta en el portal, que hoy es texto', () => {
+    // Si el mapeo sigue diciendo number, crearPropiedades la marca REHACER y
+    // sugiere repararPropiedades.js, que BORRA la propiedad con sus 41.000
+    // valores (medido 2026-09-15).
     const plan = planificar(mapeoClientes, PORTAL_REAL);
     assert.ok(!plan.aRehacer.some((x) => x.name === 'cuit'));
     assert.ok(!plan.aCrear.some((x) => x.name === 'cuit'), 'ya existe, no se toca');
 
     const campo = mapeoClientes.campos.find((c) => c.hubspot === 'cuit');
-    assert.strictEqual(campo.tipo, 'number');
-    assert.strictEqual(campo.transform, 'documentoSoloDigitos');
+    assert.strictEqual(campo.hsFieldType, 'text');
+    assert.strictEqual(campo.transform, 'documentoSoloDigitos', 'el formato que se escribe no cambio');
 });
 
 test('a los desplegables les faltan opciones y eso si se parchea', () => {
