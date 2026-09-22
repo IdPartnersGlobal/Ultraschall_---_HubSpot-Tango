@@ -159,3 +159,87 @@ test('si el ERP no contesta, se propaga: no es un codigo inexistente', async () 
     const tango = { getByFilter: async () => { throw new Error('fetch failed'); } };
     await assert.rejects(() => v.buscar({ tango, props: { codigo_tango: '000466' } }), /fetch failed/);
 });
+
+// ── una empresa SIN codigo que parece un cliente de Tango (§7.16) ───────────
+//
+// Casos reales del 2026-09-22: el sync creo fichas para `007703 Cibrario Sofia`
+// y otros 7 que ya estaban como prospecto sin codigo, y `Farmapos` (sin codigo,
+// con un negocio en Cierre ganado) es el `007678` de Tango. Nombres y CUIT de
+// los tests, inventados.
+
+const padron = [
+    fila({ COD_GVA14: '007678', RAZON_SOCI: 'Farmapos E.E', NOM_COM: 'Farmapos E.E', CUIT: '30-71701607-2' }),
+    fila({ COD_GVA14: '007703', RAZON_SOCI: 'Cibrario Sofia', NOM_COM: 'Cibrario Sofia', CUIT: '27-37827624-7' }),
+    fila({ COD_GVA14: '000406', RAZON_SOCI: 'Hospital Interzonal Julio de Vedia', NOM_COM: 'HIGA Vedia', CUIT: '30-62698339-8' }),
+    fila({ COD_GVA14: '007694', RAZON_SOCI: 'HZGA Dr. Eduardo Wilde', NOM_COM: 'HZGA Dr. Eduardo Wilde', CUIT: '30-62698339-8' }),
+    fila({ COD_GVA14: '007800', RAZON_SOCI: 'Clinica Sin Documento', NOM_COM: 'Clinica Sin Documento', CUIT: '' }),
+];
+const codigos = (filas) => filas.map((f) => f.COD_GVA14);
+
+test('gemelas: las mismas palabras, en cualquier orden y sin tildes ni forma juridica', () => {
+    assert.deepStrictEqual(codigos(v.gemelas({ name: 'Sofia Cibrario' }, padron)), ['007703']);
+    assert.deepStrictEqual(codigos(v.gemelas({ name: 'Farmapos' }, padron)), ['007678'], '"E.E" son letras sueltas');
+    assert.deepStrictEqual(codigos(v.gemelas({ name: 'Otra cosa', razon_social: 'CIBRARIO SOFÍA' }, padron)), ['007703'], 'tambien por razon social');
+});
+
+test('gemelas: un CUIT distinto descarta, aunque el nombre sea identico', () => {
+    assert.deepStrictEqual(v.gemelas({ name: 'Cibrario Sofia', cuit: '27-11111112-3' }, padron), []);
+    assert.deepStrictEqual(codigos(v.gemelas({ name: 'Cibrario Sofia', cuit: '37827624' }, padron)), ['007703'], 'el DNI dentro del CUIT no contradice');
+});
+
+test('gemelas: el CUIT SOLO no alcanza, porque en Tango se repite', () => {
+    // El 30-62698339-8 del Ministerio de Salud bonaerense lo comparten mas de
+    // diez hospitales distintos. Por documento, HIGA Fiorito "seria" Wilde.
+    assert.deepStrictEqual(v.gemelas({ name: 'HIGA Pedro Fiorito', cuit: '30626983398' }, padron), []);
+    assert.deepStrictEqual(v.gemelas({ name: 'Farmacia Nueva', cuit: '30717016072' }, padron), []);
+});
+
+test('gemelas: palabras de mas o de menos no es el mismo', () => {
+    // La leccion de `mismoNombre`: "todas las del corto estan en el largo"
+    // juntaba dos clubes distintos y dos personas distintas.
+    assert.deepStrictEqual(v.gemelas({ name: 'Cibrario Sofia Andrea' }, padron), []);
+    assert.deepStrictEqual(v.gemelas({ name: 'Cibrario' }, padron), []);
+    assert.deepStrictEqual(v.gemelas({}, padron), [], 'sin nombre no hay nada que comparar');
+});
+
+test('gemelas: con el indice da lo mismo que con el padron', () => {
+    const indice = v.indiceDeNombres(padron);
+    for (const props of [{ name: 'Sofia Cibrario' }, { name: 'Farmapos', cuit: '30717016072' }, { name: 'HZGA Dr Eduardo Wilde' }, { name: 'nadie' }]) {
+        assert.deepStrictEqual(v.gemelas(props, indice), v.gemelas(props, padron));
+    }
+});
+
+test('posible duplicado: la nota dice cual es, y como se confirma o se descarta', () => {
+    const nota = (props) => v.problemas.posibleDuplicado({ nombre: props.name, props, filas: v.gemelas(props, padron) });
+
+    const sinCuit = nota({ name: 'Cibrario Sofia' });
+    assert.strictEqual(sinCuit.clase, 'corregir');
+    assert.match(sinCuit.motivo, /«Cibrario Sofia» no tiene código de Tango, pero parece ser el cliente 007703 \(«Cibrario Sofia», CUIT 27-37827624-7\)/);
+    assert.match(sinCuit.motivo, /dos veces en Tango/);
+    assert.match(sinCuit.comoSeArregla, /cargarle el código 007703/);
+    assert.match(sinCuit.comoSeArregla, /Si es otra empresa, cargarle su CUIT/);
+
+    // Con el mismo CUIT no hay nada que descartar: no se le ofrece una salida falsa.
+    assert.doesNotMatch(nota({ name: 'Farmapos', cuit: '30717016072' }).comoSeArregla, /otra empresa/);
+
+    // Si el que no tiene CUIT es TANGO, cargarlo en la empresa no alcanza.
+    assert.match(nota({ name: 'Clinica Sin Documento' }).comoSeArregla, /administración que cargue en Tango el CUIT/);
+});
+
+test('posible duplicado: si el cliente ya tiene su empresa, se pide asociar el negocio a esa', () => {
+    const props = { name: 'Farmapos' };
+    const filas = v.gemelas(props, padron);
+    const p = v.problemas.posibleDuplicado({ nombre: 'Farmapos', props, filas, fichas: new Map([['007678', 'Farmapos E.E']]) });
+    assert.match(p.comoSeArregla, /^si es el mismo cliente, asociar el negocio a «Farmapos E\.E», que ya está vinculada al 007678, o fusionar las dos empresas/);
+    assert.doesNotMatch(p.comoSeArregla, /cargarle el código/);
+
+    // Con varios: cada uno dice donde esta, y la salida cubre a los que no tienen empresa.
+    const varios = [fila({ COD_GVA14: '000357', RAZON_SOCI: 'Clinica Oeste SA', CUIT: '33-54612680-9' }), fila({ COD_GVA14: '007182', RAZON_SOCI: 'Clinica del Oeste SA', CUIT: '30-54605503-1' })];
+    const m = v.problemas.posibleDuplicado({ nombre: 'Clinica del Oeste', props: { name: 'Clinica del Oeste' }, filas: varios, fichas: new Map([['000357', 'Clinica Oeste SA']]) });
+    assert.match(m.motivo, /000357 \(«Clinica Oeste SA», CUIT 33-54612680-9\), que ya está en la empresa «Clinica Oeste SA»; 007182/);
+    assert.match(m.comoSeArregla, /asociar el negocio a su empresa .*cargarle su código/, 'uno no tiene empresa: se dicen las dos salidas');
+
+    const todos = v.problemas.posibleDuplicado({ nombre: 'Clinica del Oeste', props: { name: 'Clinica del Oeste' }, filas: varios, fichas: new Map([['000357', 'Clinica Oeste SA'], ['007182', 'Clinica del Oeste SA']]) });
+    assert.match(todos.comoSeArregla, /^si es uno de ellos, asociar el negocio a su empresa, o fusionar las dos empresas\./);
+    assert.doesNotMatch(todos.comoSeArregla, /todavía no tiene empresa/, 'los dos tienen: esa salida no existe');
+});

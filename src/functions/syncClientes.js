@@ -11,7 +11,10 @@ const sync = require('../lib/syncClientes');
  * un trigger HTTP corta antes (ARQUITECTURA.md 8.3). host.json sube
  * functionTimeout a 10 min, el maximo del plan Consumption.
  *
- * Horario por SYNC_CLIENTES_CRON. Default: 03:00 (hora del server).
+ * Horario por SYNC_CLIENTES_CRON. Default: `0 0 3 * * *`, que es **03:00 UTC**
+ * — los timers de Azure van en UTC salvo que se ponga WEBSITE_TIME_ZONE. Con
+ * Argentina en UTC-3 eso son las **00:00 de Argentina**, que es el horario que
+ * pidio Matias el 2026-09-16. No hace falta ninguna variable: ya es el default.
  * Escribe solo si SYNC_DRY_RUN_CLIENTES=false; cualquier otro valor deja el
  * dry-run. Este circuito NO hereda la global SYNC_DRY_RUN: en Azure esta en
  * `false` por el circuito de negocios, y encender el sync de empresas tiene
@@ -56,6 +59,7 @@ async function handler(_timer, context) {
             'leidos de Tango': r.leidosTango,
             'companies en HubSpot': r.enHubSpot,
             'a crear': r.aCrear,
+            'no se crean (un prospecto sin codigo parece ser el cliente)': r.noSeCreanPorPosibleDuplicado,
             'a vincular (importadas)': r.aVincular,
             'a actualizar': r.aActualizar,
             'sin cambios': r.sinCambios,

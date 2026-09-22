@@ -1203,6 +1203,7 @@ Con el circuito de negocios ya subido (`be0987b`), Matías pidió charlar el syn
 | sin clave | no es ese cliente | no se toca, y **el cliente no se crea encima** | código de otro cliente |
 | cualquiera | el código no existe | no se toca | no existe |
 | sin código | prospecto | nada; si tenía estado, se limpia | — |
+| sin código | parece un cliente de Tango (§7.16) | se marca, y **a ese cliente no se le crea ficha** | posible duplicado |
 
 "Es su cliente" es `vinculoCliente.comparar` (§7.14): documento, y sin documento, las mismas palabras del nombre. El código se busca tal cual.
 
@@ -1238,6 +1239,55 @@ Por **palabra entera** en razón social o nombre de fantasía: `BORRAR`, `NO USA
 - **Crear las dos propiedades** (`crearPropiedades.js clientes --solo-crear --aplicar`) antes de la primera corrida real, o HubSpot rechaza las tandas con `tango_estado`.
 - **La primera corrida real**: ✅ el dry-run global se separó por circuito el 2026-09-16 (§11.1) — el sync de empresas ahora se enciende solo, con `SYNC_DRY_RUN_CLIENTES=false`. Queda que el timer tiene ~6 min de lectura antes de escribir, con un límite de 10.
 - Las tablas estáticas del catálogo (categorías de IVA, listas, depósitos, talonarios) se verificaron contra la **copia**. Antes de pedidos reales en producción, reverificarlas contra la 3.
+
+### 7.16 Una empresa sin código que parece un cliente de Tango (2026-09-22)
+
+**Decisión de Matías:** *"si la ficha no trae código, hay que marcarlas para no hacerlas de vuelta"*.
+
+#### Por qué
+
+Medido el 2026-09-22 contra el portal (41.299 empresas), sólo leyendo:
+
+- **El sync creaba fichas duplicadas.** De los 71 clientes que creó desde el 17/9, **8 ya estaban en HubSpot como prospecto sin código**, con el mismo nombre: `007703` Cibrario Sofia, `007710` Nodo Estratégico (dos veces), `007715` Clement Liliana, `007716` Arce Celeste Ayelen, `007729` Reynoso Jorge, `007738` Contreras Mariana, `007754` Clinica Parra, `007756` IOA Cientifica y Ortopedia. La simulación del 16 no lo vio porque el sync sólo buscaba por código. Pasa cada vez que administración da de alta en Tango a alguien que ya era prospecto.
+- **El circuito duplicaba en Tango.** Con una empresa sin código, un negocio ganado la da de alta. `Farmapos` (cargada a mano el 12/8, negocio `63767647770` en Cierre ganado desde el 31/8) es el cliente `007678`, que el sync vinculó a otra ficha. Le faltaba el domicilio: con cargarlo y volver a ganar el negocio, quedaba dos veces en el ERP, sin camino de vuelta.
+
+#### La regla (`vinculoCliente.gemelas`)
+
+Una empresa sin código "parece" un cliente de Tango si:
+
+1. tiene **las mismas palabras** en el nombre o la razón social (`mismoNombre`, §7.14: sin tildes, sin forma jurídica, en cualquier orden), **y**
+2. el documento **no lo contradice**: dos CUIT distintos no son el mismo.
+
+**El CUIT solo nunca alcanza**, porque en Tango se repite (decisión del 2026-08-31). Medido: el `30-62698339-8` del Ministerio de Salud bonaerense lo comparten más de diez hospitales distintos (Wilde, Fiorito, Paroissien…). Consecuencia aceptada: `Electromedica Tandil` (mismo CUIT que `000015`, otro nombre) no se detecta.
+
+#### Qué hace cada lado
+
+| | antes | ahora |
+|---|---|---|
+| **sync** | creaba otra ficha para el cliente | **no la crea**. El prospecto queda `tango_estado = posible_duplicado` y el detalle dice cuál es y qué hacer |
+| **sync**, si el cliente ya tiene su ficha | nada | el prospecto se marca igual: *"…que ya está en la ficha «X». Si es el mismo, fusionar las fichas."* |
+| **circuito** | daba de alta | **frena con nota** "Hay que corregir esto", ANTES de pedir los datos del alta: pedirle el domicilio a una empresa que no se va a crear no destraba nada |
+| **alta** (`altaCliente.crear`) | — | la misma guarda: es la única función que crea clientes en Tango |
+
+Las dos salidas se dicen siempre: **si es**, cargarle el código (la corrida siguiente la vincula, §7.15) o fusionar; **si no**, cargarle su CUIT, que la descarta. Si el que no tiene CUIT es Tango, se pide a administración. Si ya tienen el mismo CUIT, no se ofrece una salida falsa.
+
+**Si el cliente ya tiene su empresa en HubSpot, la nota del negocio pide asociar el negocio a esa**, no cargar el código: con el código, el intento siguiente frenaba otra vez con `yaVinculado` (§7.14). Una vuelta en vez de dos, y es el caso de 345 de las 366. El circuito lo averigua con la misma búsqueda por `tango_codigo_cliente`; si HubSpot no contesta, va el texto genérico y frena igual. Así queda para Farmapos:
+
+> **Código de cliente en Tango**: la empresa «Farmapos» no tiene código de Tango, pero parece ser el cliente 007678 («Farmapos E.E», CUIT 30-71701607-2) de Tango. Darla de alta dejaría el mismo cliente dos veces en Tango → *si es el mismo cliente, asociar el negocio a «Farmapos E.E», que ya está vinculada al 007678, o fusionar las dos empresas*
+
+El circuito lee el padrón (~100 s) para comparar, que el alta leía igual: se lo pasa y no se relee. Por eso ve también una empresa creada ese mismo día, que el sync todavía no marcó.
+
+`posible_duplicado` es el **único estado que lleva una empresa sin código**. Si deja de parecerse (le cargaron otro CUIT), la corrida siguiente lo limpia y crea la ficha del cliente.
+
+#### Antes de desplegar
+
+⚠️ **Primero la opción en HubSpot, después el deploy.** Sin la opción `posible_duplicado` en `tango_estado`, HubSpot rechaza la tanda entera de 100 donde caiga una marca:
+
+```
+node scripts/crearPropiedades.js clientes --solo tango_estado --aplicar
+```
+
+`--solo` es nuevo: sin él, `--aplicar` también les cambia el grupo y los tildes a 9 propiedades que Ultraschall configuró así a propósito (§7.15).
 
 ---
 

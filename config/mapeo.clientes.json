@@ -1109,23 +1109,26 @@
         "no_existe": "no_existe",
         "codigo_de_otro_cliente": "codigo_de_otro_cliente",
         "ficha_duplicada": "ficha_duplicada",
-        "marcada_para_borrar": "marcada_para_borrar"
+        "marcada_para_borrar": "marcada_para_borrar",
+        "posible_duplicado": "posible_duplicado"
       },
       "opcionesOrden": [
         "vinculada",
         "no_existe",
         "codigo_de_otro_cliente",
         "ficha_duplicada",
-        "marcada_para_borrar"
+        "marcada_para_borrar",
+        "posible_duplicado"
       ],
       "opcionesEtiquetas": {
         "vinculada": "Vinculada con Tango",
         "no_existe": "No existe en Tango",
         "codigo_de_otro_cliente": "Código de otro cliente",
         "ficha_duplicada": "Ficha duplicada",
-        "marcada_para_borrar": "Marcada para borrar en Tango"
+        "marcada_para_borrar": "Marcada para borrar en Tango",
+        "posible_duplicado": "Posible duplicado"
       },
-      "notas": "DECISION DE MATIAS 2026-09-15 (ARQUITECTURA 7.15). Lo escribe el sync de empresas, no sale de ninguna columna de Tango. Solo lo llevan las empresas que declaran un codigo de Tango; un prospecto sin codigo no tiene estado. El detalle legible va en tango_estado_detalle."
+      "notas": "DECISION DE MATIAS 2026-09-15 (ARQUITECTURA 7.15). Lo escribe el sync de empresas, no sale de ninguna columna de Tango. Solo lo llevan las empresas que declaran un codigo de Tango; un prospecto sin codigo no tiene estado, SALVO posible_duplicado (2026-09-22, ARQUITECTURA 7.16): no tiene codigo pero parece un cliente que Tango ya tiene, y por eso ni el sync le crea otra ficha a ese cliente ni el circuito lo da de alta. El detalle legible va en tango_estado_detalle."
     },
     {
       "tango": "__estado_detalle__",

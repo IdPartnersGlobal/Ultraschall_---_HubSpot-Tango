@@ -210,6 +210,42 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
         log.paso('DEAL', `${dealId}: la empresa ${company.id} declara el cliente ${vinculo.codigo} de Tango -> ${vinculo.estado}`);
     }
 
+    // 5a'. Una empresa SIN codigo que parece un cliente que Tango ya tiene
+    //     tampoco se da de alta (§7.16, decision de Matias 2026-09-22: "si la
+    //     ficha no trae codigo, hay que marcarlas para no hacerlas de vuelta").
+    //
+    //     Caso real: `Farmapos`, cargada a mano el 12/8, con un negocio en Cierre
+    //     ganado, es el cliente 007678 de Tango, que el sync vinculo a OTRA ficha.
+    //     Sin codigo, el circuito la daba de alta: el mismo cliente dos veces en
+    //     el ERP, y no hay camino de vuelta.
+    //
+    //     Va ANTES de verificar el alta, por la misma razon que el paso de
+    //     arriba: pedirle el domicilio a una empresa que no hay que crear manda a
+    //     comercial a cargar algo que no destraba nada. Cuesta leer el padron
+    //     (~100 s), que el alta leia igual: se le pasa para que no lo relea.
+    let padron = null;
+    let gemelas = [];
+    const fichasDeGemelas = new Map(); // codigo -> la empresa de HubSpot ya vinculada a ese cliente
+    if (v.cliente.faltaAlta && !vinculo && companyProps) {
+        padron = (await tango.get(procesos.entidades.clientes.process)).registros || [];
+        gemelas = vinculoCliente.gemelas(companyProps, padron);
+        if (gemelas.length) {
+            log.paso('DEAL', `${dealId}: la empresa ${company.id} no tiene codigo y parece ser ${gemelas.map((f) => f.COD_GVA14).join(', ')} de Tango; no se da de alta`);
+            // Si el cliente ya tiene su empresa en HubSpot, la nota pide asociar
+            // el negocio a esa, no cargar un codigo que frenaria otra vez.
+            // Solo cambia el texto: si HubSpot no contesta, va el generico.
+            for (const f of gemelas.slice(0, 3)) {
+                const codigo = String(f.COD_GVA14 ?? '').trim();
+                try {
+                    const otra = await fichaYaVinculada({ hs, codigo, company });
+                    if (otra) fichasDeGemelas.set(codigo, otra);
+                } catch (e) {
+                    log.aviso('DEAL', `${dealId}: no se pudo buscar la empresa del cliente ${codigo}: ${e.message}`);
+                }
+            }
+        }
+    }
+
     // Los avisos no frenan nada, pero tienen que verse: hoy el unico es que el
     // renglon va con el articulo de prueba (§9.6), y un pedido que sale con un
     // articulo que no es el que se vendio no puede pasar en silencio.
@@ -230,13 +266,16 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     //     Con codigo declarado NO se verifica el alta: no va a haber alta, y
     //     pedirle a comercial el CUIT de un cliente que no hay que crear lo
     //     manda a completar algo que no destraba nada.
-    const empresa = v.cliente.faltaAlta && !vinculo
+    const empresa = v.cliente.faltaAlta && !vinculo && !gemelas.length
         ? altaCliente.verificar({ lookups, propiedades: companyProps, owners, ownerId: deal.properties?.hubspot_owner_id })
         : null;
 
     const problemasTodos = unaVezCadaUno([
         // El codigo primero: si esta mal, es lo que hay que mirar antes que nada.
         ...(vinculo?.problema ? [vinculo.problema] : []),
+        ...(gemelas.length ? [vinculoCliente.problemas.posibleDuplicado({
+            nombre: companyProps.name || companyProps.razon_social, props: companyProps, filas: gemelas, fichas: fichasDeGemelas,
+        })] : []),
         ...v.problemas,
         ...(empresa ? empresa.problemas : []),
         ...(empresa ? empresa.pendientes.map((p) => ({
@@ -294,6 +333,8 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
                 // salio asi, con `ok: true` y cero avisos.
                 owners,
                 ownerId: deal.properties?.hubspot_owner_id,
+                // Ya leido en 5a': son ~100 s.
+                padron,
                 log, dryRun, ahora,
             });
         } catch (e) {

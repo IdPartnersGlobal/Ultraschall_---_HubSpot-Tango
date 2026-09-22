@@ -191,6 +191,80 @@ test('un prospecto sin codigo ni etiqueta no se toca', () => {
     assert.strictEqual(porId(p, 'h10'), undefined);
 });
 
+// ── prospectos sin codigo que parecen un cliente de Tango (§7.16) ──────────
+//
+// El 2026-09-22 se vio que el sync habia creado fichas para 8 clientes que ya
+// estaban en HubSpot como prospecto sin codigo. Matias: "si la ficha no trae
+// codigo, hay que marcarlas para no hacerlas de vuelta".
+
+const prospecto = (id, over = {}) => ({ id, properties: { name: B.RAZON_SOCI, ...over } });
+
+test('un prospecto que parece un cliente SIN ficha: el cliente no se crea y el prospecto queda marcado', () => {
+    const p = plan([B], [prospecto('p1')]);
+
+    assert.strictEqual(p.upserts.length, 0, 'crear otra ficha es justo el duplicado');
+    assert.strictEqual(p.resumen.aCrear, 0);
+    assert.strictEqual(p.resumen.noSeCreanPorPosibleDuplicado, 1);
+    const w = porId(p, 'p1');
+    assert.deepStrictEqual(Object.keys(w).sort(), ['tango_estado', 'tango_estado_detalle'], 'solo la marca: no se lo vincula por el nombre');
+    assert.strictEqual(w.tango_estado, 'posible_duplicado');
+    assert.strictEqual(w.tango_estado_detalle,
+        `Parece ser el cliente ${B.COD_GVA14} («${B.RAZON_SOCI}», CUIT ${B.CUIT}) de Tango, que todavía no está vinculado a ninguna ficha. ` +
+        `Si es el mismo, cargarle el código ${B.COD_GVA14}. Si no, cargarle su CUIT.`);
+});
+
+test('si el cliente ya tiene su ficha, el prospecto se marca para fusionar y la ficha no se toca', () => {
+    const p = plan([B], [yaSincronizada('h6', B), prospecto('p1')]);
+
+    assert.strictEqual(porId(p, 'h6'), undefined);
+    assert.strictEqual(p.upserts.length, 0);
+    assert.strictEqual(porId(p, 'p1').tango_estado, 'posible_duplicado');
+    assert.ok(porId(p, 'p1').tango_estado_detalle.includes(`que ya está en la ficha «${B.NOM_COM}». Si es el mismo, fusionar las fichas.`),
+        porId(p, 'p1').tango_estado_detalle);
+});
+
+test('el mismo nombre con OTRO CUIT no es el cliente: se crea y el prospecto no se toca', () => {
+    const p = plan([B], [prospecto('p1', { cuit: '30999999995' })]);
+    assert.strictEqual(p.resumen.aCrear, 1);
+    assert.strictEqual(porId(p, 'p1'), undefined);
+});
+
+test('el mismo CUIT con otro nombre tampoco: en Tango los CUIT se repiten', () => {
+    const p = plan([B], [prospecto('p1', { name: 'Otra Clinica', cuit: digitos(B.CUIT) })]);
+    assert.strictEqual(p.resumen.aCrear, 1);
+    assert.strictEqual(porId(p, 'p1'), undefined);
+});
+
+test('cuando le cargan el codigo, la corrida siguiente lo vincula', () => {
+    const marcado = prospecto('p1', { tango_estado: 'posible_duplicado', tango_estado_detalle: 'Parece ser...', codigo_tango: B.COD_GVA14 });
+    const p = plan([B], [marcado]);
+    assert.strictEqual(p.resumen.aVincular, 1);
+    assert.strictEqual(porId(p, 'p1').tango_codigo_cliente, B.COD_GVA14);
+    assert.strictEqual(porId(p, 'p1').tango_estado, 'vinculada');
+    assert.strictEqual(porId(p, 'p1').tango_estado_detalle, '');
+});
+
+test('un prospecto que deja de parecerse (le cargaron otro CUIT) se limpia, y el cliente se crea', () => {
+    const p = plan([B], [prospecto('p1', { cuit: '30999999995', tango_estado: 'posible_duplicado', tango_estado_detalle: 'Parece ser...' })]);
+    assert.deepStrictEqual(porId(p, 'p1'), { tango_estado: '', tango_estado_detalle: '' });
+    assert.strictEqual(p.resumen.aCrear, 1);
+});
+
+test('un prospecto ya marcado no se reescribe cada noche', () => {
+    const primera = porId(plan([B], [prospecto('p1')]), 'p1');
+    const p = plan([B], [prospecto('p1', primera)]);
+    assert.strictEqual(porId(p, 'p1'), undefined);
+    assert.strictEqual(p.resumen.etiquetasCambiadas, 0);
+    assert.strictEqual(p.resumen.noSeCreanPorPosibleDuplicado, 1, 'y el cliente sigue sin crearse');
+});
+
+test('dos clientes de Tango con el mismo nombre: el prospecto los nombra a los dos, y ninguno se crea', () => {
+    const otro = { ...B, COD_GVA14: '999991', ID_GVA14: 99991 };
+    const p = plan([B, otro], [prospecto('p1')]);
+    assert.strictEqual(p.resumen.noSeCreanPorPosibleDuplicado, 2);
+    assert.match(porId(p, 'p1').tango_estado_detalle, new RegExp(`uno de estos clientes de Tango: ${B.COD_GVA14} .*, 999991 `));
+});
+
 // ── configuracion ───────────────────────────────────────────────────────────
 
 test('el sync solo ESCRIBE contra la empresa 3 de Tango', () => {

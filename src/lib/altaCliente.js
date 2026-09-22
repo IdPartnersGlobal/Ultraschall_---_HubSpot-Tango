@@ -6,6 +6,7 @@ const { silencioso } = require('./logger');
 const { PROP_HASH, PROP_SYNC } = require('./syncClientes');
 const procesos = require('../../config/tango.processes.json');
 const verificarEmpresa = require('./verificarEmpresa');
+const vinculoCliente = require('./vinculoCliente');
 const defaultsTango = require('../../config/defaults.tango.json');
 const mapeoClientes = require('../../config/mapeo.clientes.json');
 
@@ -277,7 +278,9 @@ async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, registr
  *
  *   1. verificarEmpresa dice si se puede y devuelve los campos ya resueltos.
  *      Si falta algo, se corta ACA: sin haber tocado el ERP y sin gastar codigo.
- *   2. numeracion elige el COD_GVA14, que Tango no autoasigna (§7.6).
+ *   2. Con el padron: si la empresa parece un cliente que Tango ya tiene, se
+ *      corta (§7.16). Si no, numeracion elige el COD_GVA14, que Tango no
+ *      autoasigna (§7.6). `padron` evita releerlo si ya se leyo (~100 s).
  *   3. POST Api/Create. Si el codigo colisiona con un alta manual hecha en el
  *      mismo momento, se le SUMA UNO y se reintenta hasta que entre (decision
  *      de Matias 2026-08-27): por eso numeracion devuelve varios y no uno.
@@ -291,7 +294,7 @@ async function escribirDeVuelta({ tango, hs, lookups, companyId, codigo, registr
  *
  * @returns {Promise<{creado, codigo, idGva14, companyId, problemas, pendientes, dryRun}>}
  */
-async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, owners = null, ownerId = null, log = silencioso, dryRun = true, ahora = new Date() }) {
+async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, owners = null, ownerId = null, padron = null, log = silencioso, dryRun = true, ahora = new Date() }) {
     if (!companyId) throw new Error('altaCliente.crear: falta companyId');
     if (!estrategia) {
         // Sin default a proposito: es una decision de administracion (§7.6).
@@ -306,9 +309,21 @@ async function crear({ tango, hs, lookups, companyId, propiedades, estrategia, o
         return { creado: false, codigo: null, idGva14: null, companyId, problemas: v.problemas, pendientes: v.pendientes, avisos: v.avisos || [], dryRun };
     }
 
-    // 2. El codigo.
-    const padron = await tango.get(procesos.entidades.clientes.process);
-    const { codigos } = numeracion.planificar(padron.registros.map((r) => r.COD_GVA14), { estrategia, cantidad: CANDIDATOS });
+    // 2. El padron: para no duplicar un cliente y para el codigo. El circuito ya
+    //    lo leyo (son ~100 s) y lo pasa.
+    const registros = padron || (await tango.get(procesos.entidades.clientes.process)).registros || [];
+
+    // Una empresa que parece un cliente que Tango ya tiene no se crea (§7.16).
+    // El circuito lo mira antes; esto es la ultima guarda, porque esta es la
+    // unica funcion que da de alta y un duplicado en Tango no tiene vuelta.
+    const gemelas = vinculoCliente.gemelas(propiedades, registros);
+    if (gemelas.length) {
+        log.aviso('ALTA', `la company ${companyId} parece ser ${gemelas.map((f) => f.COD_GVA14).join(', ')} de Tango; no se da de alta`);
+        const problema = vinculoCliente.problemas.posibleDuplicado({ nombre: propiedades?.name || propiedades?.razon_social, props: propiedades, filas: gemelas });
+        return { creado: false, codigo: null, idGva14: null, companyId, problemas: [problema], pendientes: [], avisos: [], dryRun };
+    }
+
+    const { codigos } = numeracion.planificar(registros.map((r) => r.COD_GVA14), { estrategia, cantidad: CANDIDATOS });
     log.paso('ALTA', `candidatos de codigo (${estrategia}): ${codigos.join(', ')}`);
 
     if (dryRun) {

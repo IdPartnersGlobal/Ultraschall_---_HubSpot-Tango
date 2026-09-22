@@ -9,7 +9,8 @@
  *   node scripts/syncClientes.js --escribir      # escribe en HubSpot (solo sin proxy)
  *
  * ⚠️ Desde el 2026-09-16 el proxy pide clave (§10.0.1): la URL va con su
- * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY en el entorno.
+ * `?code=...` —la que copia el portal— o con TANGO_PROXY_KEY, que se puede
+ * dejar en local.settings.json (esta gitignoreado) y no repetir en cada corrida.
  *
  * `--escribir` pone SYNC_DRY_RUN_CLIENTES=false para ESTA corrida y nada mas:
  * no toca el modo del sync de productos ni el del circuito de negocios.
@@ -77,12 +78,13 @@ const log = {
         'Modo': config.MODO,
     });
 
-    const r = await sync.correr({ config, log, dryRun: config.DRY_RUN, fetchImpl: proxy ? fetchPorProxy(proxy) : undefined });
+    const r = await sync.correr({ config, log, dryRun: config.DRY_RUN, fetchImpl: proxy ? fetchPorProxy(proxy, { clave: env.TANGO_PROXY_KEY }) : undefined });
 
     log.datos('RESUMEN', {
         'leidos de Tango': r.leidosTango,
         'companies en HubSpot': r.enHubSpot,
         'a crear': r.aCrear,
+        'no se crean (un prospecto sin codigo parece ser el cliente)': r.noSeCreanPorPosibleDuplicado,
         'a vincular (importadas)': r.aVincular,
         'a actualizar': r.aActualizar,
         'sin cambios': r.sinCambios,

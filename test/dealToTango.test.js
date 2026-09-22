@@ -726,8 +726,12 @@ function hsFalso({ deal = {}, company = COMPANY, lineItems = [linea()], producto
     };
 }
 
-const tangoFalso = (respuesta = { NRO_PEDIDO: '00012345' }) => ({
+const tangoFalso = (respuesta = { NRO_PEDIDO: '00012345' }, padron = []) => ({
     creados: [],
+    lecturasPadron: 0,
+    // Con una empresa sin codigo, el circuito lee el padron para no duplicar un
+    // cliente que ya existe (§7.16).
+    async get() { this.lecturasPadron++; return { registros: padron, total: padron.length }; },
     async create(process, payload) { this.creados.push({ process, payload }); return respuesta; },
 });
 
@@ -1125,6 +1129,129 @@ test('un negocio con una company completa pero sin codigo de Tango LA DA DE ALTA
     assert.strictEqual(alta.payload.RAZON_SOCI, 'CLINICA DEMO SA',
         'la razon social tiene que LLEGAR al ERP, no perderse por no haberla pedido');
     assert.ok(alta.payload.ID_CATEGORIA_IVA, 'y la categoria de IVA tambien');
+});
+
+// ── Una empresa SIN codigo que Tango ya tiene no se da de alta (§7.16) ───────
+//
+// Caso real (2026-09-22): `Farmapos`, cargada a mano el 12/8, con un negocio en
+// Cierre ganado, es el cliente 007678 de Tango. Sin codigo, el circuito la daba
+// de alta: el mismo cliente dos veces en el ERP. Matias: "si la ficha no trae
+// codigo, hay que marcarlas para no hacerlas de vuelta".
+
+const FARMAPOS_TANGO = { COD_GVA14: '007678', ID_GVA14: 6437, RAZON_SOCI: 'Farmapos E.E', NOM_COM: 'Farmapos E.E', CUIT: '30-71701607-2' };
+
+/** Un Tango que registra todo lo que se le pide, con un padron dado. */
+function tangoConPadron(padron) {
+    const tango = tangoFalso(undefined, padron);
+    tango.getByFilter = async () => [];
+    return tango;
+}
+
+const procesarComoComercial = (hs, tango, extra = {}) => d2t.procesarDeal({
+    dealId: '111', hs, tango, lookups: lk, dryRun: false,
+    filtroOwner: filtroDe(OWNER_COMERCIAL), owners: OWNERS,
+    estrategiaNumeracion: defaults.clientes.numeracion.estrategia, ...extra,
+});
+
+test('una empresa sin codigo que parece un cliente de Tango NO se da de alta: frena con nota', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: { ...COMPANY_A_CREAR, name: 'Farmapos', razon_social: 'Farmapos', cuit: '' } });
+    const tango = tangoConPadron([{ COD_GVA14: '007610' }, FARMAPOS_TANGO]);
+
+    const r = await procesarComoComercial(hs, tango);
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(tango.creados.length, 0, 'ni el cliente ni el pedido');
+    assert.strictEqual(hs.notas.length, 1);
+    assert.match(hs.notas[0].cuerpo, /Hay que corregir esto/, 'no falta un dato: hay que decidir si es el mismo');
+    assert.match(hs.notas[0].cuerpo, /parece ser el cliente 007678/);
+    assert.match(hs.notas[0].cuerpo, /cargarle el código 007678/);
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+});
+
+test('si el cliente ya tiene su empresa en HubSpot, la nota pide asociar el negocio a esa: no cargar un codigo que frenaria otra vez', async () => {
+    // El caso real: el 007678 ya esta vinculado a «Farmapos E.E». Cargarle el
+    // codigo a «Farmapos» llevaba a una segunda nota ("asociar el negocio a la
+    // otra"). Se dice de entrada: una vuelta en vez de dos.
+    const hs = hsFalso({
+        deal: { hubspot_owner_id: OWNER_COMERCIAL },
+        company: { ...COMPANY_A_CREAR, name: 'Farmapos', razon_social: 'Farmapos', cuit: '' },
+        vinculadas: [{ id: '999', properties: { tango_codigo_cliente: '007678', name: 'Farmapos E.E' } }],
+    });
+    const r = await procesarComoComercial(hs, tangoConPadron([FARMAPOS_TANGO]));
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.match(hs.notas[0].cuerpo, /asociar el negocio a «Farmapos E\.E», que ya está vinculada al 007678, o fusionar las dos empresas/);
+    assert.doesNotMatch(hs.notas[0].cuerpo, /cargarle el código/);
+});
+
+test('si HubSpot no contesta la busqueda de la otra empresa, frena igual con la nota generica', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: { ...COMPANY_A_CREAR, name: 'Farmapos', razon_social: 'Farmapos', cuit: '' } });
+    hs.buscar = async () => { throw new Error('HubSpot 502'); };
+    const tango = tangoConPadron([FARMAPOS_TANGO]);
+
+    const r = await procesarComoComercial(hs, tango);
+
+    assert.strictEqual(r.estado, 'incompleto', 'es solo el texto: no puede tumbar el freno');
+    assert.strictEqual(tango.creados.length, 0);
+    assert.match(hs.notas[0].cuerpo, /cargarle el código 007678/);
+});
+
+test('si parece un cliente de Tango, no se le piden los datos del alta: no se la va a crear', async () => {
+    // La misma razon que con un codigo declarado (§7.14): pedirle el domicilio
+    // a una empresa que no hay que crear manda a cargar algo que no destraba nada.
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: { name: 'Farmapos', cuit: '30717016072', condicion_iva: 'Responsable Inscripto' } });
+    const tango = tangoConPadron([FARMAPOS_TANGO]);
+
+    const r = await procesarComoComercial(hs, tango);
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.deepStrictEqual(r.problemas.map((p) => p.campo), ['COD_GVA14'], 'solo el posible duplicado');
+    assert.doesNotMatch(hs.notas[0].cuerpo, /domicilio/i);
+    assert.doesNotMatch(hs.notas[0].cuerpo, /otra empresa/, 'tiene el mismo CUIT: no hay otra salida que ofrecerle');
+});
+
+test('un homonimo con OTRO CUIT si se da de alta, y el padron se lee una sola vez', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: COMPANY_A_CREAR });
+    const tango = tangoConPadron([{ COD_GVA14: '007610' }, { COD_GVA14: '007611', RAZON_SOCI: 'CLINICA DEMO SA', NOM_COM: 'CLINICA DEMO', CUIT: '30-71111111-5' }]);
+    const creadosEnTango = [];
+    tango.getByFilter = async (_p, filtro) => creadosEnTango.filter((c) => filtro.includes(c.COD_GVA14));
+    tango.create = async (process, payload) => {
+        tango.creados.push({ process, payload });
+        if (payload.COD_GVA14) creadosEnTango.push({ COD_GVA14: payload.COD_GVA14, ID_GVA14: 9001 });
+        return { ID_GVA14: 9001, NRO_PEDIDO: '00012345' };
+    };
+
+    const r = await procesarComoComercial(hs, tango);
+
+    assert.notStrictEqual(r.estado, 'incompleto', `no deberia frenar; freno con: ${r.motivo}`);
+    assert.strictEqual(tango.creados[0].payload.COD_GVA14, '007612', 'se dio de alta, con el codigo siguiente');
+    assert.strictEqual(tango.lecturasPadron, 1, 'son ~100 s: el alta usa el que ya leyo el circuito');
+});
+
+test('en dry-run el posible duplicado se informa y no se escribe nada', async () => {
+    const hs = hsFalso({ deal: { hubspot_owner_id: OWNER_COMERCIAL }, company: { ...COMPANY_A_CREAR, name: 'Farmapos', razon_social: '', cuit: '' } });
+    const tango = tangoConPadron([FARMAPOS_TANGO]);
+
+    const r = await procesarComoComercial(hs, tango, { dryRun: true });
+
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.match(r.motivo, /007678/);
+    assert.strictEqual(hs.escrituras.length, 0);
+    assert.strictEqual(hs.notas.length, 0);
+});
+
+test('el alta misma tampoco crea un posible duplicado, aunque la llamen sin el circuito', async () => {
+    // Es la unica funcion que da de alta: la guarda vive tambien aca.
+    const tango = tangoConPadron([FARMAPOS_TANGO]);
+    const r = await require('../src/lib/altaCliente').crear({
+        tango, hs: hsFalso(), lookups: lk, companyId: '555',
+        // Completa, para que pase la verificacion de datos y llegue a la guarda.
+        propiedades: { ...COMPANY_A_CREAR, name: 'Farmapos', razon_social: 'Farmapos', cuit: '30717016072' },
+        estrategia: 'correlativo', owners: OWNERS, ownerId: OWNER_COMERCIAL, dryRun: false,
+    });
+    assert.strictEqual(r.creado, false);
+    assert.match(r.problemas[0].motivo, /parece ser el cliente 007678/);
+    assert.strictEqual(tango.creados.length, 0);
 });
 
 test('PROPS_COMPANY pide todo lo que el alta va a leer', () => {

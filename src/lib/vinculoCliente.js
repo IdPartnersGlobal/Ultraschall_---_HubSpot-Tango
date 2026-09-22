@@ -160,6 +160,87 @@ function comparar(props = {}, fila = {}) {
     return { mismo: coincide, por: coincide ? 'nombre' : null, documento: 'sin-dato' };
 }
 
+// ─────────────────────────────────────────── una empresa SIN codigo (§7.16)
+
+/**
+ * La forma de un nombre que se usa de indice: sus palabras, ordenadas. Dos
+ * nombres tienen la misma clave si y solo si `mismoNombre` los da iguales.
+ */
+function claveDeNombre(texto) {
+    const p = [...palabras(texto)].sort();
+    return p.length ? p.join(' ') : null;
+}
+
+/** Los clientes de Tango por `claveDeNombre`, de la razon social y del nombre de fantasia. */
+function indiceDeNombres(registros = []) {
+    const indice = new Map();
+    for (const fila of registros) {
+        for (const k of new Set([claveDeNombre(fila?.RAZON_SOCI), claveDeNombre(fila?.NOM_COM)])) {
+            if (k) (indice.get(k) || indice.set(k, []).get(k)).push(fila);
+        }
+    }
+    return indice;
+}
+
+/**
+ * Los clientes de Tango que una empresa SIN codigo parece ser (2026-09-22).
+ *
+ * Por que: el sync creaba una ficha nueva para cada cliente nuevo de Tango, y
+ * 8 de los 71 que creo ya estaban en HubSpot como prospecto sin codigo. Y el
+ * circuito, con una empresa sin codigo, da de alta: si esa empresa ya era
+ * cliente, lo duplica en Tango. Decision de Matias: "si la ficha no trae
+ * codigo, hay que marcarlas para no hacerlas de vuelta".
+ *
+ * La regla es mas estricta que `comparar`, a proposito: aca no hay un codigo
+ * que diga "soy este cliente", hay que encontrarlo entre 5.800.
+ *
+ *   - Las MISMAS palabras en el nombre o la razon social (`mismoNombre`).
+ *   - Y que el documento no lo contradiga: dos CUIT distintos no son el mismo.
+ *
+ * El documento SOLO nunca alcanza: en Tango los CUIT se repiten (decision de
+ * Matias, 2026-08-31). Medido: el 30-62698339-8 del Ministerio de Salud
+ * bonaerense lo comparten mas de diez hospitales distintos.
+ *
+ * @param {object} props  la empresa de HubSpot
+ * @param {Map|Array} fuente  `indiceDeNombres(...)`, o el padron directamente
+ * @returns {Array<object>} las filas de Tango, sin repetir
+ */
+function gemelas(props = {}, fuente = []) {
+    const indice = fuente instanceof Map ? fuente : indiceDeNombres(fuente);
+    const docH = documentoComparable(props?.cuit);
+    const vistas = new Set();
+    const salida = [];
+    for (const nombre of [props?.razon_social, props?.name]) {
+        const k = claveDeNombre(nombre);
+        for (const fila of (k && indice.get(k)) || []) {
+            if (vistas.has(fila)) continue;
+            vistas.add(fila);
+            const docT = documentoComparable(fila.CUIT);
+            if (docH && docT && !mismoDocumento(docH, docT)) continue;
+            salida.push(fila);
+        }
+    }
+    return salida;
+}
+
+/**
+ * Como se deshace un "parece el mismo" que no lo es. Lo que lo decide es un
+ * CUIT distinto; si ya tienen el mismo, no hay nada que deshacer.
+ *
+ * @returns {'mismo-cuit'|'cargar-cuit'|'cuit-en-tango'}
+ */
+function comoDescartar(props = {}, filas = []) {
+    const docH = documentoComparable(props?.cuit);
+    if (docH && filas.some((f) => documentoComparable(f.CUIT))) return 'mismo-cuit';
+    return filas.every((f) => documentoComparable(f.CUIT)) ? 'cargar-cuit' : 'cuit-en-tango';
+}
+
+/** «007678 («Farmapos E.E», CUIT 30-71701607-2)», para los textos que lee comercial. */
+function describirCliente(fila) {
+    const cuit = documento.formatear(fila?.CUIT);
+    return `${String(fila?.COD_GVA14 ?? '').trim()} («${String(fila?.RAZON_SOCI ?? '').trim()}»${cuit ? `, CUIT ${cuit}` : ''})`;
+}
+
 // ───────────────────────────────────────────────────────── contra Tango
 
 /**
@@ -281,6 +362,50 @@ const problemas = {
             comoSeArregla: `asociar el negocio a «${otra}», o fusionar las dos empresas en HubSpot`,
         };
     },
+
+    /**
+     * La empresa no tiene codigo pero parece un cliente que Tango ya tiene
+     * (§7.16). Darla de alta lo duplicaria, y en Tango no hay camino de vuelta.
+     * Las dos salidas se dicen: si es, el codigo; si no, el CUIT que lo descarta.
+     *
+     * `fichas` (codigo -> nombre de la empresa de HubSpot vinculada a ese
+     * cliente) cambia que se pide si es el mismo. Si el cliente ya tiene su
+     * ficha, cargarle el codigo a esta no alcanza: el proximo intento frena con
+     * `yaVinculado` —"asociar el negocio a la otra, o fusionar"—. Se dice eso de
+     * entrada y es una vuelta en vez de dos. Pasa en 345 de las 366 que marco
+     * la simulacion del 2026-09-22.
+     */
+    posibleDuplicado({ nombre, props = {}, filas, fichas = new Map() }) {
+        const uno = filas.length === 1;
+        const codigoDe = (f) => String(f.COD_GVA14 ?? '').trim();
+        const conFicha = (f) => (fichas.get(codigoDe(f)) ? `${describirCliente(f)}, que ya está en la empresa «${fichas.get(codigoDe(f))}»` : describirCliente(f));
+        const quien = uno
+            ? `el cliente ${describirCliente(filas[0])} de Tango`
+            : `uno de estos clientes de Tango: ${filas.slice(0, 3).map(conFicha).join('; ')}${filas.length > 3 ? ` y ${filas.length - 3} más` : ''}`;
+        let siEs;
+        if (uno && fichas.get(codigoDe(filas[0]))) {
+            siEs = `si es el mismo cliente, asociar el negocio a «${fichas.get(codigoDe(filas[0]))}», que ya está vinculada al ${codigoDe(filas[0])}, o fusionar las dos empresas`;
+        } else if (uno) {
+            siEs = `si es el mismo cliente, cargarle el código ${codigoDe(filas[0])} en la ficha de la empresa`;
+        } else if (filas.every((f) => fichas.get(codigoDe(f)))) {
+            siEs = 'si es uno de ellos, asociar el negocio a su empresa, o fusionar las dos empresas';
+        } else if (filas.some((f) => fichas.get(codigoDe(f)))) {
+            siEs = 'si es uno de ellos, asociar el negocio a su empresa (o fusionarlas); si ese cliente todavía no tiene empresa, cargarle su código en la ficha de esta';
+        } else {
+            siEs = 'si es uno de ellos, cargarle ese código en la ficha de la empresa';
+        }
+        const siNo = {
+            'mismo-cuit': '',
+            'cargar-cuit': '. Si es otra empresa, cargarle su CUIT: con un CUIT distinto se la da de alta como cliente nueva',
+            'cuit-en-tango': '. Si es otra empresa, cargarle su CUIT y pedirle a administración que cargue en Tango el CUIT del cliente, que no lo tiene',
+        }[comoDescartar(props, filas)];
+        return {
+            campo: CAMPO,
+            clase: 'corregir',
+            motivo: `${deLaEmpresa(nombre)} no tiene código de Tango, pero parece ser ${quien}. Darla de alta dejaría el mismo cliente dos veces en Tango`,
+            comoSeArregla: `${siEs}${siNo}`,
+        };
+    },
 };
 
 function deLaEmpresa(nombre) {
@@ -290,4 +415,5 @@ function deLaEmpresa(nombre) {
 module.exports = {
     PROPIEDADES, codigoDeclarado, comparar, buscar, problemas,
     documentoComparable, mismoDocumento, mismoNombre, palabras,
+    claveDeNombre, indiceDeNombres, gemelas, comoDescartar, describirCliente,
 };

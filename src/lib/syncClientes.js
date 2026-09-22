@@ -62,6 +62,9 @@ const ESTADOS = {
     OTRO_CLIENTE: 'codigo_de_otro_cliente',
     DUPLICADA: 'ficha_duplicada',
     BASURA: 'marcada_para_borrar',
+    // La unica que lleva una empresa SIN codigo (§7.16): parece un cliente que
+    // Tango ya tiene.
+    POSIBLE_DUPLICADO: 'posible_duplicado',
 };
 
 const vacio = (v) => v === null || v === undefined || String(v).trim() === '';
@@ -175,7 +178,9 @@ function verificarEmpresaDeTango(config, dryRun) {
  * mismo codigo y la gente no sabria cual es. Queda en `conflictos`.
  *
  * Una company SIN codigo es un prospecto: no lleva estado. Si tenia uno (le
- * borraron el codigo que estaba mal), se limpia.
+ * borraron el codigo que estaba mal), se limpia. SALVO que parezca un cliente
+ * de Tango (§7.16, `vinculoCliente.gemelas`): esa queda como posible duplicado,
+ * y a ese cliente NO se le crea ficha — ya tiene una, sin codigo.
  *
  * @returns {{ upserts: Array<{id, properties}>, updates: Array<{id, properties}>, resumen }}
  *   upserts va por `tango_codigo_cliente`; updates, por el ID de HubSpot.
@@ -186,6 +191,7 @@ function planificar({ registros, existentes, m, ahora = new Date(), palabrasBasu
     const resumen = {
         leidosTango: registros.length, enHubSpot: existentes.length,
         aCrear: 0, aActualizar: 0, aVincular: 0, sinCambios: 0, respetados: 0,
+        noSeCreanPorPosibleDuplicado: 0,
         etiquetasCambiadas: 0, estados: {}, conflictos: [], problemas: [],
     };
 
@@ -212,12 +218,30 @@ function planificar({ registros, existentes, m, ahora = new Date(), palabrasBasu
         if (cod) (sinClavePorCodigo.get(cod) || sinClavePorCodigo.set(cod, []).get(cod)).push(c);
     }
 
+    // Prospectos SIN codigo que parecen un cliente de Tango (§7.16). Se buscan
+    // antes porque cambian que se hace con ese cliente: no se le crea ficha.
+    const indiceNombres = vinculoCliente.indiceDeNombres(registros);
+    const prospectosGemelos = []; // [company, filas de Tango]
+    const gemelasDe = new Map(); // codigo -> companies sin codigo
+    for (const c of existentes) {
+        const p = c.properties || {};
+        if (!vacio(p[CLAVE_HS]) || vinculoCliente.codigoDeclarado(p)) continue;
+        const filas = vinculoCliente.gemelas(p, indiceNombres);
+        if (!filas.length) continue;
+        prospectosGemelos.push([c, filas]);
+        for (const f of filas) {
+            const k = m.clave(f);
+            if (k) (gemelasDe.get(k) || gemelasDe.set(k, []).get(k)).push(c);
+        }
+    }
+
     // ── lo que se va a escribir ──────────────────────────────────────────
     const upserts = new Map(); // clave -> properties
     const porId = new Map();   // id de HubSpot -> properties
     const estadoDe = new Map(); // id de HubSpot -> { estado, detalle }
 
     const marcar = (c, estado, detalle = '') => estadoDe.set(String(c.id), { estado, detalle });
+    const fichaDe = new Map(); // codigo -> la company que queda vinculada a ese cliente
 
     function mapear(registro) {
         const { propiedades, problemas } = m.aHubSpot(registro);
@@ -262,6 +286,7 @@ function planificar({ registros, existentes, m, ahora = new Date(), palabrasBasu
             }
             for (const c of mismas) marcar(c, ESTADOS.DUPLICADA, detalles.duplicada(codigo, fila, [vinculada]));
             marcar(vinculada, suEstado, suDetalle);
+            fichaDe.set(codigo, vinculada);
 
             const { propiedades, hash } = mapear(fila);
             if (vinculada.properties?.[PROP_HASH] === hash) { resumen.sinCambios++; continue; }
@@ -275,6 +300,7 @@ function planificar({ registros, existentes, m, ahora = new Date(), palabrasBasu
             const { propiedades, hash } = mapear(fila);
             porId.set(String(empresa.id), { ...respetar(propiedades, empresa.properties), [PROP_HASH]: hash, [PROP_SYNC]: fecha });
             marcar(empresa, suEstado, suDetalle);
+            fichaDe.set(codigo, empresa);
             resumen.aVincular++;
             continue;
         }
@@ -290,10 +316,22 @@ function planificar({ registros, existentes, m, ahora = new Date(), palabrasBasu
             continue;
         }
 
+        // Un prospecto sin codigo parece ser este cliente: no se le crea otra
+        // ficha (§7.16). El prospecto queda marcado con el codigo, y cuando
+        // alguien se lo carga, la corrida siguiente lo vincula.
+        if (gemelasDe.has(codigo)) {
+            resumen.noSeCreanPorPosibleDuplicado++;
+            continue;
+        }
+
         const { propiedades, hash } = mapear(fila);
         upserts.set(codigo, { ...propiedades, [PROP_HASH]: hash, [PROP_SYNC]: fecha, [PROP_ESTADO]: suEstado, [PROP_DETALLE]: suDetalle });
         contar(resumen, suEstado);
         resumen.aCrear++;
+    }
+
+    for (const [c, filas] of prospectosGemelos) {
+        marcar(c, ESTADOS.POSIBLE_DUPLICADO, detalles.posibleDuplicado(c.properties, filas, fichaDe));
     }
 
     // Codigos que Tango no tiene.
@@ -304,10 +342,11 @@ function planificar({ registros, existentes, m, ahora = new Date(), palabrasBasu
         if (!porCodigo.has(codigo)) marcar(c, ESTADOS.NO_EXISTE, detalles.noExiste(codigo));
     }
 
-    // Prospectos que tenian estado: el codigo se borro, el estado tambien.
+    // Prospectos que tenian estado: el codigo se borro, el estado tambien. O
+    // dejaron de parecer un cliente de Tango: les cargaron otro CUIT.
     for (const c of existentes) {
         const p = c.properties || {};
-        if (vinculoCliente.codigoDeclarado(p)) continue;
+        if (vinculoCliente.codigoDeclarado(p) || estadoDe.has(String(c.id))) continue;
         if (!vacio(p[PROP_ESTADO]) || !vacio(p[PROP_DETALLE])) marcar(c, '', '');
     }
 
@@ -363,6 +402,32 @@ const detalles = {
         return `El cliente ${codigo} de Tango («${String(fila.RAZON_SOCI ?? '').trim()}») también está en ${nombres}. Fusionar las fichas.`;
     },
     basura: (codigo, fila) => `En Tango el cliente ${codigo} figura como «${String(fila.RAZON_SOCI ?? '').trim()}»${String(fila.HABILITADO) === 'false' ? ' y está inhabilitado' : ''}. Decidir si se sigue usando.`,
+    /**
+     * Una empresa sin codigo que parece un cliente de Tango (§7.16). Dice cual,
+     * si ese cliente ya tiene su ficha, y las dos salidas: si es, el codigo o
+     * fusionar; si no, el CUIT que lo descarta.
+     */
+    posibleDuplicado: (props, filas, fichaDe = new Map()) => {
+        const nombreDe = (c) => `«${String(c.properties?.name || c.properties?.razon_social || c.id).trim()}»`;
+        let texto;
+        if (filas.length === 1) {
+            const [fila] = filas;
+            const codigo = String(fila.COD_GVA14).trim();
+            const ficha = fichaDe.get(codigo);
+            texto = ficha
+                ? `Parece ser el cliente ${vinculoCliente.describirCliente(fila)} de Tango, que ya está en la ficha ${nombreDe(ficha)}. Si es el mismo, fusionar las fichas.`
+                : `Parece ser el cliente ${vinculoCliente.describirCliente(fila)} de Tango, que todavía no está vinculado a ninguna ficha. Si es el mismo, cargarle el código ${codigo}.`;
+        } else {
+            const lista = filas.slice(0, 3).map(vinculoCliente.describirCliente).join(', ');
+            texto = `Parece ser uno de estos clientes de Tango: ${lista}${filas.length > 3 ? ` y ${filas.length - 3} más` : ''}. Si es uno de ellos, cargarle ese código o fusionarla con su ficha.`;
+        }
+        const siNo = {
+            'mismo-cuit': '',
+            'cargar-cuit': ' Si no, cargarle su CUIT.',
+            'cuit-en-tango': ' Si no, cargarle su CUIT y pedirle a administración que cargue el del cliente en Tango, que no lo tiene.',
+        }[vinculoCliente.comoDescartar(props, filas)];
+        return texto + siNo;
+    },
 };
 
 /**

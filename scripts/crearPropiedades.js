@@ -9,6 +9,8 @@
  *
  *   node scripts/crearPropiedades.js clientes           # dry-run (no escribe)
  *   node scripts/crearPropiedades.js clientes --aplicar # crea/corrige de verdad
+ *   node scripts/crearPropiedades.js clientes --solo tango_estado --aplicar
+ *                                                      # solo esa (o esas, con coma)
  *
  * Lo que hace, en orden:
  *   1. Crea el grupo `tango_erp` si falta.
@@ -53,6 +55,15 @@ function leerToken() {
     // los tildes a 8 propiedades que Ultraschall configuro asi a proposito
     // ("Razón Social" en Informacion de la empresa). Aplicar todo se lo deshacia.
     const soloCrear = process.argv.includes('--solo-crear');
+    // Solo las propiedades nombradas (2026-09-22). Para agregarle una opcion a
+    // `tango_estado` sin que el mismo --aplicar le deshaga a Ultraschall los
+    // grupos y tildes de otras 9, que es lo que haria sin filtro.
+    const iSolo = process.argv.indexOf('--solo');
+    const solo = iSolo >= 0 ? new Set(String(process.argv[iSolo + 1] || '').split(',').map((x) => x.trim()).filter(Boolean)) : null;
+    if (solo && !solo.size) {
+        console.error('--solo necesita el nombre de la propiedad: --solo tango_estado');
+        process.exit(1);
+    }
     const def = ENTIDADES[entidad];
     if (!def) {
         console.error(`Uso: node scripts/crearPropiedades.js <${Object.keys(ENTIDADES).join('|')}> [--aplicar]`);
@@ -82,6 +93,12 @@ function leerToken() {
     // --- propiedades
     const existentes = await hs.propiedades(def.objeto);
     const plan = propiedades.planificar(mapeo, existentes);
+    if (solo) {
+        const desconocidas = [...solo].filter((n) => !mapeo.campos.some((c) => c.hubspot === n));
+        if (desconocidas.length) throw new Error(`--solo: el mapeo no tiene ${desconocidas.join(', ')}`);
+        for (const k of ['aCrear', 'aParchear', 'aConvertir', 'aRehacer', 'sobrantes']) plan[k] = plan[k].filter((p) => solo.has(p.name));
+        console.log(`(--solo) solo se miran: ${[...solo].join(', ')}`);
+    }
 
     console.log(`\nya existentes : ${plan.yaEstan.length}`);
     console.log(`a crear       : ${plan.aCrear.length}`);
