@@ -185,6 +185,15 @@
       "notas": "Lo que devuelve Tango al crear el pedido. Es ADEMAS la guarda de idempotencia: si tiene valor, el Deal ya se mando y no se vuelve a mandar (9.3). Por eso se escribe SIEMPRE que el alta salga bien, aunque despues falle cualquier otra cosa."
     },
     {
+      "tango": "__ultimoError__",
+      "hubspot": "tango_ultimo_error",
+      "label": "Ultimo error al crear el pedido (Tango)",
+      "tipo": "datetime",
+      "hsFieldType": "datetime",
+      "direccion": "tango->hubspot",
+      "notas": "PEDIDO DE MATIAS 2026-09-28. Fecha y HORA de la ultima vez que el pedido no se pudo crear y el negocio volvio de etapa con nota. Existe para disparar un workflow de HubSpot que le avise al propietario del negocio (disparador: la propiedad cambia / se conoce, con reinscripcion). Lleva hora a proposito: con fecha sola, dos errores del mismo negocio el mismo dia no cambian el valor y el workflow no vuelve a dispararse. Se escribe junto con la nota, no antes: una re-entrega de la cola no avisa dos veces. No se limpia cuando el pedido sale: es el ULTIMO error, no el actual (el actual es tango_pedido_problema)."
+    },
+    {
       "tango": "__fecha__",
       "hubspot": "tango_pedido_creado",
       "label": "Pedido creado en Tango",

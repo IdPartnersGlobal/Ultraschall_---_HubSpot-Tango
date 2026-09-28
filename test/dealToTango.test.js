@@ -864,6 +864,69 @@ test('en dry-run un negocio incompleto no deja nota ni se mueve', async () => {
     assert.strictEqual(hs.escrituras.length, 0);
 });
 
+// ── La marca para el workflow del propietario (2026-09-28) ───────────────
+//
+// La nota queda en la linea de tiempo, pero nadie se entera si no entra al
+// negocio. `tango_ultimo_error` es el disparador de un workflow de HubSpot que
+// le avisa al propietario. Tiene que llevar HORA: con fecha sola, dos errores
+// del mismo negocio el mismo dia no cambian el valor y el workflow no vuelve a
+// dispararse.
+
+const ULTIMO_ERROR = 'tango_ultimo_error';
+const marcasDeError = (hs) => hs.escrituras.filter((e) => e.props[ULTIMO_ERROR] !== undefined);
+
+test('un error deja la fecha y hora del error, para avisarle al propietario', async () => {
+    const ahora = new Date('2026-09-28T15:04:05.678Z');
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false, ahora });
+
+    const marcas = marcasDeError(hs);
+    assert.strictEqual(marcas.length, 1, 'una marca por error, no una por problema');
+    assert.strictEqual(marcas[0].objetoTipo, 'deals');
+    assert.strictEqual(marcas[0].id, '111');
+    assert.strictEqual(marcas[0].props[ULTIMO_ERROR], ahora.getTime(), 'con hora, no la medianoche del dia');
+});
+
+test('la marca de error va con la nota: una re-entrega no le avisa dos veces', async () => {
+    const hs = hsFalso({ deal: { dealstage: 'decisionmakerboughtin' }, lineItems: [linea({ hs_product_id: undefined })] });
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.strictEqual(marcasDeError(hs).length, 0);
+});
+
+test('si la nota falla, la marca de error queda igual: el propietario se entera', async () => {
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    hs.crearNota = async () => { throw new Error('HubSpot rechazo la nota'); };
+    await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.strictEqual(marcasDeError(hs).length, 1);
+});
+
+test('que falle la marca de error no frena la nota ni el retroceso', async () => {
+    const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
+    const patch = hs.actualizarObjeto;
+    hs.actualizarObjeto = async (o, i, props) => {
+        if (props[ULTIMO_ERROR] !== undefined) throw new Error('la propiedad no existe en el portal');
+        return patch(o, i, props);
+    };
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'incompleto');
+    assert.strictEqual(hs.notas.length, 1);
+    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+});
+
+test('un pedido que sale bien no deja marca de error', async () => {
+    const hs = hsFalso();
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(marcasDeError(hs).length, 0);
+});
+
+test('veneno: la caida del ERP tambien le avisa al propietario', async () => {
+    const ahora = new Date('2026-09-28T18:00:00.000Z');
+    const hs = hsFalso({ deal: { hubspot_owner_id: MI_OWNER } });
+    await d2t.procesarVeneno({ hs, dealId: '111', dryRun: false, ahora });
+    assert.strictEqual(marcasDeError(hs).at(-1)?.props[ULTIMO_ERROR], ahora.getTime());
+});
+
 test('a una empresa incompleta se la reporta igual que a un negocio', async () => {
     // Es el caso REAL de hoy: 65 de 66 companies no se pueden dar de alta en
     // Tango. Quien tiene que cargar el dato es la misma persona, y no tiene por

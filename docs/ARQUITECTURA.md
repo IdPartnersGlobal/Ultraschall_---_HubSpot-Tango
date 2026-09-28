@@ -2581,6 +2581,23 @@ La red: un test compara la cabecera de un mismo negocio con un cliente cargado d
 
 ⚠️ **El talonario de factura sigue sin ser obligatorio**: es la decisión abierta de §9.18, y esta no la toca.
 
+### 9.30 Un error del pedido le avisa al propietario (2026-09-28)
+
+**Pedido de Matías:** la nota del error está bien, pero nadie se entera si no entra al negocio. El aviso lo manda **un workflow de HubSpot**, no el código: así Ultraschall decide a quién, por dónde (campana, mail, tarea) y con qué texto, sin desplegar.
+
+La integración pone el disparador: **`tango_ultimo_error`** («Ultimo error al crear el pedido (Tango)», grupo Tango ERP), una **fecha con hora** que se escribe cada vez que el negocio vuelve de etapa con nota.
+
+- **Lleva hora a propósito.** Con fecha sola, dos errores del mismo negocio el mismo día no cambian el valor y el workflow no vuelve a dispararse. Es la primera propiedad `datetime` del portal: `propiedades.tipoHubSpot` la crea así sólo si el mapeo dice `hsFieldType: "datetime"`. `tipo: "datetime"` no alcanza, porque `tango_pedido_creado` lo declara y en el portal es `date`.
+- **Va junto con la nota, en `reportarIncompleto`, después de la guarda de re-entrega.** Una entrega repetida de la cola no avisa dos veces. Cubre los cuatro caminos de error: datos que faltan, rechazo de Tango, posible duplicado y veneno (el ERP caído).
+- **Si no se puede escribir, no frena nada:** la nota y el retroceso salen igual y queda un aviso en el log.
+- **No se limpia cuando el pedido sale.** Es el *último* error; el actual es `tango_pedido_problema`, que sí se limpia.
+
+**El workflow (se arma en HubSpot, no en el repo):** basado en negocios. Disparador: «Ultimo error al crear el pedido (Tango)» *se conoce*, con **reinscripción** activada sobre esa misma propiedad. Acción: notificación interna al **propietario del negocio**, con los tokens de «Problema al crear el pedido (Tango)» y el nombre del negocio. Opcional: crear una tarea para el propietario.
+
+**Orden para desplegar:** primero `node scripts/crearPropiedades.js pedidos --solo tango_ultimo_error --aplicar`, después el push. Al revés no rompe nada (la marca falla en silencio y el resto sigue), pero esos errores no avisarían.
+
+Red: 8 tests nuevos. Verificado con mutación: la marca antes de la guarda, sin el `try` y sin la hora se detectan, las tres.
+
 
 ## 10. Seguridad
 

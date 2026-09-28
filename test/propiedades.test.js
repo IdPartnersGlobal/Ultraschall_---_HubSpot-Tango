@@ -36,6 +36,20 @@ const PORTAL_REAL = [
 
 // --------------------------------------------------------------------- tipos
 
+test('fecha con hora se crea como datetime; las fechas de siempre no cambian', () => {
+    // tango_ultimo_error dispara un workflow: con fecha sola, dos errores el
+    // mismo dia no cambian el valor. Las demas siguen como estan en el portal.
+    assert.deepStrictEqual(tipoHubSpot({ hsFieldType: 'datetime' }), { type: 'datetime', fieldType: 'date' });
+    assert.deepStrictEqual(tipoHubSpot({ tipo: 'datetime', hsFieldType: 'date' }), { type: 'date', fieldType: 'date' });
+    assert.deepStrictEqual(tipoHubSpot({ hsFieldType: 'date' }), { type: 'date', fieldType: 'date' });
+});
+
+test('el mapeo de pedidos declara la marca de error como datetime', () => {
+    const campo = require('../config/mapeo.pedidos.json').campos.find((c) => c.hubspot === 'tango_ultimo_error');
+    assert.ok(campo, 'existe en el mapeo, asi crearPropiedades la crea');
+    assert.deepStrictEqual(tipoHubSpot(campo), { type: 'datetime', fieldType: 'date' });
+});
+
 test('un desplegable sin opciones se degrada a texto en vez de romper el alta', () => {
     // HubSpot rechaza crear una enumeration sin options.
     assert.deepStrictEqual(

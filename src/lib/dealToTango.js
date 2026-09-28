@@ -39,6 +39,7 @@ const defaults = require('../../config/defaults.tango.json');
 const PROP_NRO = mapeoPedidos._meta.claveIdempotencia.hubspot;
 const PROP_CREADO = 'tango_pedido_creado';
 const PROP_PROBLEMA = 'tango_pedido_problema';
+const PROP_ULTIMO_ERROR = 'tango_ultimo_error';
 const PROP_CLIENTE = 'tango_pedido_cliente';
 
 /**
@@ -611,6 +612,15 @@ async function reportarIncompleto({ hs, dealId, etapaActual, problemas = [], tip
     const retroceso = etapas.anterior(etapaActual, pipelines, ganadas);
     const etapaGanada = etapas.etiqueta(etapaActual, pipelines) || 'Cierre ganado';
 
+    // La marca para el workflow que le avisa al propietario (2026-09-28). Va
+    // DESPUES de la guarda de arriba —una re-entrega no avisa dos veces— y
+    // con hora, para que dos errores del mismo dia vuelvan a dispararlo.
+    try {
+        await hs.actualizarObjeto('deals', dealId, { [PROP_ULTIMO_ERROR]: ahora.getTime() });
+    } catch (e) {
+        log.aviso('DEAL', `no se pudo marcar el error en el negocio ${dealId} (el propietario no recibe aviso): ${e.message}`);
+    }
+
     let nota = false;
     try {
         await hs.crearNota('deals', dealId, notaProblema.cuerpo({ problemas, retroceso, etapaGanada, tipo }), { cuando: ahora });
@@ -759,6 +769,6 @@ function leerConfig(env = process.env) {
 module.exports = {
     admitir, procesarDeal, procesarVeneno, eventosGanados, numeroDePedido, releerNroPedido, reportarIncompleto, anotarACompletar, leerConfig, leerConfigWebhook,
     soloOwner,
-    PROP_NRO, PROP_CREADO, PROP_PROBLEMA, PROP_CLIENTE,
+    PROP_NRO, PROP_CREADO, PROP_PROBLEMA, PROP_CLIENTE, PROP_ULTIMO_ERROR,
     PROPS_DEAL, PROPS_COMPANY, PROPS_LINEA, PROPS_PRODUCTO,
 };

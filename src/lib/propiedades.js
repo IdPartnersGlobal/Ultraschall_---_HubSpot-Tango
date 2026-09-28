@@ -38,6 +38,10 @@ const ESTANDAR = new Set([
 function tipoHubSpot(campo) {
     const t = (campo.hsFieldType || '').toLowerCase();
     if (t === 'number' || campo.tipo === 'number') return { type: 'number', fieldType: 'number' };
+    // Fecha CON hora solo si el mapeo lo pide en hsFieldType. `tipo: 'datetime'`
+    // no alcanza a proposito: tango_pedido_creado lo declara asi y en el portal
+    // es `date`; leerlo como datetime la marcaria para rehacer.
+    if (t === 'datetime') return { type: 'datetime', fieldType: 'date' };
     if (t === 'date' || campo.tipo === 'datetime' || campo.tipo === 'date') return { type: 'date', fieldType: 'date' };
     if (t === 'checkbox' || campo.tipo === 'bool' || campo.tipo === 'boolean') return { type: 'bool', fieldType: 'booleancheckbox' };
     // Un desplegable sin opciones es invalido para HubSpot. Si el mapeo no
