@@ -70,6 +70,7 @@ const NOMBRE_ESTADO = {
     codigo_de_otro_cliente: 'Código de otro cliente',
     ficha_duplicada: 'Ficha duplicada',
     marcada_para_borrar: 'Marcada para borrar en Tango',
+    posible_duplicado: 'Posible duplicado',
 };
 
 (async () => {

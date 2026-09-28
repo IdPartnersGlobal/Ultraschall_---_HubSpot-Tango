@@ -1289,6 +1289,33 @@ node scripts/crearPropiedades.js clientes --solo tango_estado --aplicar
 
 `--solo` es nuevo: sin él, `--aplicar` también les cambia el grupo y los tildes a 9 propiedades que Ultraschall configuró así a propósito (§7.15).
 
+✅ Desplegado el 2026-09-22: opción agregada y verificada en el portal, commit `d1c7af7`.
+
+### 7.17 Productos: pasada única para completar los datos de Tango (2026-09-22)
+
+Ultraschall subió a mano su base de productos (121 en el portal) con el código de Tango en el SKU, pero sin el ID interno: es un número de Tango que no se ve en pantalla, y es **lo único del producto que usa el pedido** (`ID_STA11` en cada renglón; el circuito lee del producto sólo `name`, `hs_sku` y `tango_id_sta11`). Sin él, el renglón sale con el artículo de prueba `ZZZ` (§9.6).
+
+Matías: *"una pasada completa a los productos que en el campo ref tengan subido el código de Tango ... necesito eso nomás y no la sincronización, ya que eso no lo van a querer por ahora"*.
+
+`src/lib/completarProductos.js` (pura, con tests) y `scripts/completarProductos.js` (simula por defecto; `--aplicar` escribe y relee; `--verificar` sólo compara). **No es el sync de productos**:
+
+| | sync de productos (§9.12) | esta pasada |
+|---|---|---|
+| crea productos | sí, los 800+ de Tango | **no** |
+| nombre, descripción, precio | los escribe desde Tango | **no los toca** |
+| qué escribe | todo el mapeo | sólo `tango_*`, y sólo si está vacío |
+| hash y fecha de sync | sí | **no**: el producto no queda "sincronizado" |
+
+El SKU se compara **tal cual** (sin los espacios de los costados). Lo que se parece sin ser igual se informa y no se toca.
+
+**No se copian `tango_observaciones` ni `tango_cod_barra`** (decisión de Matías, al ver los ejemplos): en Tango tienen texto que no corresponde — el LX85 y el S12 dicen "Ecógrafo … AX8" en observaciones, el P7-3Q dice "P5-1Q", y el C5-2Q tiene "LX85, LX9" (con qué ecógrafos es compatible) como código de barras.
+
+**Resultado (aplicado el 2026-09-22):** 933 artículos en Tango, **109 de 121 productos completados**, 880 valores, 0 fallidos; releídos **880 de 880 iguales**. Los 12 que no cruzan tienen el SKU mal y los corrige comercial; después se vuelve a correr la pasada y completa sólo esos:
+
+`123`→TC-SPRO · `456`→D3 · `PIXX`→X1417 o X1717 · `UV1417`→RX1417 · `EKXQ56RP`→XQ56RP · `EKXR50RP`→XR50RP · `L15-7B`→`L15-7b` · `MC8-4Q-V2`→MC8-4Q · `BT720NiBP`→BT720N? · `C5-2B`→`C5-2B(R)`? · `BANR`→BAN o BANRD · `PRUD`→nada parecido.
+
+⚠️ **Lo que cambia en los pedidos:** los 109 dejan de salir como `ZZZ` y salen con su artículo real, y `VALIDA_STOCK: true` (decisión del 2026-08-25) empieza a aplicar: sin existencias, Tango rechaza el pedido y el negocio vuelve con la nota "Tango no aceptó la operación". Los 12 sin ID siguen saliendo como `ZZZ` mientras el artículo de prueba esté activo (`TANGO_PRODUCTO_PRUEBA=off` lo apaga, y entonces frenan).
+
 ---
 
 ## 8. Estrategia de sincronización
