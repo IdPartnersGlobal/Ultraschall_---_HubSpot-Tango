@@ -135,12 +135,12 @@
         },
         {
           "tango": "DOMICILIO",
-          "hubspot": "domicilio_del_consultorio",
+          "hubspot": "domicilio_fiscal",
           "origen": "hubspot",
           "resolucion": "texto",
           "obligatorio": false,
           "avisarSiFalta": true,
-          "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Mismo criterio que CUIT: no frena el alta, pero se avisa para que comercial lo complete."
+          "evidencia": "NO exigido por Tango (sondeado 2026-08-28). Mismo criterio que CUIT: no frena el alta, pero se avisa para que comercial lo complete. DESDE EL 2026-09-28 (decision de Matias) sale de `domicilio_fiscal`, no de `domicilio_del_consultorio`: DOMICILIO es la direccion fiscal del cliente. Con exigirCompleta, una empresa sin 'Direccion fiscal' frena el alta aunque tenga cargado el consultorio."
         },
         {
           "tango": "LOCALIDAD",

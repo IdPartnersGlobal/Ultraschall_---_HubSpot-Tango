@@ -187,13 +187,14 @@
     },
     {
       "tango": "DOMICILIO",
-      "hubspot": "domicilio_del_consultorio",
-      "label": "Domicilio consultorio",
+      "hubspot": "domicilio_fiscal",
+      "label": "Direccion fiscal",
       "tipo": "string",
       "hsFieldType": "text",
       "porcentajeCarga": 100,
       "autoritativoTango": false,
-      "direccion": "tango->hubspot"
+      "direccion": "tango->hubspot",
+      "notas": "DECISION DE MATIAS 2026-09-28: DOMICILIO de Tango es la direccion fiscal y va a `domicilio_fiscal`. Hasta esa fecha iba a `domicilio_del_consultorio`, que queda como dato propio de HubSpot (el consultorio no tiene por que ser el domicilio fiscal). OJO al desplegar: el hash incluye el NOMBRE de la propiedad, asi que la primera corrida despues del cambio ve distinto a todo cliente con DOMICILIO y reescribe las ~5.800 vinculadas (llena domicilio_fiscal; lo que ya este cargado se respeta)."
     },
     {
       "tango": "DIR_COM",

@@ -189,7 +189,15 @@ test('el telefono va a phone, no a un campo de direccion (fila 16 de la planilla
     assert.ok(c);
     const { propiedades } = mapper.aHubSpot(c);
     assert.ok(propiedades.phone, 'TELEFONO_1 debe ir a phone');
-    assert.strictEqual(propiedades.domicilio_fiscal, undefined, 'nunca a domicilio_fiscal');
+    assert.notStrictEqual(propiedades.domicilio_fiscal, propiedades.phone, 'el telefono nunca a domicilio_fiscal');
+});
+
+test('DOMICILIO va a domicilio_fiscal, no al consultorio (decision 2026-09-28)', () => {
+    const c = clientes.find((x) => x.DOMICILIO && String(x.DOMICILIO).trim());
+    assert.ok(c, 'la muestra tiene algun cliente con domicilio');
+    const { propiedades } = mapper.aHubSpot(c);
+    assert.strictEqual(propiedades.domicilio_fiscal, String(c.DOMICILIO).trim());
+    assert.strictEqual(propiedades.domicilio_del_consultorio, undefined, 'el consultorio es dato de HubSpot: Tango no lo escribe');
 });
 
 test('el mapper exige lookups si el mapeo los usa', () => {

@@ -1316,6 +1316,19 @@ El SKU se compara **tal cual** (sin los espacios de los costados). Lo que se par
 
 ⚠️ **Lo que cambia en los pedidos:** los 109 dejan de salir como `ZZZ` y salen con su artículo real, y `VALIDA_STOCK: true` (decisión del 2026-08-25) empieza a aplicar: sin existencias, Tango rechaza el pedido y el negocio vuelve con la nota "Tango no aceptó la operación". Los 12 sin ID siguen saliendo como `ZZZ` mientras el artículo de prueba esté activo (`TANGO_PRODUCTO_PRUEBA=off` lo apaga, y entonces frenan).
 
+### 7.18 `DOMICILIO` va a la dirección fiscal, no al consultorio (2026-09-28)
+
+**Decisión de Matías:** `DOMICILIO` de Tango se vincula con **`domicilio_fiscal`** («Dirección fiscal») en los dos sentidos. Hasta ahora iba a `domicilio_del_consultorio`, que pasa a ser un dato propio de HubSpot: el consultorio no tiene por qué ser el domicilio fiscal del cliente.
+
+- **Lectura (sync de empresas):** `mapeo.clientes.json` → `domicilio_fiscal`. Sigue sin ser autoritativo: Tango lo llena si está vacío y respeta lo cargado.
+- **Alta (circuito del pedido):** `defaults.tango.json → clientes.alta.campos[DOMICILIO]` → `domicilio_fiscal`. Con `exigirCompleta`, una empresa sin «Dirección fiscal» **frena** aunque tenga el consultorio cargado.
+
+**Cómo estaba el portal al decidirlo (medido el 2026-09-28):** `domicilio_del_consultorio` tenía dato en 5.826 empresas. **5.795 de esos valores los escribió el sync** a partir del 17/09 (la simulación del 16/09 los daba todos como «se llena»: las importadas lo traían vacío). `domicilio_fiscal` tenía dato en sólo **5** empresas, ninguna vinculada.
+
+⚠️ **La primera corrida después de desplegar reescribe ~5.800 empresas.** El hash del registro (`mapper.hash`) incluye el *nombre* de cada propiedad, así que mover `DOMICILIO` de propiedad lo cambia para todo cliente que tenga domicilio. Es lo esperado: llena `domicilio_fiscal` y deja todo lo demás igual (lo cargado se respeta). Dura lo mismo que la primera corrida (~4-5 min de 10). De la siguiente en adelante vuelve a «sin cambios».
+
+**Lo que NO hace el cambio:** no borra lo que el sync ya escribió en `domicilio_del_consultorio`. Esas ~5.795 fichas siguen teniendo el domicilio fiscal de Tango en el campo del consultorio hasta que alguien decida limpiarlo, que es escritura masiva en HubSpot y queda sujeta a la decisión de Matías.
+
 ---
 
 ## 8. Estrategia de sincronización

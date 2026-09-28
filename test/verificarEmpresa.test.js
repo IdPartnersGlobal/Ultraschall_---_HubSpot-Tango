@@ -29,7 +29,7 @@ const COMPANY = {
     cuit: '30-70985931-1',
     tipo_de_documento: 'CUIT',
     condicion_iva: 'Responsable Inscripto',
-    domicilio_del_consultorio: 'Av. Corrientes 1234',
+    domicilio_fiscal: 'Av. Corrientes 1234',
     localidad: 'CABA',
     zip: '1000',
     provincia: 'caba',

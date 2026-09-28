@@ -1081,7 +1081,7 @@ const COMPANY_A_CREAR = {
     razon_social: 'CLINICA DEMO SA',
     cuit: 30999999995,
     condicion_iva: 'Responsable Inscripto',
-    domicilio_del_consultorio: 'Av. Corrientes 1234',
+    domicilio_fiscal: 'Av. Corrientes 1234',
     localidad: 'CABA',
     zip: '1043',
     provincia: 'caba',
@@ -1569,7 +1569,7 @@ test('un negocio de Matias SI da de alta: esta mapeado a FACUNDO para probar', a
  */
 
 test('con la empresa incompleta no se crea NI el cliente NI el pedido', async () => {
-    const { hs, tango } = conAlta({ company: { ...COMPANY_A_CREAR, cuit: '', domicilio_del_consultorio: '' } });
+    const { hs, tango } = conAlta({ company: { ...COMPANY_A_CREAR, cuit: '', domicilio_fiscal: '' } });
 
     const r = await d2t.procesarDeal({
         dealId: '111', hs, tango, lookups: lk, dryRun: false,

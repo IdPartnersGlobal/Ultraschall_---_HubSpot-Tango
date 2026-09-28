@@ -50,7 +50,7 @@ const DEMO = {
     razon_social: 'EMPRESA DE PRUEBA INTEGRACION TANGO SA',
     cuit: 30999999995,
     condicion_iva: 'Responsable Inscripto',
-    domicilio_del_consultorio: 'Av. Corrientes 1234',
+    domicilio_fiscal: 'Av. Corrientes 1234',
     localidad: 'Ciudad Autonoma de Buenos Aires',
     zip: '1043',
     provincia: 'caba',
