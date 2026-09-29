@@ -363,6 +363,13 @@
         "2": "DOL"
       }
     },
+    "retroceso": {
+      "_nota": "DECISION DE MATIAS 2026-09-29 (dia de la demo): un negocio que se gano y no pudo generar el pedido vuelve a una etapa FIJA de su embudo, no a la anterior. Hasta ese dia volvia a la etapa inmediatamente anterior por displayOrder; el 2026-09-28 Ultraschall agrego Seguimiento Masivo, No Contesta y Basura - No Calificado justo antes de Cierre ganado, y dos negocios de la demo terminaron en Basura. Clave = ID del embudo; valor = ID de la etapa (el label es solo para leerlo aca: en la nota va el label ACTUAL del portal). Un embudo sin entrada aca, o una etapa que ya no existe o que es ganada, NO mueve el negocio: deja la nota y queda donde esta.",
+      "porEmbudo": {
+        "default": { "etapa": "decisionmakerboughtin", "label": "Negociación", "embudo": "Embudo de Ventas Ultraschall" },
+        "907189419": { "etapa": "1376134020", "label": "Pendiente OC/Contrato", "embudo": "Embudo de Licitaciones" }
+      }
+    },
     "productoDePrueba": {
       "_nota": "DECISION DE MATIAS 2026-08-27. Hasta que exista la integracion de productos, ningun product de HubSpot tiene tango_id_sta11: TODOS los renglones se marcaban incompletos y el pedido no salia nunca. Con esto el renglon sale igual, con la cantidad y el precio de la linea real, pero apuntando a este articulo.",
       "activo": true,
@@ -381,6 +388,7 @@
       "ID_MONEDA": "1 = PES 'Pesos'. VERIFICADO 2026-08-28. Los 1.065 pedidos de 2026 son PES; el unico otro ID en uso es 2 = DOL.",
       "ID_GVA43_TALON_PED": "1 = talonario 2 'PEDIDOS'. VERIFICADO 2026-08-28. Es el UNICO talonario de pedidos en uso: 3.234 de 3.234 pedidos de 2025 y 2026. OJO: el codigo es 2 y el ID interno es 1 — otra vez codigo != ID (5.4).",
       "ID_STA22": "1 = deposito '01' PRODUCTO TERMINADO. VERIFICADO 2026-08-28. Es la moda real: 703 de 1.065 pedidos de 2026 (66%) y 1.283 de 2.169 de 2025 (59%). Hay 16 depositos en uso; el resto se reparte sobre todo en 36 SERVICIO TECNICO, 12 EQUIPOS VETERINARIA y 40 CONGRESOS - EXPOS. Un pedido que tenga que salir de otro deposito lo va a tener que corregir una persona en el ERP: HubSpot no sabe de depositos.",
+      "ESTADO": "2 = APROBADO. DECISION DE LA REUNION CON ULTRASCHALL (2026-09-29): el pedido tiene que nacer aprobado. El de la demo (00001-00014118, negocio 65352815694) entro por Api/Create sin ESTADO y quedo en otro estado: lo aprobaron A MANO en Tango y ahi paso a 2. Los que carga comercial nacen en 2 — los 29 abiertos de 2025-2026 estan en 2 (el resto: 3 cumplido, 4 cerrado, 5 anulado). ESTADO es un campo de la cabecera que devuelve Api/GetById, igual que el resto de este bloque. ⚠️ Verificar en el primer pedido real despues del deploy que haya quedado en 2 (GVA21.ESTADO, filtro LEYENDA_4 LIKE 'HubSpot deal%').",
       "_dondeSeMiranLasTablas": "config/tango.processes.json -> auxiliares.talonariosPedido y auxiliares.depositos."
     },
     "defaults": {
@@ -392,7 +400,8 @@
       "APLICA_DESCUENTO_CLIENTE": false,
       "ES_CLIENTE_HABITUAL": true,
       "PORCENTAJE_DESCUENTO_GENERAL": 0,
-      "ID_ASIENTO_MODELO_GV": 1
+      "ID_ASIENTO_MODELO_GV": 1,
+      "ESTADO": 2
     },
     "desdeHubSpot": [
       "ID_GVA14",

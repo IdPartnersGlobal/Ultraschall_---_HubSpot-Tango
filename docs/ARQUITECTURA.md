@@ -2598,6 +2598,35 @@ La integración pone el disparador: **`tango_ultimo_error`** («Ultimo error al 
 
 Red: 8 tests nuevos. Verificado con mutación: la marca antes de la guarda, sin el `try` y sin la hora se detectan, las tres.
 
+### 9.31 El pedido nace aprobado: `ESTADO = 2` (2026-09-29)
+
+**Salió de la reunión con Ultraschall (día de la demo):** el pedido tiene que entrar a Tango **aprobado**. El de la demo (`00001-00014118`, negocio 65352815694) se creó por `Api/Create` sin `ESTADO` y quedó en otro estado; lo aprobaron **a mano** en Tango y recién ahí pasó a `2`.
+
+Lo que dicen los datos de producción (2025-2026, 3.760 pedidos): `2` = aprobado y pendiente, que es donde están **los 29** pedidos abiertos que cargó comercial; `3` cumplido (3.016), `4` cerrado (184), `5` anulado (531). Ninguno de los cargados en Tango queda en otro estado al nacer.
+
+`ESTADO: 2` va en `pedidos.defaults`, que se copia tal cual a la cabecera. Es un campo de la cabecera que devuelve `Api/GetById` (igual que los demás del bloque). Tests: el payload lo lleva, y también el que efectivamente se le manda al ERP en `procesarDeal`.
+
+⚠️ **No está probado contra Tango**: sólo se sabe con el primer pedido real después del deploy. Hay que leer `GVA21.ESTADO` del pedido con `LEYENDA_4 LIKE 'HubSpot deal%'` y confirmar que quedó en 2. Si Tango ignora el campo en el alta, el camino es otro (un `Api/Update` posterior, que hoy no se usa).
+
+Otra diferencia que queda y es esperable: `ORIGEN` = `E` (externo) en los que entran por la API, `T` en los de Tango.
+
+### 9.32 Un negocio que falla vuelve a una etapa FIJA, no a la anterior (2026-09-29)
+
+**El problema, visto en la demo:** el 2026-09-28 Ultraschall agregó al Embudo de Ventas «Seguimiento Masivo (MKT Automation)», «No Contesta» y **«Basura - No Calificado» justo antes de «Cierre ganado»**. El retroceso de §9.9 elegía la etapa inmediatamente anterior por `displayOrder`, así que un negocio que no podía generar el pedido terminaba en Basura. Pasó dos veces en la demo, y la nota se lo decía así a comercial.
+
+Ningún test lo vio porque el fixture de embudos era del 28/08. El test que decía «embudos REALES» fijaba un orden que ya no existía. Se actualizó el fixture con los embudos del 29/09, y con él fallaban 11 tests de integración: el bug, reproducido.
+
+**Decisión de Matías:** etapa **fija por embudo**, en `defaults.tango.json → pedidos.retroceso.porEmbudo` (clave = ID del embudo):
+
+| Embudo | Vuelve a |
+|---|---|
+| Embudo de Ventas Ultraschall (`default`) | Negociación (`decisionmakerboughtin`) |
+| Embudo de Licitaciones (`907189419`) | Pendiente OC/Contrato (`1376134020`) |
+
+`etapas.destinoDelRetroceso` reemplaza a `etapas.anterior`, que se borró. **No mueve el negocio** si el embudo no tiene etapa configurada, si la configurada ya no existe o si es ganada (sería un bucle: mover dispara el webhook). En esos casos la nota sale igual. El nombre que va en la nota es el actual del portal, no el de la configuración.
+
+Red: un test valida que cada embudo con etapa ganada tenga su destino, y que el destino exista y esté abierto. Así, un embudo nuevo o una etapa borrada rompen un test, no un negocio. Mutación: sin la configuración fallan 12 tests; aceptando una etapa ganada, 1.
+
 
 ## 10. Seguridad
 

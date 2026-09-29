@@ -1,5 +1,5 @@
 {
-  "_nota": "Los dos embudos de deals del portal 51311915, tal como los devuelve /crm/v3/pipelines/deals. Copiado el 2026-08-28. No hay datos personales: son etapas de embudo. Fija el orden real para que un reordenamiento del embudo rompa un test y no un pedido.",
+  "_nota": "Los dos embudos de deals del portal 51311915, tal como los devuelve /crm/v3/pipelines/deals. Copiado el 2026-09-29 (antes: 2026-08-28). El 2026-09-28 Ultraschall agrego Seguimiento Masivo, No Contesta y Basura - No Calificado JUSTO ANTES de Cierre ganado en Ventas: con el retroceso a la etapa anterior, un negocio que fallaba terminaba en Basura (paso dos veces en la demo). Por eso el retroceso ahora va a una etapa FIJA por embudo (pedidos.retroceso en defaults.tango.json). No hay datos personales: son etapas de embudo.",
   "pipelines": [
     {
       "id": "907189419",
@@ -34,9 +34,27 @@
           }
         },
         {
+          "id": "1445462700",
+          "label": "Pliego en Revisión",
+          "displayOrder": 3,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
+          "id": "1445462699",
+          "label": "Informe a Dirección",
+          "displayOrder": 4,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
           "id": "1376134019",
           "label": "Propuesta Presentada",
-          "displayOrder": 3,
+          "displayOrder": 5,
           "metadata": {
             "isClosed": "false",
             "probability": "0.6"
@@ -45,7 +63,7 @@
         {
           "id": "1376134020",
           "label": "Pendiente OC/Contrato",
-          "displayOrder": 4,
+          "displayOrder": 6,
           "metadata": {
             "isClosed": "false",
             "probability": "0.8"
@@ -54,7 +72,7 @@
         {
           "id": "1376134021",
           "label": "Cierre ganado",
-          "displayOrder": 5,
+          "displayOrder": 7,
           "metadata": {
             "isClosed": "true",
             "probability": "1.0"
@@ -63,7 +81,7 @@
         {
           "id": "1376134022",
           "label": "Cierre perdido",
-          "displayOrder": 6,
+          "displayOrder": 8,
           "metadata": {
             "isClosed": "false",
             "probability": "0.2"
@@ -78,7 +96,7 @@
       "stages": [
         {
           "id": "appointmentscheduled",
-          "label": "Lead Calificado",
+          "label": "Contacto Inicial",
           "displayOrder": 0,
           "metadata": {
             "isClosed": "false",
@@ -87,7 +105,7 @@
         },
         {
           "id": "qualifiedtobuy",
-          "label": "Diagnóstico de Necesidades",
+          "label": "Seguimiento 1",
           "displayOrder": 1,
           "metadata": {
             "isClosed": "false",
@@ -95,36 +113,99 @@
           }
         },
         {
-          "id": "1364103973",
-          "label": "Validación/Demo",
+          "id": "1445449599",
+          "label": "Llamada o Asesoramiento",
           "displayOrder": 2,
           "metadata": {
             "isClosed": "false",
-            "probability": "0.2"
+            "probability": "0.5"
           }
         },
         {
           "id": "presentationscheduled",
-          "label": "Propuesta",
+          "label": "Cotización Enviada",
           "displayOrder": 3,
           "metadata": {
             "isClosed": "false",
-            "probability": "0.6"
+            "probability": "0.5"
+          }
+        },
+        {
+          "id": "1364103973",
+          "label": "Demo de Producto",
+          "displayOrder": 4,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.7"
+          }
+        },
+        {
+          "id": "1445449600",
+          "label": "Seguimiento 2",
+          "displayOrder": 5,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.7"
           }
         },
         {
           "id": "decisionmakerboughtin",
           "label": "Negociación",
-          "displayOrder": 4,
+          "displayOrder": 6,
           "metadata": {
             "isClosed": "false",
             "probability": "0.8"
           }
         },
         {
+          "id": "1445449601",
+          "label": "Promesa de Pago",
+          "displayOrder": 7,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.9"
+          }
+        },
+        {
+          "id": "1445449602",
+          "label": "Seguimiento Final",
+          "displayOrder": 8,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.9"
+          }
+        },
+        {
+          "id": "1445449603",
+          "label": "Seguimiento Masivo (MKT Automation)",
+          "displayOrder": 9,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
+          "id": "1447521200",
+          "label": "No Contesta",
+          "displayOrder": 10,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
+          "id": "1447521199",
+          "label": "Basura - No Calificado",
+          "displayOrder": 11,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.1"
+          }
+        },
+        {
           "id": "closedwon",
           "label": "Cierre ganado",
-          "displayOrder": 5,
+          "displayOrder": 12,
           "metadata": {
             "isClosed": "true",
             "probability": "1.0"
@@ -133,7 +214,7 @@
         {
           "id": "closedlost",
           "label": "Cierre perdido",
-          "displayOrder": 6,
+          "displayOrder": 13,
           "metadata": {
             "isClosed": "false",
             "probability": "0.2"

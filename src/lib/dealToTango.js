@@ -572,7 +572,7 @@ async function releerNroPedido({ tango, codigoCliente, dealId, log = silencioso 
  *
  * ⚠️ Mover la etapa DISPARA EL WEBHOOK otra vez: esta suscripto a `dealstage`.
  * No es un bucle porque se retrocede a una etapa abierta y el control 3 la
- * descarta sin gastar red. `etapas.anterior` ademas se saltea las ganadas.
+ * descarta sin gastar red. `etapas.destinoDelRetroceso` ademas nunca devuelve una ganada.
  *
  * ⚠️ La cola es at-least-once (§9.5). La guarda contra duplicar la nota y
  * retroceder DOS etapas no es un flag propio: es que el negocio ya no esta en
@@ -609,7 +609,8 @@ async function reportarIncompleto({ hs, dealId, etapaActual, problemas = [], tip
         return { motivo, nota: false, retroceso: null, yaReportado: true };
     }
 
-    const retroceso = etapas.anterior(etapaActual, pipelines, ganadas);
+    // Etapa FIJA por embudo (§9.32), no la anterior: el orden del embudo cambia.
+    const retroceso = etapas.destinoDelRetroceso(etapaActual, pipelines, ganadas, defaults.pedidos.retroceso?.porEmbudo);
     const etapaGanada = etapas.etiqueta(etapaActual, pipelines) || 'Cierre ganado';
 
     // La marca para el workflow que le avisa al propietario (2026-09-28). Va
@@ -630,7 +631,7 @@ async function reportarIncompleto({ hs, dealId, etapaActual, problemas = [], tip
     }
 
     if (!retroceso) {
-        log.aviso('DEAL', `${dealId}: no hay etapa anterior a la que volver; queda en '${etapaGanada}'`);
+        log.aviso('DEAL', `${dealId}: el embudo no tiene etapa de retroceso valida (pedidos.retroceso); queda en '${etapaGanada}'`);
         return { motivo, nota, retroceso: null };
     }
 

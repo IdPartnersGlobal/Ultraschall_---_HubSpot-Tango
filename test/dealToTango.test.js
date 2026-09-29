@@ -93,63 +93,67 @@ test('una firma que no cierra es 401 y no se lee nada', () => {
 });
 
 
-// ── Retroceder una etapa (§9.9) ─────────────────────────────────────────
+// ── A que etapa vuelve un negocio que fallo (§9.9, §9.32) ─────────────────
 
-test('la etapa anterior sale de los embudos REALES del portal', () => {
-    // Fija el orden de hoy. Si alguien reordena el embudo, se rompe este test
-    // y no un pedido: hoy 'Cierre perdido' va DESPUES de 'Cierre ganado'
-    // (displayOrder 6 contra 5) en los dos embudos, y por eso retroceder por
-    // displayOrder es seguro. Si eso cambiara, dejaria de serlo.
+const RETROCESO = defaults.pedidos.retroceso.porEmbudo;
+
+test('con los embudos REALES vuelve a la etapa fija: Negociacion y Pendiente OC, NUNCA a Basura', () => {
+    // Los embudos del portal al 2026-09-29. El 28/9 agregaron Seguimiento
+    // Masivo, No Contesta y Basura - No Calificado justo antes de Cierre ganado,
+    // y con "la anterior" dos negocios de la demo terminaron en Basura.
     const ps = require('./fixtures/pipelines-deals.json').pipelines;
 
-    const ventas = etapas.anterior('closedwon', ps);
+    const ventas = etapas.destinoDelRetroceso('closedwon', ps, etapas.desdePipelines(ps), RETROCESO);
     assert.strictEqual(ventas.id, 'decisionmakerboughtin');
     assert.strictEqual(ventas.label, 'Negociación');
     assert.strictEqual(ventas.pipelineLabel, 'Embudo de Ventas Ultraschall');
 
-    const licitaciones = etapas.anterior('1376134021', ps);
+    const licitaciones = etapas.destinoDelRetroceso('1376134021', ps, etapas.desdePipelines(ps), RETROCESO);
     assert.strictEqual(licitaciones.id, '1376134020');
     assert.strictEqual(licitaciones.label, 'Pendiente OC/Contrato');
+});
 
+test('la configuracion apunta a etapas que existen, abiertas, en cada embudo con ganado', () => {
+    const ps = require('./fixtures/pipelines-deals.json').pipelines;
+    const ganadas = etapas.desdePipelines(ps);
     for (const p of ps) {
-        const orden = Object.fromEntries(p.stages.map((s) => [s.label, Number(s.displayOrder)]));
-        assert.ok(orden['Cierre perdido'] > orden['Cierre ganado'],
-            `en '${p.label}' Cierre perdido dejo de ir despues de Cierre ganado: revisar etapas.anterior`);
+        if (!p.stages.some((s) => ganadas.has(String(s.id)))) continue;
+        const cfg = RETROCESO[String(p.id)];
+        assert.ok(cfg, `el embudo '${p.label}' no tiene etapa de retroceso configurada`);
+        const etapa = p.stages.find((s) => String(s.id) === cfg.etapa);
+        assert.ok(etapa, `'${cfg.label}' ya no existe en '${p.label}'`);
+        assert.ok(!ganadas.has(String(etapa.id)), `'${etapa.label}' es ganada: seria un bucle`);
+        assert.notStrictEqual(String(etapa.metadata?.isClosed), 'true', `'${etapa.label}' esta cerrada`);
     }
 });
 
-test('retroceder NUNCA cae en otra etapa ganada', () => {
-    // Mover la etapa dispara el webhook otra vez: caer en una ganada seria un bucle.
-    const pipelines = [{
-        id: 'p', label: 'Raro',
-        stages: [
-            { id: 'primera', label: 'Primera', displayOrder: 0 },
-            { id: 'ganado-viejo', label: 'Ganado viejo', displayOrder: 1 },
-            { id: 'closedwon', label: 'Cierre ganado', displayOrder: 2 },
-        ],
-    }];
-    const ganadas = new Set(['closedwon', 'ganado-viejo']);
-    assert.strictEqual(etapas.anterior('closedwon', pipelines, ganadas).id, 'primera');
-});
-
-test('sin etapa anterior no se inventa ninguna', () => {
-    const pipelines = [{ id: 'p', label: 'X', stages: [{ id: 'unica', label: 'Unica', displayOrder: 0 }] }];
-    assert.strictEqual(etapas.anterior('unica', pipelines), null, 'ya estaba en la primera');
-    assert.strictEqual(etapas.anterior('fantasma', pipelines), null, 'no pertenece a ningun embudo');
-    assert.strictEqual(etapas.anterior(null, pipelines), null);
-    assert.strictEqual(etapas.anterior('closedwon', []), null, 'sin embudos no se mueve nada');
-});
-
-test('anterior se ordena por displayOrder, no por como vengan', () => {
+test('reordenar el embudo no cambia el destino', () => {
     const pipelines = [{
         id: 'p', label: 'X',
         stages: [
-            { id: 'c', label: 'C', displayOrder: 2 },
-            { id: 'a', label: 'A', displayOrder: 0 },
-            { id: 'b', label: 'B', displayOrder: 1 },
+            { id: 'closedwon', label: 'Cierre ganado', displayOrder: 0 },
+            { id: 'basura', label: 'Basura', displayOrder: 1 },
+            { id: 'nego', label: 'Negociación', displayOrder: 9 },
         ],
     }];
-    assert.strictEqual(etapas.anterior('c', pipelines).id, 'b');
+    assert.strictEqual(etapas.destinoDelRetroceso('closedwon', pipelines, new Set(['closedwon']), { p: { etapa: 'nego' } }).id, 'nego');
+});
+
+test('sin una etapa valida configurada no se mueve nada', () => {
+    const pipelines = [{ id: 'p', label: 'X', stages: [{ id: 'closedwon', label: 'Cierre ganado', displayOrder: 1 }, { id: 'otro-ganado', label: 'Ganado 2', displayOrder: 0 }, { id: 'abierta', label: 'Abierta', displayOrder: 2 }] }];
+    const ganadas = new Set(['closedwon', 'otro-ganado']);
+    assert.strictEqual(etapas.destinoDelRetroceso('closedwon', pipelines, ganadas, {}), null, 'embudo sin configurar: no se adivina');
+    assert.strictEqual(etapas.destinoDelRetroceso('closedwon', pipelines, ganadas, { p: { etapa: 'borrada' } }), null, 'la etapa ya no existe');
+    assert.strictEqual(etapas.destinoDelRetroceso('closedwon', pipelines, ganadas, { p: { etapa: 'otro-ganado' } }), null, 'una ganada seria un bucle');
+    assert.strictEqual(etapas.destinoDelRetroceso('fantasma', pipelines, ganadas, { p: { etapa: 'abierta' } }), null, 'no pertenece a ningun embudo');
+    assert.strictEqual(etapas.destinoDelRetroceso(null, pipelines, ganadas, { p: { etapa: 'abierta' } }), null);
+    assert.strictEqual(etapas.destinoDelRetroceso('closedwon', [], ganadas, { p: { etapa: 'abierta' } }), null, 'sin embudos no se mueve nada');
+});
+
+test('la nota nombra la etapa como se llama HOY en el portal, no como dice la config', () => {
+    const pipelines = [{ id: 'p', label: 'X', stages: [{ id: 'closedwon', label: 'Cierre ganado' }, { id: 'nego', label: 'Negociación final' }] }];
+    const r = etapas.destinoDelRetroceso('closedwon', pipelines, new Set(['closedwon']), { p: { etapa: 'nego', label: 'Negociación' } });
+    assert.strictEqual(r.label, 'Negociación final');
 });
 
 // ── El texto de la nota ─────────────────────────────────────────────────
@@ -395,6 +399,20 @@ test('el talonario, el deposito, la moneda y el stock salen de los defaults', ()
     assert.strictEqual(r.payload.ID_STA22, 1, 'deposito 01 PRODUCTO TERMINADO, 66% de los pedidos');
     assert.strictEqual(r.payload.ID_MONEDA, 1, 'PES');
     assert.strictEqual(r.payload.VALIDA_STOCK, true, 'decision de Matias 2026-08-25');
+});
+
+test('el pedido nace APROBADO: ESTADO 2 (reunion con Ultraschall 2026-09-29)', () => {
+    // El pedido de la demo (00001-00014118) entro por la API en otro estado y
+    // lo tuvieron que aprobar a mano en Tango. Los que carga comercial nacen en
+    // 2: los 29 abiertos de 2025-2026 estan en 2.
+    assert.strictEqual(verificar().payload.ESTADO, 2);
+});
+
+test('el ESTADO aprobado llega al ERP en el pedido que se crea de verdad', async () => {
+    const tango = tangoFalso();
+    const r = await d2t.procesarDeal({ dealId: '111', hs: hsFalso(), tango, lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(tango.creados[0].payload.ESTADO, 2);
 });
 
 test('los defaults del pedido apuntan a filas que existen en el ERP', () => {

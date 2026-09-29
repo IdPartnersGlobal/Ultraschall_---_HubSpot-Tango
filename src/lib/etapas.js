@@ -58,47 +58,40 @@ function esGanada(etapa, ganadas = GANADAS) {
 }
 
 /**
- * La etapa inmediatamente anterior, para devolver un negocio que se gano con
- * datos incompletos (§9.9).
+ * A que etapa vuelve un negocio que se gano y no pudo generar el pedido (§9.9).
  *
- * "Anterior" es por `displayOrder` dentro del MISMO embudo, no por el orden en
- * que HubSpot devuelve las etapas, que no esta garantizado.
+ * Es una etapa FIJA por embudo, de la configuracion (`pedidos.retroceso` en
+ * defaults.tango.json). Decision de Matias 2026-09-29, §9.32. Hasta ese dia era
+ * "la anterior por displayOrder", y el 28/9 Ultraschall agrego Seguimiento
+ * Masivo, No Contesta y Basura - No Calificado justo antes de Cierre ganado: dos
+ * negocios de la demo terminaron en Basura. Una etapa fija no depende del orden.
  *
- * ⚠️ Se saltea cualquier etapa GANADA. No es teorico: mover el negocio dispara
- * el webhook otra vez (esta suscripto a `dealstage`), asi que retroceder a otra
- * etapa ganada seria un bucle. Retrocediendo a una etapa abierta el webhook
- * llega igual, pero muere en el control 3 sin gastar una sola llamada de red.
+ * No mueve nada (null) si:
+ *   - el embudo no tiene etapa configurada (un embudo nuevo no se adivina);
+ *   - la etapa configurada ya no existe en el embudo (la borraron);
+ *   - la etapa configurada es GANADA: mover el negocio dispara el webhook otra
+ *     vez (esta suscripto a `dealstage`) y seria un bucle.
+ * En esos casos la nota sale igual y el negocio queda donde esta.
  *
- * ⚠️ NO se usa `isClosed` para saltear 'Cierre perdido': en este portal esa
- * etapa esta marcada `isClosed=false` en los dos embudos (mal cargado, ver
- * `desdePipelines`). Hoy no hace falta —medido 2026-08-28, 'Cierre perdido' va
- * DESPUES de 'Cierre ganado' en los dos, displayOrder 6 contra 5—, pero si
- * alguien reordena el embudo esto elegiria mal. El test lo fija contra los
- * embudos reales para que un reordenamiento rompa un test y no un pedido.
+ * El label es el ACTUAL del portal, no el de la configuracion: si le cambian el
+ * nombre a la etapa, la nota dice el nombre nuevo.
  *
- * @returns {{id, label, pipelineId, pipelineLabel}|null} null si no hay anterior
+ * @returns {{id, label, pipelineId, pipelineLabel}|null}
  */
-function anterior(etapaActual, pipelines = [], ganadas = GANADAS) {
+function destinoDelRetroceso(etapaActual, pipelines = [], ganadas = GANADAS, porEmbudo = {}) {
     const actual = String(etapaActual ?? '').trim();
     if (!actual) return null;
 
-    for (const p of pipelines) {
-        const ordenadas = [...(p.stages || [])].sort((a, b) => Number(a.displayOrder) - Number(b.displayOrder));
-        const i = ordenadas.findIndex((s) => String(s.id) === actual);
-        if (i === -1) continue;
+    const p = pipelines.find((x) => (x.stages || []).some((s) => String(s.id) === actual));
+    if (!p) return null; // la etapa no pertenece a ningun embudo conocido
 
-        for (let j = i - 1; j >= 0; j--) {
-            if (esGanada(ordenadas[j].id, ganadas)) continue;
-            return {
-                id: String(ordenadas[j].id),
-                label: ordenadas[j].label,
-                pipelineId: String(p.id),
-                pipelineLabel: p.label,
-            };
-        }
-        return null; // ya estaba en la primera etapa del embudo
-    }
-    return null; // la etapa no pertenece a ningun embudo conocido
+    const destino = String(porEmbudo?.[String(p.id)]?.etapa ?? '').trim();
+    if (!destino) return null;
+
+    const etapa = (p.stages || []).find((s) => String(s.id) === destino);
+    if (!etapa || esGanada(etapa.id, ganadas)) return null;
+
+    return { id: String(etapa.id), label: etapa.label, pipelineId: String(p.id), pipelineLabel: p.label };
 }
 
 /** Nombre legible de una etapa, para poder nombrarla en la nota. */
@@ -110,4 +103,4 @@ function etiqueta(etapa, pipelines = []) {
     return null;
 }
 
-module.exports = { esGanada, desdePipelines, anterior, etiqueta, GANADAS };
+module.exports = { esGanada, desdePipelines, destinoDelRetroceso, etiqueta, GANADAS };
