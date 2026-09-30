@@ -1456,7 +1456,7 @@ Detalle que cuesta caro: `isClosed` llega como **string**. Tratarlo como boolean
 | `FECHA_ENTREGA` | 🟡 propiedad del Deal a definir | |
 | `NRO_ORDEN_COMPRA` | 🟡 propiedad del Deal a definir | |
 | `LEYENDA_1..5` | trazabilidad | Propuesta: dejar el ID del Deal de HubSpot en una leyenda para auditoría. |
-| `VALIDA_STOCK` | config | ⚠️ el ejemplo va en `false`; definir si producción debe validar. |
+| `VALIDA_STOCK` | config | `false` desde el 2026-09-30: el stock no frena el pedido (§9.33). |
 | `PORCENTAJE_DESCUENTO_GENERAL` | Deal | |
 | `APLICA_DESCUENTO_CLIENTE` / `CALCULA_PROMOCIONES` | config | Definir política. |
 
@@ -2626,6 +2626,18 @@ Ningún test lo vio porque el fixture de embudos era del 28/08. El test que dec�
 `etapas.destinoDelRetroceso` reemplaza a `etapas.anterior`, que se borró. **No mueve el negocio** si el embudo no tiene etapa configurada, si la configurada ya no existe o si es ganada (sería un bucle: mover dispara el webhook). En esos casos la nota sale igual. El nombre que va en la nota es el actual del portal, no el de la configuración.
 
 Red: un test valida que cada embudo con etapa ganada tenga su destino, y que el destino exista y esté abierto. Así, un embudo nuevo o una etapa borrada rompen un test, no un negocio. Mutación: sin la configuración fallan 12 tests; aceptando una etapa ganada, 1.
+
+### 9.33 El stock no frena el pedido: `VALIDA_STOCK = false` (2026-09-30)
+
+**Decisión de Matías:** que Tango no rechace un pedido porque falta stock. `VALIDA_STOCK` pasa de `true` (decisión del 2026-08-25) a `false` en `pedidos.defaults`.
+
+**Por qué:** con `true`, si un artículo no tiene existencias, Tango rechaza el pedido entero. El negocio vuelve con la nota «Tango no aceptó la operación», que parece un error de la integración y no lo es. Pasó en la demo del 29/09 (el aviso de `tango_ultimo_error` de las 19:22 fue un rechazo por stock). Y a medida que los productos tienen su `tango_id_sta11` y dejan de salir como `ZZZ`, iba a pasar cada vez más: el 29/09 sólo 48 de los productos de HubSpot tenían stock en el depósito 01.
+
+**Qué no cambia:** esta decisión sólo saca el rechazo. No toca si el pedido compromete stock en Tango. Eso lo decide la parametrización de Tango, no el payload. La traducción del mensaje «No hay existencias…» en `enCastellano` queda por si Tango lo sigue mandando.
+
+**Evidencia:** `false` es el valor del ejemplo de Postman (`docs/payloads/pedido-create.json`), que Tango aceptó. ⚠️ **No está probado contra la empresa 3 con un artículo sin existencias**: el primer pedido real que tenga uno lo confirma.
+
+Red: el test de defaults exige `false`. Las secciones 9.6 y 9.20 quedan como historia: describen el período en que estaba en `true`.
 
 
 ## 10. Seguridad

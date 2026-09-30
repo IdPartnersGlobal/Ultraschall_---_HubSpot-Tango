@@ -398,7 +398,9 @@ test('el talonario, el deposito, la moneda y el stock salen de los defaults', ()
     assert.strictEqual(r.payload.ID_GVA43_TALON_PED, 1, 'talonario 2 PEDIDOS, el unico en uso');
     assert.strictEqual(r.payload.ID_STA22, 1, 'deposito 01 PRODUCTO TERMINADO, 66% de los pedidos');
     assert.strictEqual(r.payload.ID_MONEDA, 1, 'PES');
-    assert.strictEqual(r.payload.VALIDA_STOCK, true, 'decision de Matias 2026-08-25');
+    // El stock NO frena el pedido: decision de Matias 2026-09-30 (9.33). Estuvo
+    // en true del 2026-08-25 al 30/09 y en la demo Tango rechazo uno por stock.
+    assert.strictEqual(r.payload.VALIDA_STOCK, false, 'decision de Matias 2026-09-30');
 });
 
 test('el pedido nace APROBADO: ESTADO 2 (reunion con Ultraschall 2026-09-29)', () => {

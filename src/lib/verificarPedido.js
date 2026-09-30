@@ -26,8 +26,8 @@ const verificarEmpresa = require('./verificarEmpresa');
  * process de GVA43 y STA22 nunca se consiguieron y ya no hacen falta: las
  * auxiliares se resolvieron por la columna interna de GVA21 (7.7).
  *
- * El que sigue sin evidencia es VALIDA_STOCK. Si el articulo no tiene stock,
- * Tango rechaza el pedido y el error va a parecer del circuito.
+ * VALIDA_STOCK va en false desde el 2026-09-30 (decision de Matias, 9.33): la
+ * falta de stock no frena el pedido, ni aca ni en el ERP.
  *
  * ⚠️ Que la company no tenga `tango_id_gva14` NO es un problema del pedido: es
  * un cliente que todavia no existe en el ERP y hay que darlo de alta primero
