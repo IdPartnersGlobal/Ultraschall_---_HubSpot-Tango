@@ -227,6 +227,7 @@
             "farancibia@ultraschall.com.ar": "10",
             "jbutorac@ultraschall.com.ar": "24",
             "jgomez@ultraschall.com.ar": "25",
+            "ggarcia@ultraschall.com.ar": "28",
             "matias.tari@idpartners.ar": "10"
           },
           "porOwnerNota": "matias.tari@idpartners.ar NO es vendedor de Ultraschall: es el implementador, y va mapeado a FACUNDO (10) por pedido de Matias (2026-09-03) para poder probar el circuito con negocios propios. Los clientes que cree una prueba suya van a quedar con FACUNDO de vendedor — que es lo que pasaba con TODOS antes de que el default se sacara. Sacar este renglon el dia que las pruebas terminen.",
@@ -364,10 +365,10 @@
       }
     },
     "retroceso": {
-      "_nota": "DECISION DE MATIAS 2026-09-29 (dia de la demo): un negocio que se gano y no pudo generar el pedido vuelve a una etapa FIJA de su embudo, no a la anterior. Hasta ese dia volvia a la etapa inmediatamente anterior por displayOrder; el 2026-09-28 Ultraschall agrego Seguimiento Masivo, No Contesta y Basura - No Calificado justo antes de Cierre ganado, y dos negocios de la demo terminaron en Basura. Clave = ID del embudo; valor = ID de la etapa (el label es solo para leerlo aca: en la nota va el label ACTUAL del portal). Un embudo sin entrada aca, o una etapa que ya no existe o que es ganada, NO mueve el negocio: deja la nota y queda donde esta.",
+      "_nota": "DECISION DE MATIAS 2026-09-29 (dia de la demo): un negocio que se gano y no pudo generar el pedido vuelve a una etapa FIJA de su embudo, no a la anterior. Hasta ese dia volvia a la etapa inmediatamente anterior por displayOrder; el 2026-09-28 Ultraschall agrego Seguimiento Masivo, No Contesta y Basura - No Calificado justo antes de Cierre ganado, y dos negocios de la demo terminaron en Basura. Clave = ID del embudo; valor = ID de la etapa (el label es solo para leerlo aca: en la nota va el label ACTUAL del portal). Un embudo sin entrada aca, o una etapa que ya no existe o que es ganada, NO mueve el negocio: deja la nota y queda donde esta. CAMBIADO EL 2026-10-02 (Matias): en los dos embudos vuelve a 'Rebotado | Ver errores', una etapa que Ultraschall creo para eso justo antes de Cierre ganado. Hasta ese dia volvia a Negociacion (Ventas) y a Pendiente OC/Contrato (Licitaciones).",
       "porEmbudo": {
-        "default": { "etapa": "decisionmakerboughtin", "label": "Negociación", "embudo": "Embudo de Ventas Ultraschall" },
-        "907189419": { "etapa": "1376134020", "label": "Pendiente OC/Contrato", "embudo": "Embudo de Licitaciones" }
+        "default": { "etapa": "1448683552", "label": "Rebotado | Ver errores", "embudo": "Embudo de Ventas Ultraschall" },
+        "907189419": { "etapa": "1448681912", "label": "Rebotado | Ver errores", "embudo": "Embudo de Licitaciones" }
       }
     },
     "productoDePrueba": {

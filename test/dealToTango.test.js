@@ -96,21 +96,27 @@ test('una firma que no cierra es 401 y no se lee nada', () => {
 // ── A que etapa vuelve un negocio que fallo (§9.9, §9.32) ─────────────────
 
 const RETROCESO = defaults.pedidos.retroceso.porEmbudo;
+/** "Rebotado | Ver errores" en cada embudo (Matias, 2026-10-02). */
+const REBOTADO_VENTAS = '1448683552';
+const REBOTADO_LICITACIONES = '1448681912';
 
-test('con los embudos REALES vuelve a la etapa fija: Negociacion y Pendiente OC, NUNCA a Basura', () => {
-    // Los embudos del portal al 2026-09-29. El 28/9 agregaron Seguimiento
+test('con los embudos REALES vuelve a "Rebotado | Ver errores" en los dos, NUNCA a Basura', () => {
+    // Los embudos del portal al 2026-10-02. El 28/9 agregaron Seguimiento
     // Masivo, No Contesta y Basura - No Calificado justo antes de Cierre ganado,
-    // y con "la anterior" dos negocios de la demo terminaron en Basura.
+    // y con "la anterior" dos negocios de la demo terminaron en Basura. Despues
+    // agregaron "Rebotado | Ver errores" en los dos embudos, y desde el 2/10 el
+    // negocio que falla va ahi (antes: Negociacion y Pendiente OC/Contrato).
     const ps = require('./fixtures/pipelines-deals.json').pipelines;
 
     const ventas = etapas.destinoDelRetroceso('closedwon', ps, etapas.desdePipelines(ps), RETROCESO);
-    assert.strictEqual(ventas.id, 'decisionmakerboughtin');
-    assert.strictEqual(ventas.label, 'Negociación');
+    assert.strictEqual(ventas.id, REBOTADO_VENTAS);
+    assert.strictEqual(ventas.label, 'Rebotado | Ver errores');
     assert.strictEqual(ventas.pipelineLabel, 'Embudo de Ventas Ultraschall');
 
     const licitaciones = etapas.destinoDelRetroceso('1376134021', ps, etapas.desdePipelines(ps), RETROCESO);
-    assert.strictEqual(licitaciones.id, '1376134020');
-    assert.strictEqual(licitaciones.label, 'Pendiente OC/Contrato');
+    assert.strictEqual(licitaciones.id, REBOTADO_LICITACIONES);
+    assert.strictEqual(licitaciones.label, 'Rebotado | Ver errores');
+    assert.strictEqual(licitaciones.pipelineLabel, 'Embudo de Licitaciones');
 });
 
 test('la configuracion apunta a etapas que existen, abiertas, en cada embudo con ganado', () => {
@@ -808,15 +814,15 @@ test('un negocio incompleto deja una nota que dice QUE falta', async () => {
     assert.strictEqual(hs.notas[0].objetoTipo, 'deals');
     assert.strictEqual(hs.notas[0].id, '111');
     assert.match(hs.notas[0].cuerpo, /catalogo/, 'la nota dice que falta');
-    assert.match(hs.notas[0].cuerpo, /Negociación/, 'y a que etapa se movio');
+    assert.match(hs.notas[0].cuerpo, /Rebotado \| Ver errores/, 'y a que etapa se movio');
 });
 
 test('un negocio incompleto vuelve UNA etapa atras', async () => {
     const hs = hsFalso({ lineItems: [linea({ hs_product_id: undefined })] });
     const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
 
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'Negociación, la anterior a Cierre ganado');
-    assert.strictEqual(r.retroceso.label, 'Negociación');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS, 'Rebotado | Ver errores, la etapa fija del embudo');
+    assert.strictEqual(r.retroceso.label, 'Rebotado | Ver errores');
 });
 
 test('la nota se escribe ANTES de mover la etapa', async () => {
@@ -840,7 +846,7 @@ test('si la nota falla, el negocio se mueve igual', async () => {
 
     const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
     assert.strictEqual(r.estado, 'incompleto');
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS);
     assert.ok(hs.problemaEscrito(), 'la explicacion quedo en la propiedad');
 });
 
@@ -850,8 +856,8 @@ test('un negocio de Licitaciones vuelve a la etapa de SU embudo', async () => {
     const hs = hsFalso({ deal: { dealstage: '1376134021' }, lineItems: [linea({ hs_product_id: undefined })] });
     const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
 
-    assert.strictEqual(hs.etapaFinal, '1376134020');
-    assert.strictEqual(r.retroceso.label, 'Pendiente OC/Contrato');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_LICITACIONES);
+    assert.strictEqual(r.retroceso.label, 'Rebotado | Ver errores');
     assert.strictEqual(r.retroceso.pipelineLabel, 'Embudo de Licitaciones');
 });
 
@@ -930,7 +936,7 @@ test('que falle la marca de error no frena la nota ni el retroceso', async () =>
     const r = await d2t.procesarDeal({ dealId: '111', hs, tango: tangoFalso(), lookups: lk, dryRun: false });
     assert.strictEqual(r.estado, 'incompleto');
     assert.strictEqual(hs.notas.length, 1);
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS);
 });
 
 test('un pedido que sale bien no deja marca de error', async () => {
@@ -956,7 +962,7 @@ test('a una empresa incompleta se la reporta igual que a un negocio', async () =
 
     assert.strictEqual(r.estado, 'incompleto');
     assert.strictEqual(hs.notas.length, 1);
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS);
 });
 
 test('el circuito entero sale con el articulo de prueba y crea el pedido', async () => {
@@ -1137,7 +1143,7 @@ test('veneno: un negocio propio si recibe la nota y vuelve una etapa', async () 
 
     assert.strictEqual(r.estado, 'reportado');
     assert.strictEqual(hs.notas.length, 1);
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'vuelve a Negociacion, no a otra cosa');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS, 'vuelve a Rebotado, no a otra cosa');
     // El texto es el tecnico: aca no falta ningun dato que comercial pueda cargar.
     assert.match(hs.notas[0].cuerpo, /ERP no respondio|no se pudo crear/i);
 });
@@ -1248,7 +1254,7 @@ test('una empresa sin codigo que parece un cliente de Tango NO se da de alta: fr
     assert.match(hs.notas[0].cuerpo, /Hay que corregir esto/, 'no falta un dato: hay que decidir si es el mismo');
     assert.match(hs.notas[0].cuerpo, /parece ser el cliente 007678/);
     assert.match(hs.notas[0].cuerpo, /cargarle el código 007678/);
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS);
 });
 
 test('si el cliente ya tiene su empresa en HubSpot, la nota pide asociar el negocio a esa: no cargar un codigo que frenaria otra vez', async () => {
@@ -1369,7 +1375,7 @@ test('si Tango rechaza el DATO del alta, se anota y retrocede: NO se propaga', a
 
     assert.strictEqual(r.estado, 'incompleto', 'sale por el camino de los datos, no por el de las fallas');
     assert.strictEqual(hs.notas.length, 1, 'comercial se entera en el negocio');
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'y el negocio vuelve una etapa');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS, 'y el negocio vuelve una etapa');
     assert.match(hs.notas[0].cuerpo, /20 caracteres/, 'la nota dice el limite que puso el ERP');
     assert.doesNotMatch(hs.notas[0].cuerpo, /avisar a sistemas/i, 'y NO manda a sistemas: no hay nada roto');
 });
@@ -1662,7 +1668,7 @@ test('con la empresa incompleta no se crea NI el cliente NI el pedido', async ()
 
     assert.strictEqual(r.estado, 'incompleto');
     assert.strictEqual(tango.creados.length, 0, 'no se toca el ERP: ni alta ni pedido');
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'y el negocio retrocede una etapa');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS, 'y el negocio retrocede una etapa');
     assert.deepStrictEqual(r.problemas.map((p) => p.campo).sort(), ['CUIT', 'DOMICILIO']);
 });
 
@@ -2178,7 +2184,7 @@ test('un codigo que no existe en Tango FRENA, no crea nada y la nota dice que ha
 
     assert.strictEqual(r.estado, 'incompleto');
     assert.strictEqual(tango.creados.length, 0, 'ni cliente ni pedido');
-    assert.strictEqual(hs.etapaFinal, 'decisionmakerboughtin', 'vuelve una etapa, como cualquier freno');
+    assert.strictEqual(hs.etapaFinal, REBOTADO_VENTAS, 'vuelve una etapa, como cualquier freno');
     assert.ok(!hs.escrituras.some((e) => e.objetoTipo === 'companies'), 'la empresa no se toca');
 
     const nota = hs.notas[0].cuerpo;

@@ -1099,6 +1099,9 @@ En el catálogo se guarda el **código**, no el ID: el ID se resuelve contra la 
 | `10` FACUNDO | `farancibia@ultraschall.com.ar` |
 | `24` Juan Butorac | `jbutorac@ultraschall.com.ar` |
 | `25` Julian Gomez | `jgomez@ultraschall.com.ar` |
+| `28` Gerardo Garcia | `ggarcia@ultraschall.com.ar` (agregado el 2026-10-02) |
+
+**2026-10-02:** «Gerardo Garcia» es un alta nueva en Tango (código `28`, ID interno `31`, sin mail), y Matías pidió vincularlo a `ggarcia@ultraschall.com.ar` (owner `94578356`). Vino con dos cambios más: la opción nueva en el desplegable `tango_vendedor` (si no, el sync de empresas se cae con 400 en la tanda de 100 donde aparezca el primer cliente suyo) y el fixture `vendedores.json`, ahora con 28 vendedores. Al 2026-10-02 ningún cliente de Tango lo tiene asignado (de 5.843). ⚠️ **Orden para desplegar:** primero `node scripts/crearPropiedades.js clientes --solo tango_vendedor --aplicar` (agrega la opción en el portal) y **después** el push. El orden es el mismo que el de `posible_duplicado` (§7.16).
 
 🟡 **Sólo cerraron 4 de 27.** Los otros 23 (FERNANDO, DAVID, DOMENECH ROMINA, MELINA, VANESA, Narkys Garmendia, Natali Vazquez…) no tienen un owner con nombre parecido, y quedan 8 owners `@ultraschall.com.ar` sin vendedor (`pthaler`, `emiccelli`, `jquiroga`, `agaston`, `ggarcia`, `cgscaputo`…). Hay que completar la tabla a mano. Mientras tanto esos casos caen en FACUNDO, y queda registrado en `resueltos.ID_GVA23.ownerSinEquivalencia` de qué mail se trataba — para no confundir el default con un dato real del owner.
 
@@ -2618,10 +2621,12 @@ Ningún test lo vio porque el fixture de embudos era del 28/08. El test que dec�
 
 **Decisión de Matías:** etapa **fija por embudo**, en `defaults.tango.json → pedidos.retroceso.porEmbudo` (clave = ID del embudo):
 
-| Embudo | Vuelve a |
-|---|---|
-| Embudo de Ventas Ultraschall (`default`) | Negociación (`decisionmakerboughtin`) |
-| Embudo de Licitaciones (`907189419`) | Pendiente OC/Contrato (`1376134020`) |
+| Embudo | Vuelve a (desde el 2026-10-02) | Hasta el 2026-10-02 |
+|---|---|---|
+| Embudo de Ventas Ultraschall (`default`) | **Rebotado \| Ver errores** (`1448683552`) | Negociación (`decisionmakerboughtin`) |
+| Embudo de Licitaciones (`907189419`) | **Rebotado \| Ver errores** (`1448681912`) | Pendiente OC/Contrato (`1376134020`) |
+
+**Cambio del 2026-10-02 (Matías):** Ultraschall creó en los dos embudos una etapa «Rebotado | Ver errores», justo antes de «Cierre ganado», y el negocio que falla vuelve ahí. Así un rebote no se mezcla con los negocios que están de verdad en Negociación o esperando la OC. Es abierta (`isClosed=false`, probabilidad 0,2), así que el test de configuración la acepta. Sólo cambió la configuración: `destinoDelRetroceso` es el mismo. El fixture de embudos se actualizó con los del 02/10. Mutación: con los destinos viejos fallan 12 tests.
 
 `etapas.destinoDelRetroceso` reemplaza a `etapas.anterior`, que se borró. **No mueve el negocio** si el embudo no tiene etapa configurada, si la configurada ya no existe o si es ganada (sería un bucle: mover dispara el webhook). En esos casos la nota sale igual. El nombre que va en la nota es el actual del portal, no el de la configuración.
 

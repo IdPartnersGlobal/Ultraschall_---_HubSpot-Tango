@@ -565,5 +565,26 @@
   "COD_GVA18": null,
   "OBSERVACIONES": null,
   "COD_DESCRIP": "27 - CARRITO WEB"
+ },
+ {
+  "ID_GVA23": 31,
+  "COD_SHOP": 0,
+  "COD_GVA23": "28",
+  "NOMBRE_VEN": "Gerardo Garcia",
+  "INHABILITA": false,
+  "PORC_COMIS": 0,
+  "ID_TIPO_DOCUMENTO_GV": 40,
+  "NRO_DOC": "",
+  "DOM_VENDED": "",
+  "LOCALIDAD": "",
+  "COD_POSTAL": "",
+  "ID_GVA18": null,
+  "COD_PROVIN": null,
+  "TELEFONO": "",
+  "E_MAIL": "",
+  "TIPO_DOC": "96",
+  "COD_GVA18": "",
+  "OBSERVACIONES": "",
+  "COD_DESCRIP": "28 - Gerardo Garcia"
  }
 ]

@@ -1,5 +1,5 @@
 {
-  "_nota": "Los dos embudos de deals del portal 51311915, tal como los devuelve /crm/v3/pipelines/deals. Copiado el 2026-09-29 (antes: 2026-08-28). El 2026-09-28 Ultraschall agrego Seguimiento Masivo, No Contesta y Basura - No Calificado JUSTO ANTES de Cierre ganado en Ventas: con el retroceso a la etapa anterior, un negocio que fallaba terminaba en Basura (paso dos veces en la demo). Por eso el retroceso ahora va a una etapa FIJA por embudo (pedidos.retroceso en defaults.tango.json). No hay datos personales: son etapas de embudo.",
+  "_nota": "Los dos embudos de deals del portal 51311915, tal como los devuelve /crm/v3/pipelines/deals. Copiado el 2026-10-02 (antes: 2026-09-29 y 2026-08-28). Al 2026-10-02 Ultraschall ya habia agregado \"Rebotado | Ver errores\" justo antes de Cierre ganado en los dos embudos (Ventas 1448683552, Licitaciones 1448681912): es la etapa fija a la que vuelve un negocio que no pudo generar el pedido (pedidos.retroceso en defaults.tango.json, 9.32). El 2026-09-28 habian agregado Seguimiento Masivo, No Contesta y Basura - No Calificado en Ventas. No hay datos personales: son etapas de embudo.",
   "pipelines": [
     {
       "id": "907189419",
@@ -70,9 +70,18 @@
           }
         },
         {
+          "id": "1448681912",
+          "label": "Rebotado | Ver errores",
+          "displayOrder": 7,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        },
+        {
           "id": "1376134021",
           "label": "Cierre ganado",
-          "displayOrder": 7,
+          "displayOrder": 8,
           "metadata": {
             "isClosed": "true",
             "probability": "1.0"
@@ -81,7 +90,7 @@
         {
           "id": "1376134022",
           "label": "Cierre perdido",
-          "displayOrder": 8,
+          "displayOrder": 9,
           "metadata": {
             "isClosed": "false",
             "probability": "0.2"
@@ -203,9 +212,18 @@
           }
         },
         {
+          "id": "1448683552",
+          "label": "Rebotado | Ver errores",
+          "displayOrder": 12,
+          "metadata": {
+            "isClosed": "false",
+            "probability": "0.2"
+          }
+        },
+        {
           "id": "closedwon",
           "label": "Cierre ganado",
-          "displayOrder": 12,
+          "displayOrder": 13,
           "metadata": {
             "isClosed": "true",
             "probability": "1.0"
@@ -214,7 +232,7 @@
         {
           "id": "closedlost",
           "label": "Cierre perdido",
-          "displayOrder": 13,
+          "displayOrder": 14,
           "metadata": {
             "isClosed": "false",
             "probability": "0.2"
