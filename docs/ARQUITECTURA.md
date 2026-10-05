@@ -2644,6 +2644,37 @@ Red: un test valida que cada embudo con etapa ganada tenga su destino, y que el 
 
 Red: el test de defaults exige `false`. Las secciones 9.6 y 9.20 quedan como historia: describen el período en que estaba en `true`.
 
+### 9.34 Un producto con el código de Tango y sin el ID sale con su artículo real (2026-10-02)
+
+**El problema:** el renglón del pedido va con `ID_STA11` (el ID interno del artículo) y lo lee sólo de `tango_id_sta11` en el producto de HubSpot. La pasada de productos (§7.17) lo cargó en los que cruzaban, pero Ultraschall sigue subiendo productos con el código de Tango en el SKU y sin el ID. Esos renglones salían con el artículo de prueba o frenaban el pedido.
+
+**El cambio (pedido de Matías, «manteniendo la funcionalidad»):** un paso más entre la lectura de los productos y la verificación del pedido, en `lib/articuloPorCodigo`. Orden final de un renglón:
+
+1. `tango_id_sta11` del producto: lo de siempre. Si todos lo tienen, el paso no consulta Tango.
+2. **El SKU buscado como código de artículo** (`GetByFilter` process 87, `COD_STA11 IN (...)`, en tandas de 100).
+3. El artículo de prueba, si está activo (§9.6).
+4. Frena con nota.
+
+**Cómo se compara el SKU con el código (decisión de Matías, 2026-10-05):** si coincide exacto (sólo con los espacios de los costados recortados), se usa. Si es igual salvo mayúsculas y en Tango hay **un solo** artículo así, también se usa: `L15-7B` es `L15-7b`, el mismo transductor. Si es igual salvo mayúsculas con **más de uno**, no se elige ninguno y la nota los nombra. Medido el 2026-10-05: 21 de los 942 códigos tienen minúsculas, y ningún par choca si se ignoran, así que el tercer caso hoy no existe. Está para que el día que aparezca no se elija uno a ciegas. SQL Server no distingue mayúsculas, así que la consulta ya trae los candidatos y la decisión se toma en el código. (La pasada de productos de §7.17 sigue siendo estricta: a `L15-7B` lo dejó como parecido.)
+
+**Lo que no hace:** no escribe el ID en el producto de HubSpot. Vive sólo en ese pedido; cargarlo es la pasada de productos, y Matías no quiere un sync (§7.17). Si Tango no responde, el error sube como cualquier otra lectura del circuito y el reintento procesa el negocio entero.
+
+**Seguridad del filtro:** el SKU entra al SQL sólo si cumple `^[A-Za-z0-9Ññ .,+\-/%()]{1,15}$`. Son los caracteres que usan los 942 códigos de artículo de Tango, medido el 2026-10-02, y ninguno es una comilla. `%` no es comodín porque el filtro es `IN`, no `LIKE`.
+
+**Evidencia contra producción (sólo lectura):** a los 341 productos con ID se les borró el ID en memoria y, buscados por código, devolvieron el mismo ID en 341 de 341. De los 16 que hoy no tienen ID se resuelve 1, `L15-7B` → `L15-7b` (ID 486). Los otros 15 son SKU mal cargados (§7.17). El filtro tarda entre 8 y 15 s.
+
+**Los mensajes, adaptados** (`verificarPedido.sinArticulo`). Llegar sin artículo ahora quiere decir que el SKU está vacío o no es exactamente un código de Tango, y las dos cosas se arreglan en el producto. La nota ya no manda a «avisar a sistemas»:
+
+| Caso | La nota dice | Cómo se arregla |
+|---|---|---|
+| sin SKU | «'X' no tiene el código de Tango en el SKU del producto» | cargar en el SKU el código del artículo en Tango |
+| SKU que no está en Tango | «'X' tiene el SKU 'Y', que no es ningún código de artículo de Tango» | corregir el SKU para que sea exactamente el código |
+| coincide salvo mayúsculas con varios códigos (hoy no pasa) | «'X' tiene el SKU 'Abc', y en Tango hay varios códigos que sólo cambian en mayúsculas: 'abc', 'ABC'» | que el SKU diga exactamente el código correcto, con sus mayúsculas y minúsculas |
+
+Los candidatos los trae la misma consulta: `articuloPorCodigo` los guarda en `tango_codigos_parecidos` sólo cuando son más de uno. Con el artículo de prueba activo, el aviso dice el mismo motivo (ya no «la integración de productos está pendiente») y la `OBSERVACIONES` del renglón en Tango agrega el SKU: `PRUEBA - en el negocio: X (SKU Y)`. `LEYENDA_3` no cambia.
+
+Red: `test/articuloPorCodigo.test.js` (12), 5 de integración en `dealToTango.test.js` y 4 de los textos. Mutación: sin el paso fallan 2, con varios eligiendo el primero 2, con la regla vieja (sólo exacto) 2, sin respetar el ID cargado 3, sin validar el SKU 1 y sin tandas 1.
+
 
 ## 10. Seguridad
 

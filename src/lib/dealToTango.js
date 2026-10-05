@@ -6,6 +6,7 @@ const verificarPedido = require('./verificarPedido');
 const altaCliente = require('./altaCliente');
 const verificarEmpresa = require('./verificarEmpresa');
 const vinculoCliente = require('./vinculoCliente');
+const articuloPorCodigo = require('./articuloPorCodigo');
 const notaProblema = require('./notaProblema');
 const soloOwner = require('./soloOwner');
 const dryRun = require('./dryRun');
@@ -154,9 +155,13 @@ async function procesarDeal({ dealId, hs, tango, lookups, estrategiaNumeracion, 
     ]);
 
     const idsProducto = [...new Set(lineItems.map((l) => l.properties?.hs_product_id).filter(Boolean).map(String))];
-    const productos = new Map(
+    const delCatalogo = new Map(
         (await hs.objetos('products', idsProducto, PROPS_PRODUCTO)).map((p) => [String(p.id), p.properties || {}])
     );
+    // 5'. Un producto sin `tango_id_sta11` pero con el codigo de Tango en el
+    //     SKU se resuelve aca, por el codigo (§9.34). Los que tienen ID no
+    //     consultan nada: si todos lo tienen, este paso no gasta red.
+    const { productos } = await articuloPorCodigo.completar({ tango, productos: delCatalogo, log });
 
     const company = companies[0] || null;
     const companyProps = company?.properties || null;

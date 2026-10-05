@@ -585,8 +585,47 @@ test('un producto que no esta atado a Tango frena el renglon, si no hay articulo
     // 2026-08-27 lo tapa el articulo de prueba (§9.6); apagado, vuelve a frenar.
     const r = verificar({ productos: SIN_ATAR, productoDePrueba: null });
     assert.strictEqual(r.ok, false);
-    assert.match(r.problemas[0].motivo, /no está vinculado/);
-    assert.ok(!/tango_id_sta11/.test(r.problemas[0].motivo), 'sin nombres internos: lo lee comercial');
+    assert.match(r.problemas[0].motivo, /no tiene el código de Tango en el SKU/);
+    assert.ok(!/tango_id_sta11|hs_sku/.test(r.problemas[0].motivo + r.problemas[0].comoSeArregla), 'sin nombres internos: lo lee comercial');
+});
+
+// ── Lo que dice la nota cuando el producto no tiene articulo (§9.34) ─────
+//
+// Desde el 2026-10-02 el circuito busca el articulo por el codigo del SKU, asi
+// que un producto sin articulo se arregla EN EL PRODUCTO: la nota ya no manda
+// a "avisar a sistemas".
+
+test('sin SKU: la nota pide cargar el codigo de Tango en el SKU', () => {
+    const r = verificar({ productos: new Map([['77', { name: 'Ecografo' }]]), productoDePrueba: null });
+    const p = r.problemas[0];
+    assert.match(p.motivo, /'Ecografo' no tiene el código de Tango en el SKU/);
+    assert.match(p.comoSeArregla, /cargar en el SKU del producto .* el código del artículo en Tango/);
+    assert.doesNotMatch(p.comoSeArregla, /Cierre ganado/, 'eso ya lo dice el cierre de la nota');
+    assert.doesNotMatch(p.comoSeArregla, /avisar a sistemas/, 'ya no es un tema de sistemas');
+});
+
+test('con un SKU que no es codigo de Tango: la nota lo nombra y pide corregirlo', () => {
+    const r = verificar({ productos: new Map([['77', { name: 'Parlante BT250', hs_sku: 'SPE250' }]]), productoDePrueba: null });
+    const p = r.problemas[0];
+    assert.match(p.motivo, /tiene el SKU 'SPE250', que no es ningún código de artículo de Tango/);
+    assert.match(p.comoSeArregla, /corregir el SKU del producto .* exactamente el código del artículo en Tango/);
+    assert.doesNotMatch(p.comoSeArregla, /avisar a sistemas/);
+});
+
+test('si el SKU coincide con VARIOS codigos que solo cambian en mayusculas, la nota los nombra', () => {
+    const productos = new Map([['77', { name: 'Algo', hs_sku: 'Abc', tango_codigos_parecidos: ['abc', 'ABC'] }]]);
+    const r = verificar({ productos, productoDePrueba: null });
+    const p = r.problemas[0];
+    assert.match(p.motivo, /SKU 'Abc', y en Tango hay varios códigos que sólo cambian en mayúsculas: 'abc', 'ABC'/);
+    assert.match(p.comoSeArregla, /exactamente el código del artículo correcto, con sus mayúsculas y minúsculas/);
+});
+
+test('con el articulo de prueba, el aviso dice POR QUE y el renglon lleva el SKU', () => {
+    const r = verificar({ productos: new Map([['77', { name: 'Parlante BT250', hs_sku: 'SPE250' }]]) });
+    assert.strictEqual(r.ok, true);
+    assert.match(r.avisos[0].porQue, /el SKU 'SPE250' no es ningún código de artículo de Tango/);
+    assert.doesNotMatch(r.avisos[0].porQue, /integracion de productos/, 'el texto viejo ya no es cierto');
+    assert.strictEqual(r.payload.RENGLON_DTO[0].OBSERVACIONES, 'PRUEBA - en el negocio: Ecografo (SKU SPE250)');
 });
 
 // ── El articulo de prueba (§9.6) ─────────────────────────────────────────
@@ -979,6 +1018,73 @@ test('el circuito entero sale con el articulo de prueba y crea el pedido', async
     assert.strictEqual(payload.RENGLON_DTO[0].ID_STA11, PRUEBA.idSta11);
     assert.strictEqual(payload.LEYENDA_3, verificarPedido.LEYENDA_PRUEBA);
     assert.strictEqual(payload.LEYENDA_4, 'HubSpot deal 111', 'sigue viajando el ID del negocio');
+});
+
+// ── Un producto con el codigo de Tango y sin el ID (§9.34) ───────────────
+
+/** Tango falso que ademas sabe buscar articulos por codigo (process 87). */
+const tangoConArticulos = (articulos) => ({
+    ...tangoFalso(),
+    consultasArticulos: 0,
+    async getByFilter(process, condicion) {
+        assert.strictEqual(process, 87, 'solo se buscan articulos');
+        this.consultasArticulos++;
+        const pedidos = [...condicion.matchAll(/'([^']*)'/g)].map((m) => m[1].toUpperCase());
+        return articulos.filter((a) => pedidos.includes(a.COD_STA11.toUpperCase()));
+    },
+});
+
+test('un producto con el codigo de Tango en el SKU y sin ID sale con su articulo REAL', async () => {
+    // El caso del 2026-10-02: Ultraschall sube productos con el codigo y sin
+    // el ID. Antes salian con el articulo de prueba (o frenaban).
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Detector', hs_sku: 'BT250' } }] });
+    const tango = tangoConArticulos([{ ID_STA11: 200, COD_STA11: 'BT250' }]);
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'creado');
+    const payload = tango.creados[0].payload;
+    assert.strictEqual(payload.RENGLON_DTO[0].ID_STA11, 200, 'el articulo de Tango, no el de prueba');
+    assert.strictEqual(payload.RENGLON_DTO[0].OBSERVACIONES, '');
+    assert.strictEqual(payload.LEYENDA_3, undefined, 'no es un pedido de prueba');
+    assert.strictEqual(r.avisos.length, 0);
+});
+
+test('con el ID cargado el circuito es el de siempre: no busca por codigo', async () => {
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Ecografo', hs_sku: 'BT250', tango_id_sta11: '394' } }] });
+    const tango = tangoConArticulos([{ ID_STA11: 200, COD_STA11: 'BT250' }]);
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(tango.consultasArticulos, 0);
+    assert.strictEqual(tango.creados[0].payload.RENGLON_DTO[0].ID_STA11, 394, 'manda el ID del producto');
+});
+
+test('si el SKU no es un codigo de Tango, sigue como antes: el articulo de prueba', async () => {
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Parlante', hs_sku: 'SPE250' } }] });
+    const tango = tangoConArticulos([{ ID_STA11: 200, COD_STA11: 'BT250' }]);
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+
+    assert.strictEqual(tango.consultasArticulos, 1, 'se busco');
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(tango.creados[0].payload.RENGLON_DTO[0].ID_STA11, PRUEBA.idSta11);
+    assert.strictEqual(tango.creados[0].payload.LEYENDA_3, verificarPedido.LEYENDA_PRUEBA);
+});
+
+test('un SKU que cambia solo en mayusculas sale con su articulo, si en Tango hay uno solo', async () => {
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Transductor', hs_sku: 'L15-7B' } }] });
+    const tango = tangoConArticulos([{ ID_STA11: 486, COD_STA11: 'L15-7b' }]);
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+    assert.strictEqual(r.estado, 'creado');
+    assert.strictEqual(tango.creados[0].payload.RENGLON_DTO[0].ID_STA11, 486);
+    assert.strictEqual(tango.creados[0].payload.LEYENDA_3, undefined, 'no es un pedido de prueba');
+});
+
+test('si cambia solo en mayusculas pero en Tango hay VARIOS, no se elige: articulo de prueba', async () => {
+    const hs = hsFalso({ productos: [{ id: '77', properties: { name: 'Algo', hs_sku: 'Abc' } }] });
+    const tango = tangoConArticulos([{ ID_STA11: 1, COD_STA11: 'abc' }, { ID_STA11: 2, COD_STA11: 'ABC' }]);
+    const r = await d2t.procesarDeal({ dealId: '111', hs, tango, lookups: lk, dryRun: false });
+    assert.strictEqual(tango.creados[0].payload.RENGLON_DTO[0].ID_STA11, PRUEBA.idSta11);
+    assert.match(r.avisos[0].porQue, /coincide con varios códigos de Tango/);
 });
 
 test('en dry-run no se crea nada ni se escribe nada', async () => {

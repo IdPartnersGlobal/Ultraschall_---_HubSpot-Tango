@@ -117,6 +117,45 @@ function problema(campo, motivo, comoSeArregla) {
     return { campo, motivo, comoSeArregla };
 }
 
+/**
+ * Por que un producto del catalogo no tiene articulo de Tango, dicho para quien
+ * lo arregla (§9.34). Desde el 2026-10-02 el circuito lo busca por el codigo
+ * del SKU (lib/articuloPorCodigo), asi que llegar aca quiere decir una de tres:
+ * el SKU esta vacio, no es ningun codigo de Tango, o se parece (salvo
+ * mayusculas) a VARIOS y no se puede elegir. Siempre se arregla en el
+ * producto, no en sistemas.
+ *
+ * @returns {{motivo, porQue, comoSeArregla, sku}}
+ */
+function sinArticulo(nombre, producto = {}) {
+    const sku = vacio(producto.hs_sku) ? null : String(producto.hs_sku).trim();
+    const varios = Array.isArray(producto.tango_codigos_parecidos) ? producto.tango_codigos_parecidos : [];
+
+    if (!sku) {
+        return {
+            sku,
+            motivo: `'${nombre}' no tiene el código de Tango en el SKU del producto`,
+            porQue: 'el producto no tiene el código de Tango en el SKU',
+            comoSeArregla: `cargar en el SKU del producto (biblioteca de productos de HubSpot) el código del artículo en Tango`,
+        };
+    }
+    if (varios.length > 1) {
+        const lista = varios.map((c) => `'${c}'`).join(', ');
+        return {
+            sku,
+            motivo: `'${nombre}' tiene el SKU '${sku}', y en Tango hay varios códigos que sólo cambian en mayúsculas: ${lista}`,
+            porQue: `el SKU '${sku}' coincide con varios códigos de Tango (${lista}) y no se puede elegir uno`,
+            comoSeArregla: `corregir el SKU del producto para que diga exactamente el código del artículo correcto, con sus mayúsculas y minúsculas`,
+        };
+    }
+    return {
+        sku,
+        motivo: `'${nombre}' tiene el SKU '${sku}', que no es ningún código de artículo de Tango`,
+        porQue: `el SKU '${sku}' no es ningún código de artículo de Tango`,
+        comoSeArregla: `corregir el SKU del producto (biblioteca de productos de HubSpot) para que sea exactamente el código del artículo en Tango`,
+    };
+}
+
 /** Numero de HubSpot -> numero. Las propiedades llegan siempre como texto. */
 function numero(v) {
     if (vacio(v)) return null;
@@ -354,11 +393,13 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
                 'cargar la linea eligiendo un producto de la biblioteca, no escribiendola a mano'));
             continue;
         }
+        const falta = idSta11 === null ? sinArticulo(nombre, producto) : null;
         if (idSta11 === null && !productoDePrueba) {
-            // Es el bloqueo esperado hasta que corra el sync de productos: sin
-            // el ID del articulo en Tango el renglon no se puede armar.
-            problemas.push(problema('RENGLON_DTO', `'${nombre}' todavía no está vinculado con el artículo equivalente de Tango`,
-                'no es algo que se cargue en el negocio: avisar a sistemas'));
+            // Sin ID y sin un SKU que sea codigo de Tango (§9.34), el renglon
+            // no se puede armar. Se arregla en el producto: hasta el 2026-10-02
+            // la nota decia "avisar a sistemas", porque el ID solo lo cargaba
+            // la pasada de productos.
+            problemas.push(problema('RENGLON_DTO', falta.motivo, falta.comoSeArregla));
             continue;
         }
         if (idSta11 === null) {
@@ -373,7 +414,7 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
                 // El ID interno no va: esto lo lee comercial y el articulo se
                 // busca por su codigo, no por su ID (§9.21).
                 motivo: `'${nombre}' va con el articulo de prueba ${productoDePrueba.codigo}${productoDePrueba.descripcion ? ` (${productoDePrueba.descripcion})` : ''}`,
-                porQue: 'ese producto todavia no esta atado a Tango y la integracion de productos esta pendiente',
+                porQue: falta.porQue,
             });
         }
 
@@ -402,7 +443,8 @@ function verificar({ deal = {}, company = null, lineItems = [], productos = new 
             // El articulo que correspondia, para que del lado del ERP se pueda
             // leer que se pidio de verdad. Es lo unico que queda del producto
             // original cuando va el de prueba.
-            OBSERVACIONES: dePrueba ? `PRUEBA - en el negocio: ${nombre}`.slice(0, 250) : '',
+            // Con el SKU, administracion ve en Tango que codigo se busco y no estaba.
+            OBSERVACIONES: dePrueba ? `PRUEBA - en el negocio: ${nombre}${falta.sku ? ` (SKU ${falta.sku})` : ''}`.slice(0, 250) : '',
         });
     }
 
