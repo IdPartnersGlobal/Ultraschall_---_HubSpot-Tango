@@ -394,6 +394,15 @@ test('Gerardo Garcia es el vendedor 28, que en GVA23 es el ID 31 (2026-10-02)', 
     assert.strictEqual(r.resueltos.ID_GVA23.codigo, '28');
 });
 
+test('Fernando Luna es el vendedor 01, que en GVA23 es el ID 1 (2026-10-30)', () => {
+    // Su usuario de HubSpot es del 2026-10-08 (owner 100708708). En Tango el
+    // vendedor 01 se llama solo "FERNANDO", pero tiene cargado su mail.
+    const owners = { '100708708': 'fluna@ultraschall.com.ar' };
+    const r = verificar(COMPANY, { ownerId: '100708708', owners });
+    assert.strictEqual(r.valores.ID_GVA23, 1);
+    assert.strictEqual(r.resueltos.ID_GVA23.codigo, '01');
+});
+
 test('el owner se puede resolver por id contra la tabla de owners', () => {
     // HubSpot guarda el ID del owner, no el mail: la tabla se lee aparte.
     const owners = { '90573355': 'jbutorac@ultraschall.com.ar' };

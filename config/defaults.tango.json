@@ -228,6 +228,7 @@
             "jbutorac@ultraschall.com.ar": "24",
             "jgomez@ultraschall.com.ar": "25",
             "ggarcia@ultraschall.com.ar": "28",
+            "fluna@ultraschall.com.ar": "01",
             "matias.tari@idpartners.ar": "10"
           },
           "porOwnerNota": "matias.tari@idpartners.ar NO es vendedor de Ultraschall: es el implementador, y va mapeado a FACUNDO (10) por pedido de Matias (2026-09-03) para poder probar el circuito con negocios propios. Los clientes que cree una prueba suya van a quedar con FACUNDO de vendedor — que es lo que pasaba con TODOS antes de que el default se sacara. Sacar este renglon el dia que las pruebas terminen.",
